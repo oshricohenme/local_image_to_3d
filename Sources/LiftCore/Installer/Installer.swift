@@ -354,6 +354,9 @@ public struct Installer: Sendable {
         env["PATH"] = "\(venv)/bin:" + (toolEnvironment["PATH"] ?? "/usr/bin:/bin")
         env["VIRTUAL_ENV"] = venv
         env["HF_HUB_CACHE"] = hfHub.path
+        // Plain HTTP: files grow on disk (the progress bar), a rerun resumes from them, little memory. hf_xet held
+        // ~1 GB per file in memory, wrote in bursts and lost it all on a pause or relaunch (first real run).
+        env["HF_HUB_DISABLE_XET"] = "1"
         if let token = hfToken() { env["HF_TOKEN"] = token }
         let command = ShellCommand(hf, ["download", w.repo] + (w.files ?? []) + ["--revision", w.revision], environment: env, ownProcessGroup: true)
         lines("$ \(command.display)")

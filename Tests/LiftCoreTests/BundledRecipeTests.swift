@@ -127,6 +127,9 @@ import Testing
             "\(bin.path)/hf download VAST-AI/UniRig skeleton/articulation-xl_quantization_256/model.ckpt skin/articulation-xl/model.ckpt --revision main",
             "\(bin.path)/hf download facebook/opt-350m config.json --revision main",
         ])
+        // Plain HTTP, not hf_xet: xet held ~1 GB per file in memory (5 GB for Pixal3D), wrote in bursts (the bar
+        // froze), and a pause or relaunch threw the memory away and rewrote files from earlier on (first real run).
+        #expect(runner.commands.allSatisfy { $0.environment["HF_HUB_DISABLE_XET"] == "1" })
     }
 
     /// Spec §4a: every weights repo is credited, and RMBG-2.0's non-commercial license is flagged wherever it's used.
