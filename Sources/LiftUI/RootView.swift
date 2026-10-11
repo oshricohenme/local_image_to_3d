@@ -2,7 +2,8 @@ import LiftCore
 import SwiftUI
 
 /// The main window: the wizard on first launch, then the sidebar (Generate, Queue, History, Models,
-/// Settings) with the server badge, plus the app-wide confirmation dialog, alert and interrupted sheet.
+/// Settings) with the server badge and interrupted sheet, plus the app-wide About-this-model sheet (setup installs
+/// a model too), confirmation dialog and alert.
 public struct RootView: View {
     @Bindable var app: AppModel
     let onSidebarAppear: ([String]) -> Void
@@ -31,6 +32,9 @@ public struct RootView: View {
             case .ready:
                 main
             }
+        }
+        .sheet(isPresented: Binding(get: { app.aboutBeforeInstall != nil }, set: { if !$0 { app.aboutBeforeInstall = nil } })) {
+            if let m = app.aboutBeforeInstall { AboutModelSheet(app: app, model: m) }
         }
         .confirmationDialog("Are you sure?", isPresented: Binding(get: { app.confirmation != nil }, set: { if !$0 { app.confirmation = nil } }),
                             presenting: app.confirmation) { c in
@@ -67,9 +71,6 @@ public struct RootView: View {
         }
         .sheet(isPresented: Binding(get: { app.showInterrupted && !app.interrupted.isEmpty }, set: { app.showInterrupted = $0 })) {
             InterruptedSheet(app: app)
-        }
-        .sheet(isPresented: Binding(get: { app.aboutBeforeInstall != nil }, set: { if !$0 { app.aboutBeforeInstall = nil } })) {
-            if let m = app.aboutBeforeInstall { AboutModelSheet(app: app, model: m) }
         }
     }
 
