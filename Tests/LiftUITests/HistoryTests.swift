@@ -1,5 +1,5 @@
 import Foundation
-import LiftCore
+@testable import LiftCore
 import Testing
 @testable import LiftUI
 
@@ -18,6 +18,20 @@ import Testing
         #expect(ViewerKind.of("/x/a.GLB") == .mesh && ViewerKind.of("a.usdz") == .mesh)
         #expect(ViewerKind.of("a.webp") == .image && ViewerKind.of("a.mov") == .video && ViewerKind.of("a.wav") == .audio)
         #expect(ViewerKind.of("rigged.fbx") == .none)
+    }
+
+    @Test func aCleanedUpJobShowsItsExportedModel() {
+        let at = Date()
+        var job = JobRecord(id: "j", title: "t", priority: .normal, position: 1, source: .ui, state: .succeeded, forceStart: false,
+                            currentStep: 0, createdAt: at, updatedAt: at)
+        let step = StepRecord(jobId: "j", idx: 0, recipe: "test-cube", task: "image_to_3d", inputs: [:], settings: [:], state: .succeeded,
+                              outputs: ["/w/jobs/j/steps/0/cube.glb"])
+        #expect(HistoryModel.viewable(JobView(job: job, steps: [step])) == "/w/jobs/j/steps/0/cube.glb")
+        job.cleanedUp = true
+        job.exports = [ExportResult(format: .obj, path: "/e/t"), ExportResult(format: .glb, path: "/e/t.glb")]
+        #expect(HistoryModel.viewable(JobView(job: job, steps: [step])) == "/e/t.glb")  // the job's own copy is gone
+        job.exports = [ExportResult(format: .fbx, path: "/e/t.fbx")]
+        #expect(HistoryModel.viewable(JobView(job: job, steps: [step])) == nil)
     }
 
     @Test func curlResubmitsTheSameJob() async throws {

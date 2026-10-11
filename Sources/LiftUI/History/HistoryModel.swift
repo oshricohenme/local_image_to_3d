@@ -52,6 +52,13 @@ public final class HistoryModel {
         if selected == nil || current == nil { selected = jobs.first?.job.id }
     }
 
+    /// What the viewer shows: the job's own first output, or once its files were cleaned up after
+    /// exporting, the exported GLB (or USDZ).
+    public static func viewable(_ v: JobView) -> String? {
+        if !v.job.cleanedUp { return v.outputs.first }
+        return v.job.exports.first { $0.format == .glb && $0.path != nil }?.path ?? v.job.exports.first { $0.format == .usdz && $0.path != nil }?.path
+    }
+
     /// The type the job's last step produces, from its recipe task.
     public static func output(of v: JobView, models: [ModelView]) -> IOType? {
         guard let last = v.steps.last else { return nil }

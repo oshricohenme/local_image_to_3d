@@ -61,12 +61,18 @@ struct HistoryView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(v.job.title).font(.title2).bold()
                     Text("\(chain(v)) · via \(Format.source(v.job.source)) · \(v.job.createdAt.formatted())").foregroundStyle(.secondary)
-                    if v.job.state == .succeeded, let first = v.outputs.first {
+                    credits(v)
+                    if v.job.state == .succeeded, let first = HistoryModel.viewable(v) {
                         ResultViewer(path: first).frame(height: 360).clipShape(RoundedRectangle(cornerRadius: 10))
-                    } else {
+                    } else if v.job.state != .succeeded {
                         failure(v)
                     }
-                    outputs(v)
+                    if v.job.cleanedUp {
+                        Text("Lift's own copy of this job was deleted after exporting; the exported files are below.").font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        outputs(v)
+                    }
+                    exports(v)
                     used(v)
                     actions(v)
                 }
@@ -74,6 +80,40 @@ struct HistoryView: View {
             }
         } else {
             ContentUnavailableView("Select a job", systemImage: "square.grid.2x2")
+        }
+    }
+
+    /// "Made with <project> by <authors>" for each model the job ran (spec §4a).
+    func credits(_ v: JobView) -> some View {
+        ForEach(v.job.credits.indices, id: \.self) { i in
+            let a = v.job.credits[i]
+            HStack(spacing: 6) {
+                Text(Credits.madeWith(a)).font(.callout)
+                Link("Project page", destination: a.homepage).font(.callout)
+            }
+        }
+    }
+
+    @ViewBuilder func exports(_ v: JobView) -> some View {
+        if v.job.exportPending {
+            Label("Exporting…", systemImage: "arrow.up.doc")
+        }
+        if !v.job.exports.isEmpty {
+            Text("Exported").font(.headline)
+            ForEach(v.job.exports.indices, id: \.self) { i in
+                let e = v.job.exports[i]
+                HStack {
+                    Text(Format.export(e.format)).bold()
+                    if let path = e.path {
+                        Text(URL(filePath: path).lastPathComponent).font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: path)]) }
+                    } else {
+                        Text(e.error ?? "Not exported").foregroundStyle(.red).textSelection(.enabled)
+                        Spacer()
+                    }
+                }
+            }
         }
     }
 
@@ -133,8 +173,15 @@ struct HistoryView: View {
 
     func actions(_ v: JobView) -> some View {
         HStack {
-            Button("Retry") { app.run { try await app.retry(v.job.id) } }
-            Button("Retry with changes…") { retrying = v }
+            Button("Retry") { app.run { try await app.retry(v.job.id) } }.disabled(v.job.cleanedUp)
+            Button("Retry with changes…") { retrying = v }.disabled(v.job.cleanedUp)
+            Menu("Export Again…") {
+                ForEach(ExportFormat.allCases, id: \.self) { f in
+                    Button(Format.export(f)) { app.run { _ = try await app.engine.jobsExport(v.job.id, formats: [f]) } }
+                }
+            }
+            .disabled(v.job.state != .succeeded || v.job.cleanedUp || v.job.exportPending)
+            .fixedSize()
             Button("Copy as curl") { copy(HistoryModel.curl(v, apiBase: app.serverStatus?.urls.api ?? "http://127.0.0.1:7777/v1", models: app.models)) }
                 .disabled(app.serverStatus == nil)
             Spacer()
