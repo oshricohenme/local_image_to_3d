@@ -1,0 +1,134 @@
+import Foundation
+
+extension Recipe {
+    /// Structural checks beyond decoding. Empty means valid.
+    func problems(folder: URL, matchFolder: Bool) -> [String] {
+        var out: [String] = []
+        if id.range(of: #"^[a-z0-9][a-z0-9-]*$"#, options: .regularExpression) == nil {
+            out.append("id must be lowercase letters, digits and dashes")
+        }
+        if matchFolder && folder.lastPathComponent != id { out.append("id \(id) must match its folder name \(folder.lastPathComponent)") }
+        if (repo == nil) != (commit == nil) { out.append("repo and commit go together") }
+        if let commit, commit.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) == nil {
+            out.append("commit must be a full 40-character sha")
+        }
+        if platform.status == .unsupported && (platform.reason ?? "").isEmpty {
+            out.append("platform.reason is required when unsupported")
+        }
+        for w in weights where w.repo.split(separator: "/").count != 2 {
+            out.append("weights: \(w.repo) must be owner/name")
+        }
+        if resources.maxConcurrentPerProcess < 1 { out.append("resources.max_concurrent_per_process must be ≥ 1") }
+        if resources.memoryGB <= 0 { out.append("resources.memory_gb must be > 0") }
+        if tasks.isEmpty { out.append("at least one task is required") }
+        if Set(tasks.map(\.id)).count != tasks.count { out.append("task ids must be unique") }
+        let allKeys = Set(tasks.flatMap { $0.settings.map(\.key) })
+        for key in resources.memoryKeys where !allKeys.contains(key) {
+            out.append("resources.memory_keys: \(key) is not a setting")
+        }
+        for task in tasks {
+            if task.inputs.isEmpty { out.append("task \(task.id): at least one input is required") }
+            if Set(task.settings.map(\.key)).count != task.settings.count {
+                out.append("task \(task.id): setting keys must be unique")
+            }
+            for def in task.settings {
+                if def.type == .enum && (def.options ?? []).isEmpty {
+                    out.append("task \(task.id): \(def.key): enum needs options")
+                }
+                if let d = def.default, case .failure(let message) = def.check(d) {
+                    out.append("task \(task.id): \(def.key): default \(message)")
+                }
+            }
+        }
+        if !FileManager.default.fileExists(atPath: folder.appending(path: "launcher.py").path) {
+            out.append("launcher.py is missing")
+        }
+        return out
+    }
+}
+
+enum Checked { case success(SettingValue), failure(String) }
+
+extension SettingDef {
+    /// Type, option and range check; returns the value coerced to the declared type.
+    func check(_ value: SettingValue) -> Checked {
+        let coerced: SettingValue
+        switch (type, value) {
+        case (.int, .int): coerced = value
+        case (.int, .float(let d)) where d.rounded() == d: coerced = .int(Int(d))
+        case (.float, .float): coerced = value
+        case (.float, .int(let i)): coerced = .float(Double(i))
+        case (.bool, .bool): coerced = value
+        case (.string, .string), (.path, .string): coerced = value
+        case (.enum, _):
+            guard let match = options?.first(where: { $0 == value || ($0.number != nil && $0.number == value.number) }) else {
+                return .failure("must be one of \((options ?? []).map(\.description).joined(separator: ", "))")
+            }
+            coerced = match
+        default:
+            return .failure("must be \(type.rawValue)")
+        }
+        if let n = coerced.number {
+            if let min, n < min { return .failure("must be ≥ \(min.formatted())") }
+            if let max, n > max { return .failure("must be ≤ \(max.formatted())") }
+        }
+        if type == .path, case .string(let p) = coerced, !FileManager.default.fileExists(atPath: p) {
+            return .failure("path does not exist: \(p)")
+        }
+        return .success(coerced)
+    }
+}
+
+extension RecipeTask {
+    /// Validates request settings and fills defaults. `prefix` names the field path in errors.
+    public func validated(settings: [String: SettingValue], prefix: String) throws(LiftError) -> [String: SettingValue] {
+        var out: [String: SettingValue] = [:]
+        var errors: [FieldError] = []
+        let known = Set(self.settings.map(\.key))
+        for key in settings.keys.sorted() where !known.contains(key) {
+            errors.append(FieldError("\(prefix).\(key)", "unknown setting"))
+        }
+        for def in self.settings {
+            guard let value = settings[def.key] ?? def.default else {
+                errors.append(FieldError("\(prefix).\(def.key)", "required"))
+                continue
+            }
+            switch def.check(value) {
+            case .success(let v): out[def.key] = v
+            case .failure(let message): errors.append(FieldError("\(prefix).\(def.key)", message))
+            }
+        }
+        if !errors.isEmpty { throw .invalidInput(errors) }
+        return out
+    }
+
+    /// Checks input names and that files exist. A chained step may leave its first input out.
+    public func validated(inputs: [String: String], chained: Bool, prefix: String) throws(LiftError) -> [String: String] {
+        var errors: [FieldError] = []
+        let known = Set(self.inputs.map(\.name))
+        for name in inputs.keys.sorted() where !known.contains(name) {
+            errors.append(FieldError("\(prefix).\(name)", "unknown input"))
+        }
+        for (i, input) in self.inputs.enumerated() {
+            guard let value = inputs[input.name] else {
+                if !(chained && i == 0) { errors.append(FieldError("\(prefix).\(input.name)", "required")) }
+                continue
+            }
+            var isDir: ObjCBool = false
+            switch input.type {
+            case .text:
+                break
+            case .imageSet:
+                if !FileManager.default.fileExists(atPath: value, isDirectory: &isDir) || !isDir.boolValue {
+                    errors.append(FieldError("\(prefix).\(input.name)", "must be an existing folder: \(value)"))
+                }
+            default:
+                if !FileManager.default.fileExists(atPath: value, isDirectory: &isDir) || isDir.boolValue {
+                    errors.append(FieldError("\(prefix).\(input.name)", "must be an existing file: \(value)"))
+                }
+            }
+        }
+        if !errors.isEmpty { throw .invalidInput(errors) }
+        return inputs
+    }
+}
