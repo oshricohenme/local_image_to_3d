@@ -10,7 +10,7 @@ jobs:
     # Xcode 26 / Swift 6.2+ image. If macos-26 isn't available to this repo, set the repository
     # variable MACOS_RUNNER to macos-latest (Settings → Secrets and variables → Actions → Variables).
     runs-on: ${{ vars.MACOS_RUNNER || 'macos-26' }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +41,18 @@ jobs:
         run: |
           mkdir -p test-results
           swift test --skip-build --xunit-output test-results/swift.xml
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Lift.app (app + lift-mcp)
+        run: |
+          xcodegen generate --spec App/project.yml
+          xcodebuild -project App/Lift.xcodeproj -scheme Lift -configuration Debug \
+            -derivedDataPath build/xcode -skipPackagePluginValidation build
+
+      - name: Launch smoke test
+        run: App/smoke-test.sh build/xcode/Build/Products/Debug/Lift.app
 
       - name: lift_shim tests
         working-directory: dev-recipes/shared/lift_shim
