@@ -14,17 +14,24 @@ public struct Settings: Codable, Sendable, Equatable {
     public var exportDir: String?
     public var exportFormats: [ExportFormat] = [.glb]
     public var cleanupAfterExport = false
+    /// App behavior (spec §11), applied by Lift.app: macOS notifications when a job finishes or waits for
+    /// memory, launch at login (ServiceManagement), and keep running in the menu bar after the window closes.
+    public var notifications = true
+    public var launchAtLogin = false
+    public var menuBar = true
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case maxSlots = "max_slots", memoryBudgetGB = "memory_budget_gb", idleUnloadMinutes = "idle_unload_minutes"
         case devRecipes = "dev_recipes", queuePaused = "queue_paused"
         case pinOverrides = "pin_overrides"
         case exportDir = "export_dir", exportFormats = "export_formats", cleanupAfterExport = "cleanup_after_export"
+        case notifications, launchAtLogin = "launch_at_login", menuBar = "menu_bar"
     }
 
     /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, models_set_pin).
     public static let userKeys: Set<String> = ["max_slots", "memory_budget_gb", "idle_unload_minutes", "dev_recipes",
-                                               "export_dir", "export_formats", "cleanup_after_export"]
+                                               "export_dir", "export_formats", "cleanup_after_export",
+                                               "notifications", "launch_at_login", "menu_bar"]
 
     public init() {}
 
@@ -40,6 +47,9 @@ public struct Settings: Codable, Sendable, Equatable {
         exportDir = try c.decodeIfPresent(String.self, forKey: .exportDir)
         exportFormats = try c.decodeIfPresent([ExportFormat].self, forKey: .exportFormats) ?? d.exportFormats
         cleanupAfterExport = try c.decodeIfPresent(Bool.self, forKey: .cleanupAfterExport) ?? d.cleanupAfterExport
+        notifications = try c.decodeIfPresent(Bool.self, forKey: .notifications) ?? d.notifications
+        launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        menuBar = try c.decodeIfPresent(Bool.self, forKey: .menuBar) ?? d.menuBar
     }
 
     /// Upper bounds keep every value convertible to bytes / a Duration without trapping:

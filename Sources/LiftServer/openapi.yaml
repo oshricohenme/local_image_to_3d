@@ -894,6 +894,9 @@ components:
         export_dir: { type: string, description: The export folder; "" clears it. }
         export_formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' }, description: 'Default export formats; settings_set takes a comma list, e.g. "glb,usdz".' }
         cleanup_after_export: { type: boolean, description: Default for deleting a job's files after a verified export. }
+        notifications: { type: boolean, description: Show a macOS notification when a job finishes, fails or waits for memory. }
+        launch_at_login: { type: boolean, description: Start Lift when you log in. }
+        menu_bar: { type: boolean, description: Keep Lift running in the menu bar after the window closes. }
         recipe_sources:
           type: array
           items:

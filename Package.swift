@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "LiftCore", targets: ["LiftCore"]),
+        .library(name: "LiftUI", targets: ["LiftUI"]),
         .library(name: "LiftServer", targets: ["LiftServer"]),
         .executable(name: "lift-mcp", targets: ["lift-mcp"]),
     ],
@@ -60,6 +61,12 @@ let package = Package(
             .product(name: "ArgumentParser", package: "swift-argument-parser"),
         ]),
         .testTarget(name: "LiftCoreTests", dependencies: ["LiftCore"]),
+        .target(name: "LiftUI", dependencies: [
+            "LiftCore",
+            "LiftServer",
+            .product(name: "GLTFKit2", package: "GLTFKit2"),
+        ]),
+        .testTarget(name: "LiftUITests", dependencies: ["LiftUI"]),
         .testTarget(name: "LiftServerTests", dependencies: [
             "LiftServer",
             "lift-mcp",

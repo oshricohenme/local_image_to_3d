@@ -7,3 +7,6 @@ spike/work/
 .build/
 .superpowers/
 test-results/
+App/Lift.xcodeproj/
+App/build/
+build/

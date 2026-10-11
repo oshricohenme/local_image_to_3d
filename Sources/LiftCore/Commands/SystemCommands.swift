@@ -91,6 +91,19 @@ extension Lift {
         return s
     }
 
+    /// Forgets learned memory samples (all, or one recipe's), so estimates fall back to the recipe values.
+    public func resourcesResetEstimates(recipe: String? = nil) throws -> ResourcesView {
+        try store.db.write { db in
+            if let recipe {
+                try db.execute(sql: "DELETE FROM memorySample WHERE recipe = ?", arguments: [recipe])
+            } else {
+                try db.execute(sql: "DELETE FROM memorySample")
+            }
+        }
+        tick()
+        return try resourcesGet()
+    }
+
     // MARK: settings
 
     public func settingsGet() -> Settings { settings }
