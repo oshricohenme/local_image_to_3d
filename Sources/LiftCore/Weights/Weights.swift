@@ -31,6 +31,16 @@ public struct RepoSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+extension RepoSnapshot {
+    /// Just these files (a recipe's `weights[].files`); nil keeps the whole repo.
+    func only(_ paths: [String]?) -> RepoSnapshot {
+        guard let paths else { return self }
+        var s = self
+        s.files = files.filter { paths.contains($0.path) }
+        return s
+    }
+}
+
 public enum WeightsMetadataError: Error, Sendable, Equatable {
     /// No network (or Hugging Face unreachable): verification may fall back to the last good check.
     case offline
@@ -188,7 +198,7 @@ public struct WeightsVerifier: Sendable {
     public func totalBytes(_ recipe: Recipe) async -> Int? {
         var total = 0
         for w in recipe.weights {
-            guard let s = try? await metadata.snapshot(repo: w.repo, revision: w.revision) else { return nil }
+            guard let s = try? await metadata.snapshot(repo: w.repo, revision: w.revision).only(w.files) else { return nil }
             total += s.files.reduce(0) { $0 + $1.size }
         }
         return total
@@ -200,7 +210,13 @@ public struct WeightsVerifier: Sendable {
         guard !recipe.weights.isEmpty else { return report }
         var snapshots: [RepoSnapshot] = []
         do {
-            for w in recipe.weights { snapshots.append(try await snapshot(for: w, report: &report)) }
+            for w in recipe.weights {
+                let s = try await snapshot(for: w, report: &report)
+                for path in w.files ?? [] where !s.files.contains(where: { $0.path == path }) {
+                    report.problems.append(WeightProblem(repo: w.repo, path: path, issue: .missing, detail: "not in \(w.repo)@\(w.revision)"))
+                }
+                snapshots.append(s.only(w.files))
+            }
         } catch let error as WeightsMetadataError {
             // Offline, an outage (5xx) or a rate limit (429): fall back to the last good check's file lists.
             // A refusal (401/403/404) is an answer, not an outage: unknown.

@@ -142,13 +142,16 @@ public struct Installer: Sendable {
     /// and state.json marked failed.
     public func install(_ entry: CatalogEntry, pin: String?, onLine: @escaping @Sendable (String) -> Void) async throws {
         let (registry, shimConfig) = try preflight(entry)
+        if entry.recipe.metalToolchain, try await runner.run(ShellCommand("/usr/bin/xcrun", ["metal", "--version"]), onLine: { _ in }) != 0 {
+            throw LiftError.prerequisite("\(entry.recipe.name) needs Apple's Metal Toolchain; install it from Setup (system_install_prereqs with metal)")
+        }
         let recipe = entry.recipe
         let commit = pin ?? recipe.commit
         let git = tools.git!, uv = tools.uv!
         let fm = FileManager.default
         let root = dir(recipe.id)
         // repo/ is converged in place below (spec §6: Lift owns its working copy); the rest is rebuilt.
-        for name in ["venv", "recipe", "state.json", "shim.json", "install.log"] {
+        for name in ["venv", "deps", "recipe", "state.json", "shim.json", "install.log"] {  // deps/: substitutes' clones and builds
             try? fm.removeItem(at: root.appending(path: name))
         }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -304,7 +307,7 @@ public struct Installer: Sendable {
         env["HF_HUB_CACHE"] = hfHub.path
         if let token = hfToken() { env["HF_TOKEN"] = token }
         for w in recipe.weights {
-            let command = ShellCommand(hf, ["download", w.repo, "--revision", w.revision], environment: env)
+            let command = ShellCommand(hf, ["download", w.repo] + (w.files ?? []) + ["--revision", w.revision], environment: env)
             lines("$ \(command.display)")
             try await runner.check(command, onLine: lines)
         }

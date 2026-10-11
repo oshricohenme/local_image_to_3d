@@ -139,6 +139,39 @@ import Testing
         #expect(try await inst.checkUpstream(entry.recipe, pin: nil) == UpstreamStatus(pin: entry.recipe.commit, head: head, commitsAhead: 7))
     }
 
+    @Test func aRecipeNeedingTheMetalToolchainChecksItBeforeTouchingAnything() async throws {
+        let runner = FakeRunner()
+        runner.on("xcrun metal", code: 1)
+        let entry = try source(pixalYAML + "\nmetal_toolchain: true\n")
+        await #expect(throws: LiftError.self) { try await self.installer(runner).install(entry, pin: nil, onLine: { _ in }) }
+        #expect(runner.displays == ["/usr/bin/xcrun metal --version"])
+        let ok = FakeRunner()
+        try await installer(ok).install(entry, pin: nil, onLine: { _ in })
+        #expect(ok.displays.first == "/usr/bin/xcrun metal --version")
+    }
+
+    @Test func depsStartsEmptyOnEveryInstall() async throws {
+        let inst = try installer(FakeRunner())
+        let stale = inst.dir("pixal3d").appending(path: "deps/mtlgemm/build")  // a previous install's build products
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try await inst.install(try source(), pin: nil, onLine: { _ in })
+        #expect(!FileManager.default.fileExists(atPath: inst.dir("pixal3d").appending(path: "deps").path))
+    }
+
+    @Test func weightDownloadsNameOnlyTheListedFiles() async throws {
+        let runner = FakeRunner()
+        let yaml = pixalYAML.replacingOccurrences(of: "  - { repo: TencentARC/Pixal3D, gated: false }",
+                                                  with: "  - { repo: TencentARC/Pixal3D, gated: false, files: [pipeline.json, ckpts/a.safetensors] }")
+        let entry = try source(yaml)
+        let inst = try installer(runner)
+        let bin = inst.dir("pixal3d").appending(path: "venv/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try "#!/bin/sh\n".write(to: bin.appending(path: "hf"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appending(path: "hf").path)
+        try await inst.downloadWeights(entry.recipe, onLine: { _ in })
+        #expect(runner.displays.first == "\(bin.path)/hf download TencentARC/Pixal3D pipeline.json ckpts/a.safetensors --revision main")
+    }
+
     @Test func downloadWeightsRunsHFFromTheVenv() async throws {
         let runner = FakeRunner()
         let entry = try source()

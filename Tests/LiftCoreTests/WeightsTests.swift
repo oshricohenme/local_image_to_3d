@@ -87,6 +87,19 @@ func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data],
         #expect(await v.totalBytes(try recipe()) == 4098)
     }
 
+    @Test func onlyTheListedFilesAreCheckedAndCounted() async throws {
+        let (meta, hub, v) = try setup()
+        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["config.json": Data("{}".utf8)], lfs: [])
+        snap.files.append(RemoteFile(path: "pytorch_model.bin", size: 9_000, sha256: String(repeating: "0", count: 64)))  // not needed, not downloaded
+        meta.set("org/model", .success(snap))
+        let subset = [Recipe.Weight(repo: "org/model", files: ["config.json"])]
+        let r = try await v.verify(try recipe(subset))
+        #expect(r.state == .ok && r.problems.isEmpty)
+        #expect(await v.totalBytes(try recipe(subset)) == 2)
+        let typo = try await v.verify(try recipe([Recipe.Weight(repo: "org/model", files: ["config.json", "confg.json"])]))
+        #expect(typo.state == .missing && typo.problems == [WeightProblem(repo: "org/model", path: "confg.json", issue: .missing, detail: "not in org/model@main")])
+    }
+
     @Test func missingFileIsListed() async throws {
         let (meta, hub, v) = try setup()
         var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1])], lfs: [])
