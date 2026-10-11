@@ -223,7 +223,16 @@ everything else is still built.
 - **Native Homebrew only.** Lift uses `/opt/homebrew/bin/brew` (arm64). An Intel/Rosetta Homebrew in
   `/usr/local` is detected and never used for native libraries: its packages are x86_64 and can't be
   loaded by arm64 Python (found on the dev machine: `open3d` couldn't load an x86_64 `libusb`).
-- If only the Rosetta Homebrew exists, the setup screen offers to install native Homebrew alongside it.
+- If only the Rosetta Homebrew exists, setup installs native Homebrew alongside it. Homebrew's official
+  installer refuses to run as root and needs a terminal for `sudo`, so the GUI flow is:
+  1. One macOS administrator dialog (`do shell script … with administrator privileges`) creates
+     `/opt/homebrew` and gives it to the user.
+  2. Then, as the user, Homebrew `main` is cloned into `/opt/homebrew`, followed by `brew update`.
+- **Detection checks that it works, not just that files exist.** Native brew counts as present only if
+  `/opt/homebrew/bin/brew --version` succeeds *and* `brew config` reports an arm64 prefix of `/opt/homebrew`.
+  An empty or partial `/opt/homebrew` (seen on the dev machine) is treated as missing and repaired.
+- Development never installs prerequisites by hand. Everything goes through setup, so the dev machine
+  exercises the same path users get.
 - Recipes can declare `brew: [libusb, …]`. These are installed with the native brew, and its `lib/` is
   added to the worker's `DYLD_FALLBACK_LIBRARY_PATH`.
 - If `brew` is missing, a setup screen offers **Install Homebrew**. That runs the official install script
