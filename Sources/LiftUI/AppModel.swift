@@ -109,6 +109,8 @@ public final class AppModel {
     let serverPort: Int?
     var refresher: Task<Void, Never>?
     var seen: [String: JobView] = [:]
+    /// A menu-bar choice made before Lift opened (first launch), saved once the engine opens.
+    var pendingMenuBar: Bool?
 
     static let workdirKey = "workdir"
     static let setupKey = "setupDone"
@@ -126,7 +128,7 @@ public final class AppModel {
     /// The open engine, for actions; throws when Lift isn't open (the views only offer actions when it is).
     public var engine: Lift {
         get throws {
-            guard let lift else { throw LiftError.invalidState("Lift isn't open") }
+            guard let lift else { throw LiftError.invalidState("Finish setup first: choose where Lift keeps its files.") }
             return lift
         }
     }
@@ -191,6 +193,10 @@ public final class AppModel {
             let server = LiftServer(lift: lift, configuration: .init(secrets: secrets, port: serverPort, bridgePath: paths.bridge?.path))
             self.lift = lift
             self.server = server
+            if let on = pendingMenuBar {
+                pendingMenuBar = nil
+                _ = try? await lift.settingsSet("menu_bar", .bool(on))
+            }
             if self.workdir != workdir { defaults.set(workdir.path, forKey: Self.workdirKey) }
             do {
                 serverStatus = try await server.start()
@@ -297,6 +303,15 @@ public final class AppModel {
     }
 
     // MARK: actions
+
+    /// "Keep running in the menu bar". macOS also sets this when it places the menu-bar icon at launch,
+    /// before setup has opened Lift, so it's remembered locally until then instead of erroring.
+    public func setMenuBar(_ on: Bool) {
+        guard settings.menuBar != on || lift == nil else { return }
+        settings.menuBar = on
+        if lift == nil { pendingMenuBar = on; return }
+        run { _ = try await self.engine.settingsSet("menu_bar", .bool(on)) }
+    }
 
     /// Runs a command, showing any error in an alert, then refreshes.
     public func run(_ body: @escaping @MainActor () async throws -> Void) {

@@ -36,7 +36,7 @@ struct LiftApp: App {
     /// "Keep running in the menu bar" (spec §11): the `menu_bar` setting.
     var menuBarInserted: Binding<Bool> {
         Binding(get: { delegate.app.settings.menuBar }, set: { on in
-            delegate.app.run { _ = try await delegate.app.engine.settingsSet("menu_bar", .bool(on)) }
+            delegate.app.setMenuBar(on)
         })
     }
 }

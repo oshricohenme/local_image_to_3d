@@ -54,6 +54,7 @@ public struct MenuBarView: View {
             Button(app.queue?.paused == true ? "Resume Queue" : "Pause Queue") {
                 app.run { _ = app.queue?.paused == true ? try await app.engine.queueResume() : try await app.engine.queuePause() }
             }
+            .disabled(app.lift == nil)  // first launch: nothing to pause until setup opens Lift
             ForEach(app.resources?.workers ?? [], id: \.id) { w in
                 Button("Unload \(app.models.first { $0.id == w.recipe }?.name ?? w.recipe)") {
                     app.gated { confirm in try await app.engine.workersUnload(w.id, confirm: confirm) }
