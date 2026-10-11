@@ -11,7 +11,7 @@ import importlib.machinery
 import importlib.util
 import sys
 
-_STANDINS = {"flash_attn": "lift_shim.standins.flash_attn"}
+_STANDINS = {"flash_attn": "lift_shim.standins.flash_attn", "spconv": "lift_shim.standins.spconv"}
 
 
 _IDENTITY = ("__name__", "__spec__", "__package__", "__loader__", "__file__", "__path__", "__cached__")
