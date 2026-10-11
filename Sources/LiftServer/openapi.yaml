@@ -192,6 +192,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/MemoryWarningResult' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/export:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_export
+      summary: Export a finished job again. Formats and folder default to the job's own export, then the export settings. Never deletes the job's files.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExportJob' }
+      responses:
+        '200':
+          description: The job, with one export result per format.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/jobs/{id}/move:
     parameters: [{ $ref: '#/components/parameters/JobId' }]
     post:
@@ -391,6 +407,18 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/readme:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    get:
+      operationId: models_readme
+      summary: The model's upstream README as Markdown (Lift's own copy once installed, else fetched at the pinned commit and cached; offline, the cached copy). 404 when there is none.
+      responses:
+        '200':
+          description: The README.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readme' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/models/{id}/weights/download:
     parameters: [{ $ref: '#/components/parameters/ModelId' }]
@@ -981,6 +1009,19 @@ components:
         title: { type: string, description: Defaults to the first input's file name. }
         priority: { $ref: '#/components/schemas/Priority' }
         accept_memory_warning: { type: boolean, default: false, description: Queue it even if it's bigger than this Mac's memory or the budget. }
+        export: { $ref: '#/components/schemas/ExportSpec' }
+    ExportJob:
+      type: object
+      properties:
+        formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' } }
+        dir: { type: string, description: A folder on this Mac. }
+    Readme:
+      type: object
+      required: [text, base_url, cached]
+      properties:
+        text: { type: string, description: Markdown. }
+        base_url: { type: string, description: Resolves the README's relative links and images at the pinned commit. }
+        cached: { type: boolean, description: Served from Lift's cache because the network wasn't available. }
     StepInput:
       type: object
       required: [recipe, task]

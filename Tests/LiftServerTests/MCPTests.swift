@@ -27,6 +27,17 @@ import Testing
         return try #require((try json(content)["job"] as? [String: Any])?["id"] as? String)
     }
 
+    @Test func jobsExportReExportsAFinishedJob() async throws {
+        let client = try await connect(try await ServerFixture.shared.get().base)
+        let id = try await submit(client)
+        _ = try await client.callTool(name: "jobs_wait", arguments: ["id": .string(id), "timeout_seconds": 120])
+        let dir = try Fixtures.tempDir()
+        let (content, isError) = try await client.callTool(name: "jobs_export", arguments: ["id": .string(id), "formats": ["glb"], "dir": .string(dir.path)])
+        #expect(isError != true)
+        let exports = try #require((try json(content)["job"] as? [String: Any])?["exports"] as? [[String: Any]])
+        #expect((exports.first?["path"] as? String)?.hasPrefix(dir.path) == true)
+    }
+
     @Test func toolsAreTheSpecTable() async throws {
         let client = try await connect(try await ServerFixture.shared.get().base)
         #expect(Set(try await client.listTools().tools.map(\.name)) == ToolCatalogTests.specTools)
@@ -129,14 +140,14 @@ import Testing
 }
 
 @Suite struct ToolCatalogTests {
-    /// Spec §10's table, minus jobs_export (Plan 4: exports). Recipes come only with the app, so the only
+    /// Spec §10's table, plus models_readme (spec §4a). Recipes come only with the app, so the only
     /// recipe command is recipes_list.
     static let specTools: Set<String> = [
         "jobs_submit", "jobs_list", "jobs_get", "jobs_wait", "jobs_cancel", "jobs_retry", "jobs_move", "jobs_set_priority",
-        "jobs_force_start", "jobs_delete", "jobs_list_interrupted", "jobs_resolve_interrupted",
+        "jobs_force_start", "jobs_delete", "jobs_export", "jobs_list_interrupted", "jobs_resolve_interrupted",
         "queue_status", "queue_pause", "queue_resume",
         "models_list", "models_get", "models_install", "models_reinstall", "models_set_pin", "models_check_upstream",
-        "models_uninstall", "models_install_log", "models_download_weights", "models_verify_weights",
+        "models_uninstall", "models_install_log", "models_readme", "models_download_weights", "models_verify_weights",
         "recipes_list",
         "workers_list", "workers_load", "workers_unload", "resources_get", "resources_set",
         "settings_get", "settings_set", "server_status", "server_set_lan", "server_rotate_token", "secrets_set_hf_token",

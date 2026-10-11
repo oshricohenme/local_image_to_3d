@@ -15,8 +15,17 @@ struct SubmitWire: Codable, Sendable {
     var priority: Priority?
     /// Run even if the job is bigger than this Mac's memory or the budget (spec §8).
     var acceptMemoryWarning: Bool?
+    var export: Export?
 
-    enum CodingKeys: String, CodingKey { case steps, title, priority, acceptMemoryWarning = "accept_memory_warning" }
+    /// `ExportSpec` on the wire (snake_case).
+    struct Export: Codable, Sendable {
+        var dir: String?
+        var formats: [ExportFormat]?
+        var cleanupAfterExport: Bool?
+        enum CodingKeys: String, CodingKey { case dir, formats, cleanupAfterExport = "cleanup_after_export" }
+    }
+
+    enum CodingKeys: String, CodingKey { case steps, title, priority, acceptMemoryWarning = "accept_memory_warning", export }
 }
 
 /// Turns `<name>`, `<name>_path`, `<name>_base64` (+ `<name>_filename`) and multipart uploads into the
@@ -78,7 +87,8 @@ struct Inputs {
         }
         if !errors.isEmpty
  { throw LiftError.invalidInput(errors) }
-        return SubmitRequest(steps: steps, title: wire.title, priority: wire.priority ?? .normal, source: source)
+        return SubmitRequest(steps: steps, title: wire.title, priority: wire.priority ?? .normal, source: source,
+                             export: wire.export.map { ExportSpec(dir: $0.dir, formats: $0.formats, cleanupAfterExport: $0.cleanupAfterExport) })
     }
 
     func save(_ data: Data, step: Int, name: String, filename: String) throws -> URL {

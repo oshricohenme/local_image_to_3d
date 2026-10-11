@@ -136,6 +136,11 @@ enum Tools {
         },
         "models_check_upstream": { a, c in .json(try await c.lift.modelsCheckUpstream(a.required("id"))) },
         "models_install_log": { a, c in .text(try await c.lift.modelsInstallLog(a.required("id"))) },
+        "models_readme": { a, c in
+            guard let readme = try await c.lift.modelsReadme(a.required("id")) else { throw LiftError.notFound("README for \(try a.required("id", as: String.self))") }
+            return .json(readme)
+        },
+        "jobs_export": { a, c in .job(try await c.lift.jobsExport(a.required("id"), formats: a.decode("formats"), dir: a.decode("dir"))) },
         "models_download_weights": { a, c in
             .json(try gated(await c.lift.modelsDownloadWeights(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"))))
         },

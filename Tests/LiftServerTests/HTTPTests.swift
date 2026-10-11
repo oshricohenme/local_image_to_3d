@@ -29,6 +29,24 @@ import Testing
         #expect(file.status == 200 && file.data.prefix(4) == Data("glTF".utf8))
     }
 
+    @Test func exportOnSubmitAndAgainLaterWithCredits() async throws {
+        let (_, _, base) = try await ServerFixture.shared.get()
+        let http = HTTP(base: base)
+        let dir = try Fixtures.tempDir()
+        let submit = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()])], "title": "exported",
+                                                                     "export": ["dir": dir.path, "formats": ["glb"], "cleanup_after_export": false]])
+        let id = try #require((submit.json["job"] as? [String: Any])?["id"] as? String)
+        let done = try await wait(http, id)
+        let job = try #require(done["job"] as? [String: Any])
+        #expect((job["exports"] as? [[String: Any]])?.first?["path"] as? String == dir.appending(path: "exported.glb").path)
+        #expect(job["export_pending"] as? Bool == false)
+        #expect((done["attribution"] as? [String: Any])?["credit"] as? String == "Test Cube (Lift test fixture) by Lift (MIT)")
+        let again = try await http.call("POST", "/v1/jobs/\(id)/export", json: ["formats": ["obj"]])
+        #expect(again.status == 200)
+        #expect(((again.json["job"] as? [String: Any])?["exports"] as? [[String: Any]])?.first?["format"] as? String == "obj")
+        #expect(try await http.call("GET", "/v1/models/test-cube/readme").status == 404)  // no upstream repo, no network
+    }
+
     @Test func waitWithZeroTimeoutAnswersAtOnce() async throws {
         let (_, _, base) = try await ServerFixture.shared.get()
         let http = HTTP(base: base)

@@ -173,6 +173,21 @@ struct API: APIProtocol {
         .ok(.init(body: .plainText(HTTPBody(try await lift.modelsInstallLog(input.path.id)))))
     }
 
+    func jobsExport(_ input: Operations.JobsExport.Input) async throws -> Operations.JobsExport.Output {
+        var formats: [ExportFormat]?
+        var dir: String?
+        if case .json(let body) = input.body {
+            formats = try body.formats.map { try Wire.convert($0) }
+            dir = body.dir
+        }
+        return .ok(.init(body: .json(try Wire.convert(JobOut(try await lift.jobsExport(input.path.id, formats: formats, dir: dir))))))
+    }
+
+    func modelsReadme(_ input: Operations.ModelsReadme.Input) async throws -> Operations.ModelsReadme.Output {
+        guard let readme = try await lift.modelsReadme(input.path.id) else { throw LiftError.notFound("README for \(input.path.id)") }
+        return .ok(.init(body: .json(try Wire.convert(readme))))
+    }
+
     func modelsDownloadWeights(_ input: Operations.ModelsDownloadWeights.Input) async throws -> Operations.ModelsDownloadWeights.Output {
         let model = try gated(await lift.modelsDownloadWeights(input.path.id, confirm: input.query.confirm ?? false, wait: input.query.wait ?? false))
         return .ok(.init(body: .json(try Wire.convert(model))))
