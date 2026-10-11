@@ -31,7 +31,10 @@ built for any modality (image, video, audio) so later projects need only a recip
    - **Every error says what happened, why, and what to do,** with a "Fix it" or "Try again" button where possible.
    - **Nothing is left in a half-done state.** Interrupted setup resumes where it stopped.
    - The developer view (recipes' raw settings, commits, the shim) is opt-in under Settings → Developer.
-5. **Use packages, don't reinvent.** An established package is preferred for every operation.
+5. **Credit the authors; never claim their work.** Every model Lift runs is someone else's open-source
+   project. Lift always shows who made it, where it comes from and its license, and states plainly that
+   Lift didn't create it and isn't affiliated with its authors (§4a).
+6. **Use packages, don't reinvent.** An established package is preferred for every operation.
 
 ## 2. Scope
 
@@ -218,6 +221,45 @@ from the same folders.
 Multi-view input (`image_set`) accepts any of: a 4-view preset (front/right/back/left slots; Lift writes the
 upstream example `transforms.json` with your file names), a folder that already contains
 `transforms.json`, or N images plus an orbit (count, elevation, FOV), for which Lift writes evenly spaced cameras.
+
+## 4a. Attribution
+
+**Recipe `attribution:` block (required).**
+- `project`, `authors` (people and/or organisation), `homepage`, `repo`, optional `paper`
+  (`title`, `url`, `bibtex`), and `license` (SPDX id plus URL) for the code.
+- A `components:` list for everything else the model pulls in, each with its own license and URL. That
+  covers the weights repos, helper models (e.g. MoGe-2, DINOv3, RMBG-2.0) and Mac ports (e.g. trellis-mac,
+  pedronaugusto's Metal packages).
+- A component whose license restricts use gets `restrictions:` (e.g. `non-commercial`). The UI shows this
+  prominently, e.g. "RMBG-2.0 is licensed CC BY-NC 4.0: not for commercial use."
+- A recipe without a complete attribution block fails validation and can't be installed.
+
+**README.**
+- Lift shows the project's own README, rendered as Markdown, with relative links and images resolved to
+  the repo at the pinned commit.
+- Once installed, it's read from Lift's own clone. Before install, it's fetched from
+  `raw.githubusercontent.com/<repo>/<pin>/README.md` (text only, cached in the workdir). Offline, Lift
+  shows the cached copy or the attribution block alone.
+
+**Where it appears.**
+- **Models → About:** the first tab, holding the attribution header, the README, the licenses and the
+  disclaimer.
+- **Generate:** the selected model's card shows "by <authors> · <license> · About".
+- **Queue (running job) and History (each result):** "Made with <project> by <authors>", with a link.
+- **First install of a model:** a one-time "About this model" sheet. It shows the authors, license,
+  restrictions and disclaimer, with buttons to open the project page and the README, and **Continue**.
+- **App → About Lift → Credits:** every upstream project, component and Mac port, with its license.
+
+**Disclaimer (fixed wording, everywhere above):** "<Project> was created by <authors>. Lift is an
+independent app that runs open-source projects on your Mac. Lift did not create <Project> and is not
+affiliated with or endorsed by its authors."
+
+**Outputs.**
+- Exported files carry attribution where the format allows: the GLB `asset.copyright` /
+  `asset.generator` fields read "<Project> by <authors> (<license>), run with Lift"; USDZ/OBJ/FBX get the
+  equivalent metadata or a sidecar `<name>.credits.txt`.
+- HTTP/MCP job results include an `attribution` object, so calling agents can credit the authors too.
+- `models_get` returns the attribution, and a new `models_readme` command returns the README text.
 
 ## 5. Mac compatibility shim (`lift_shim`)
 
