@@ -138,6 +138,7 @@ extension UIFixtures {
         #expect(pixal.task == "Photo → 3D model" && pixal.credit.hasPrefix("by Dong-Yang Li") && pixal.credit.hasSuffix("· MIT"))
         #expect(pixal.gated == ["briaai/RMBG-2.0"] && pixal.description?.contains("one photo") == true)
         #expect(pixal.restrictions.contains("Not for commercial use: RMBG-2.0 by BRIA AI (CC-BY-NC-4.0)"))
+        #expect(pixal.restrictions.filter { $0.hasPrefix("DINOv3") }.count == 1)  // one line per component
         #expect(pixal.size == "About 3 GB")  // the recipe's estimate while the weights' size is unknown
         #expect(setup.addOns(app).first?.gated == [])
 

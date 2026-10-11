@@ -305,7 +305,9 @@ public final class SetupModel {
         let r = m.recipe, a = r.attribution
         let gated = r.weights.filter(\.gated).map(\.repo)
         let restrictions = a.components.flatMap { c in
-            c.restrictions.map { $0 == "non-commercial" ? "Not for commercial use: \(c.name) (\(c.license.spdx))" : "\(c.name): \($0)" }
+            let other = c.restrictions.filter { $0 != "non-commercial" }
+            return (c.restrictions.contains("non-commercial") ? ["Not for commercial use: \(c.name) (\(c.license.spdx))"] : [])
+                + (other.isEmpty ? [] : ["\(c.name): \(other.joined(separator: "; "))"])
         }
         let bytes = sizes[m.id] ?? Int(r.resources.diskGB * 1_000_000_000)
         var unsupported: String?
