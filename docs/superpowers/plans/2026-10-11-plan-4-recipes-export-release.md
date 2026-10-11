@@ -21,18 +21,26 @@ Each commit ran the full `swift test` (197 tests at `d73021d`) and the recipe py
 32 passed against the go/no-go clones). Earlier, in the prototype: real installs of pixal3d and trellis2-mac
 through Lift's Installer without weights passed (238 s / 226 s).
 
-## Waiting (edits to existing LiftCore files, after plan1-writer's fix pass)
+## Landed after plan1-writer's fix passes (edits to existing files)
 
-1. `Recipe`: `attribution: Attribution` (required; validation adds `Attribution.problems`), `metal_toolchain`,
-   `weights[].files`, `description`, `errors: [{match, message}]`.
-2. Installer: Metal Toolchain check before anything; `deps/` emptied; `hf download <repo> <files…>`; the verifier checks only listed files.
-3. Export in jobs: `SubmitRequest.export`, `JobRecord.export/exports/exportPending/cleanedUp` (migration), settings
-   `export_dir`/`export_formats`/`cleanup_after_export`, run after the last step, `jobs_wait` waits, resume at open,
-   cleanup only after every format verified, `jobsExport`. Credits from each step's recipe.
-4. Job view `attribution: Attribution?`; `Lift.modelsReadme(_:) -> Readme?` (with `LiftConfig.readmeHTTP`).
-5. A failed step shows the recipe's plain `errors` message; the raw error stays in the log.
-6. Swift tests: bundled-recipe dry-run installs/pins/credits, opt-in real installs, export flow and resume.
-7. Plan 2 wiring: `export` on jobs_submit, `jobs_export` route/tool (+ `specTools`); Plan 3: export UI in its Generate/Setup/Settings/History files.
+| Commit | What |
+|---|---|
+| `807d70f` | `Recipe.attribution: Attribution` required (a recipe without it doesn't load; `Attribution.problems` in validation), `metal_toolchain`, `weights[].files`, `description`, `errors: [{match, message}]` (`plainError`, `failureMessage`). |
+| `609f5f6` | Installer: Metal Toolchain check before anything; `deps/` emptied every install; `hf download <repo> <files…>`; the verifier checks only listed files and reports a listed path the repo lacks. |
+| `549f8db` | Export in jobs: `SubmitRequest.export`, `JobRecord.export/exports/exportPending/cleanedUp/credits` (migration `export-and-credits`), settings `export_dir`/`export_formats`/`cleanup_after_export`, export after the last step, `jobs_wait` waits for it, resume at open, cleanup only after every format verified, `Lift.jobsExport`; `JobView.attribution` (credits snapshot at submit). openapi.yaml schemas + `JobOut.attribution` so the drift test stays green. |
+| `8d7a268` | A failed step shows the recipe's plain message, then "Details:" with the raw error; `Lift.modelsReadme(_:) -> Readme?` through `LiftConfig.readmeHTTP`. |
+| `e38226e` | `BundledRecipeTests` (parse/validate, dry-run installs in the findings order, pins, shim configs, credits, plain copy with 2–4 basic settings and help on every setting, weight subsets) and opt-in `RealInstallTests`. |
+| `e078c7e` | HTTP/MCP: `export` on `jobs_submit`, `POST /v1/jobs/{id}/export` + `jobs_export`, `GET /v1/models/{id}/readme` + `models_readme`, attribution in job results; `specTools` updated. |
+| `8ac135a` | `release.yml` builds like Plan 3: `xcodegen generate --spec App/project.yml`, `App/Lift.xcodeproj`, scheme `Lift`, then `App/smoke-test.sh`. |
+
+Full `swift test`: 229 tests pass at `e078c7e`. Plan 1's process-group work (`bae4636`) covers Plan 4's Task 2.
+Build note: after a LiftCore struct or init signature changes, the incremental build can leave stale
+`LiftServerTests` objects (a segfault or an undefined `LiftConfig.init` at link). Deleting `*.o` and `*.swiftdeps`
+under `.build/arm64-apple-macosx/debug/LiftServerTests.build` fixes it.
+
+## Still open
+
+- Plan 3 owns the export UI (Generate export section, wizard export folder and cleanup default, Settings → Storage, History re-export) and the About/credits/README views, binding to the names above.
 
 ## Decisions to fold into the spec
 
