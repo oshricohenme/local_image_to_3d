@@ -193,6 +193,30 @@ struct API: APIProtocol {
         return .ok(.init(body: .json(try Wire.convert(model))))
     }
 
+    func downloadsList(_ input: Operations.DownloadsList.Input) async throws -> Operations.DownloadsList.Output {
+        .ok(.init(body: .json(try Wire.convert(DownloadListOut(downloads: await lift.downloadsList())))))
+    }
+
+    func downloadsPause(_ input: Operations.DownloadsPause.Input) async throws -> Operations.DownloadsPause.Output {
+        .ok(.init(body: .json(try Wire.convert(try await lift.downloadsPause(input.path.id)))))
+    }
+
+    func downloadsResume(_ input: Operations.DownloadsResume.Input) async throws -> Operations.DownloadsResume.Output {
+        .ok(.init(body: .json(try Wire.convert(try await lift.downloadsResume(input.path.id)))))
+    }
+
+    func downloadsCancel(_ input: Operations.DownloadsCancel.Input) async throws -> Operations.DownloadsCancel.Output {
+        .ok(.init(body: .json(try Wire.convert(try gated(await lift.downloadsCancel(input.path.id, confirm: input.query.confirm ?? false))))))
+    }
+
+    func downloadsRetry(_ input: Operations.DownloadsRetry.Input) async throws -> Operations.DownloadsRetry.Output {
+        .ok(.init(body: .json(try Wire.convert(try await lift.downloadsRetry(input.path.id)))))
+    }
+
+    func downloadsReorder(_ input: Operations.DownloadsReorder.Input) async throws -> Operations.DownloadsReorder.Output {
+        .ok(.init(body: .json(try Wire.convert(DownloadListOut(downloads: try await lift.downloadsReorder(input.path.id, position: input.query.position))))))
+    }
+
     func modelsCancelInstall(_ input: Operations.ModelsCancelInstall.Input) async throws -> Operations.ModelsCancelInstall.Output {
         .ok(.init(body: .json(try Wire.convert(try await lift.modelsCancelInstall(input.path.id)))))
     }

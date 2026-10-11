@@ -28,6 +28,8 @@ public struct LiftConfig: Sendable {
     public var weightsRecheckInterval: Duration
     /// Where `models_readme` fetches READMEs before a model is installed (a fake in tests).
     public var readmeHTTP: any ReadmeHTTP
+    /// Waits between download retries (tests record it instead).
+    public var sleep: @Sendable (Duration) async throws -> Void
 
     public init(workdir: URL, workerRuntime: URL, bundledRecipes: URL, runner: any CommandRunner = SubprocessRunner(),
                 toolSearchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local",
@@ -35,7 +37,8 @@ public struct LiftConfig: Sendable {
                 systemFree: @escaping @Sendable () -> Int = Memory.systemFree, physicalMemory: Int = Memory.physical,
                 hfToken: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["HF_TOKEN"] },
                 hfHub: URL = HFHubAPI.defaultCache, weightsMetadata: (any WeightsMetadata)? = nil,
-                weightsRecheckInterval: Duration = .seconds(30), readmeHTTP: any ReadmeHTTP = URLSessionReadmeHTTP()) {
+                weightsRecheckInterval: Duration = .seconds(30), readmeHTTP: any ReadmeHTTP = URLSessionReadmeHTTP(),
+                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.workdir = workdir
         self.workerRuntime = workerRuntime
         self.bundledRecipes = bundledRecipes
@@ -52,6 +55,7 @@ public struct LiftConfig: Sendable {
         self.weightsMetadata = weightsMetadata ?? HFHubAPI(token: hfToken)
         self.weightsRecheckInterval = weightsRecheckInterval
         self.readmeHTTP = readmeHTTP
+        self.sleep = sleep
     }
 }
 
@@ -111,8 +115,9 @@ public actor Lift {
     /// What an install or download is doing now: getting the code, setting up python, checking the install,
     /// downloading weights, verifying weights, cancelling.
     var phases: [String: String] = [:]
-    /// Bytes downloaded so far while weights download.
-    var progress: [String: InstallProgress] = [:]
+    /// Every download record (mirrors the `download` table), and the task of each one running.
+    var downloads: [String: Download] = [:]
+    var downloadTasks: [String: Task<Void, Never>] = [:]
     /// The last bundled-recipes sync (first launch or app update).
     var bundleSync = BundledRecipes.Result(copied: false, keptLocal: [])
     var weightReports: [String: WeightsReport] = [:]
@@ -161,12 +166,15 @@ public actor Lift {
             try store.db.write { try s.save($0) }
         }
         try store.db.write { try Self.recoverInterrupted($0) }
+        try store.db.write { try Self.recoverDownloads($0) }
+        downloads = Dictionary(uniqueKeysWithValues: try store.db.read { try Download.fetchAll($0) }.map { ($0.id, $0) })
         bundleSync = try BundledRecipes(bundle: config.bundledRecipes, recipes: config.workdir.appending(path: "recipes")).sync()
     }
 
     func start() async {
         tools = await toolchain.detect()
         rescan()
+        pumpDownloads()  // the ones a quit cut short, again
         // Exports cut short by a quit or crash run again (their steps already succeeded).
         for job in (try? await store.db.read { try JobRecord.filter(Column("exportPending") == true).fetchAll($0) }) ?? [] {
             if let spec = job.export { Task { try? await self.export(job.id, spec) } }
@@ -186,6 +194,8 @@ public actor Lift {
     public func close() {
         closing = true
         housekeeping?.cancel()
+        for task in downloadTasks.values { task.cancel() }  // their state stays "downloading", resumed at the next open
+        downloadTasks = [:]
         for w in workers.values {
             w.stopping = true
             w.process.kill()
@@ -231,6 +241,10 @@ public actor Lift {
 
     func status(_ id: String) -> ModelStatus {
         if installing[id] != nil { return .installing(phase: phases[id] ?? "installing") }
+        if let phase = phases[id] { return .installing(phase: phase) }  // checking the files after a download
+        if let d = currentDownload(id), d.state.isActive {
+            return .installing(phase: d.state == .queued ? "waiting to download" : d.state == .paused ? "download paused" : "downloading weights")
+        }
         let base = installer.status(id: id, source: catalog.entries[id], pin: settings.pinOverrides[id])
         switch (base, weightReports[id]?.state) {
         case (.installed, .missing?), (.updateAvailable, .missing?): return .weightsMissing(weightReports[id]!.problems)

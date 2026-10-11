@@ -4,6 +4,8 @@ import GRDB
 /// App settings, one `setting` row per key (snake_case key, JSON value). Missing rows mean the default.
 public struct Settings: Codable, Sendable, Equatable {
     public var maxSlots = 1
+    /// Weights downloads that run at once (the rest wait in the download queue).
+    public var maxDownloads = 1
     public var memoryBudgetGB = 48.0
     public var idleUnloadMinutes = 10.0
     public var devRecipes = false
@@ -21,7 +23,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var menuBar = true
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case maxSlots = "max_slots", memoryBudgetGB = "memory_budget_gb", idleUnloadMinutes = "idle_unload_minutes"
+        case maxSlots = "max_slots", maxDownloads = "max_downloads", memoryBudgetGB = "memory_budget_gb", idleUnloadMinutes = "idle_unload_minutes"
         case devRecipes = "dev_recipes", queuePaused = "queue_paused"
         case pinOverrides = "pin_overrides"
         case exportDir = "export_dir", exportFormats = "export_formats", cleanupAfterExport = "cleanup_after_export"
@@ -29,7 +31,7 @@ public struct Settings: Codable, Sendable, Equatable {
     }
 
     /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, models_set_pin).
-    public static let userKeys: Set<String> = ["max_slots", "memory_budget_gb", "idle_unload_minutes", "dev_recipes",
+    public static let userKeys: Set<String> = ["max_slots", "max_downloads", "memory_budget_gb", "idle_unload_minutes", "dev_recipes",
                                                "export_dir", "export_formats", "cleanup_after_export",
                                                "notifications", "launch_at_login", "menu_bar"]
 
@@ -39,6 +41,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Settings()
         maxSlots = try c.decodeIfPresent(Int.self, forKey: .maxSlots) ?? d.maxSlots
+        maxDownloads = try c.decodeIfPresent(Int.self, forKey: .maxDownloads) ?? d.maxDownloads
         memoryBudgetGB = try c.decodeIfPresent(Double.self, forKey: .memoryBudgetGB) ?? d.memoryBudgetGB
         idleUnloadMinutes = try c.decodeIfPresent(Double.self, forKey: .idleUnloadMinutes) ?? d.idleUnloadMinutes
         devRecipes = try c.decodeIfPresent(Bool.self, forKey: .devRecipes) ?? d.devRecipes
@@ -67,6 +70,7 @@ public struct Settings: Codable, Sendable, Equatable {
     var problems: [FieldError] {
         var errors: [FieldError] = []
         if !(1...Self.maxSlotsLimit).contains(maxSlots) { errors.append(FieldError("max_slots", "must be 1…\(Self.maxSlotsLimit)")) }
+        if !(1...3).contains(maxDownloads) { errors.append(FieldError("max_downloads", "must be 1…3")) }
         if !(memoryBudgetGB > 0 && memoryBudgetGB <= Self.memoryBudgetGBLimit) {
             errors.append(FieldError("memory_budget_gb", "must be > 0 and ≤ \(Self.memoryBudgetGBLimit.formatted())"))
         }

@@ -9,12 +9,16 @@ public struct ShellCommand: Sendable, Equatable {
     /// Overrides on top of the inherited environment.
     public var environment: [String: String]
     public var workingDirectory: String?
+    /// Runs in its own process group, and cancelling kills the whole group (`hf download`: Pause stops it all).
+    public var ownProcessGroup = false
 
-    public init(_ executable: String, _ arguments: [String] = [], environment: [String: String] = [:], workingDirectory: String? = nil) {
+    public init(_ executable: String, _ arguments: [String] = [], environment: [String: String] = [:], workingDirectory: String? = nil,
+                ownProcessGroup: Bool = false) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
+        self.ownProcessGroup = ownProcessGroup
     }
 
     /// What logs and errors show.
@@ -56,17 +60,25 @@ public struct SubprocessRunner: CommandRunner {
 
     public func run(_ command: ShellCommand, onLine: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         let env = Environment.lift(command.environment)
+        var options = PlatformOptions()
+        if command.ownProcessGroup { options.processGroupID = 0 }  // pgid = pid
         let result = try await Subprocess.run(
             .path(FilePath(command.executable)),
             arguments: Arguments(command.arguments),
             environment: env,
             workingDirectory: command.workingDirectory.map { FilePath($0) },
+            platformOptions: options,
             input: .none,
             output: .sequence,
             error: .combinedWithOutput
         ) { execution in
-            for try await line in execution.standardOutput.strings(bufferingPolicy: .unbounded) {
-                onLine(line)
+            let pid = execution.processIdentifier.value
+            try await withTaskCancellationHandler {
+                for try await line in execution.standardOutput.strings(bufferingPolicy: .unbounded) {
+                    onLine(line)
+                }
+            } onCancel: {
+                if command.ownProcessGroup { _ = kill(-pid, SIGKILL) }  // the group: hf and anything it started
             }
         }
         return result.terminationStatus.code

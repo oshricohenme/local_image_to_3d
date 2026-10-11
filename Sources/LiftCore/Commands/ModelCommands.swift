@@ -13,8 +13,10 @@ public struct ModelView: Codable, Sendable, Equatable {
     public var diskBytes: Int?
     /// The last weights check this session (nil until one ran).
     public var weights: WeightsReport?
-    /// While weights download: bytes so far out of the total (nil in other phases, or while the total is unknown).
+    /// While weights download (or are paused): bytes so far out of the total (nil while the total is unknown).
     public var progress: InstallProgress? = nil
+    /// The model's latest download that isn't done: queued, downloading, paused, failed or cancelled.
+    public var download: Download? = nil
 }
 
 /// One recipe found in `bundled-local` / `bundled`, and whether it can be used.
@@ -42,7 +44,11 @@ extension Lift {
         guard let recipe = installed[id] ?? entry?.recipe else { throw LiftError.notFound("model \(id)") }
         return ModelView(id: id, name: recipe.name, source: entry?.source, status: status(id), recipe: recipe,
                          pin: settings.pinOverrides[id] ?? entry?.recipe.commit ?? recipe.commit,
-                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil, weights: weightReports[id], progress: progress[id])
+                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil, weights: weightReports[id],
+                         progress: currentDownload(id).flatMap { d in
+                             d.state == .downloading || d.state == .paused ? d.totalBytes.map { InstallProgress(downloadedBytes: d.downloadedBytes, totalBytes: $0) } : nil
+                         },
+                         download: currentDownload(id))
     }
 
     static func diskSize(_ url: URL) -> Int {
@@ -62,8 +68,9 @@ extension Lift {
 
     public func modelsGet(_ id: String) throws -> ModelView { try modelView(id, disk: true) }
 
-    /// "Using" a model (spec §4): in the background, install it, then download its weights (unless
-    /// `downloadWeights` is false) and verify them. `wait` waits for all of it. Progress goes to `install.log`.
+    /// "Using" a model (spec §4): in the background, install it, then queue its weights download (unless
+    /// `downloadWeights` is false), which verifies them when it's done. `wait` waits for all of it.
+    /// Progress goes to `install.log`.
     public func modelsInstall(_ id: String, confirm: Bool = false, wait: Bool = false, downloadWeights: Bool = true) async throws -> Gated<ModelView> {
         guard let entry = catalog.entries[id] else { throw LiftError.notFound("recipe \(id)") }
         guard installing[id] == nil else { throw LiftError.invalidState("\(id) is already installing") }
@@ -82,14 +89,13 @@ extension Lift {
         let installer = self.installer, verifier = self.verifier
         let pin = settings.pinOverrides[id]
         phases[id] = "installing"
+        if let d = currentDownload(id), d.state.isActive { _ = try downloadsCancel(d.id, confirm: true) }  // a reinstall starts afresh
         let task = Task {
             let ok = (try? await installer.install(entry, pin: pin, onLine: { _ in }, onPhase: { phase in await self.setPhase(id, phase) })) != nil
             await self.rescan()
             if ok && downloadWeights && !r.weights.isEmpty && !Task.isCancelled {
-                await self.setPhase(id, "downloading weights")
-                await self.downloading(r) { try? await installer.downloadWeights(r, onLine: { _ in }) }
-            }
-            if ok && !Task.isCancelled {
+                _ = try? await self.enqueueDownload(r)  // the download queue carries on from here
+            } else if ok && !Task.isCancelled {
                 await self.setPhase(id, "verifying weights")
                 await self.verified(id, await verifier.report(r))
             }
@@ -97,7 +103,10 @@ extension Lift {
         }
         installing[id] = task
         tick()
-        if wait { await task.value }
+        if wait {
+            await task.value
+            await settleDownload(id)
+        }
         return .done(try modelView(id))
     }
 
@@ -113,33 +122,17 @@ extension Lift {
         phases[id] = phase
     }
 
-    func setProgress(_ id: String, _ p: InstallProgress?) {
-        progress[id] = p
-    }
-
-    /// Runs `body` (the `hf download`s) while polling the cache every second, so models_get reports real bytes.
-    /// The total is the recipe's weights files as the Hugging Face API lists them; unknown offline (no progress).
-    func downloading(_ r: Recipe, _ body: @Sendable () async -> Void) async {
-        let verifier = self.verifier, hub = config.hfHub, repos = r.weights.map(\.repo)
-        let poll = Task {
-            guard let total = await verifier.totalBytes(r), total > 0 else { return }
-            while !Task.isCancelled {
-                let done = WeightsProgress.downloadedBytes(hub: hub, repos: repos)
-                await self.setProgress(r.id, InstallProgress(downloadedBytes: min(done, total), totalBytes: total))
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-        await body()
-        poll.cancel()
-        progress[r.id] = nil
-    }
-
     /// Stops an install or weights download. What's done so far stays (a partial download resumes next time);
     /// a cancelled install never counts as installed, and isn't marked failed either.
     public func modelsCancelInstall(_ id: String) throws -> ModelView {
-        guard let task = installing[id] else { throw LiftError.invalidState("\(id) isn't installing or downloading") }
-        task.cancel()
-        phases[id] = "cancelling"
+        if let task = installing[id] {
+            task.cancel()
+            phases[id] = "cancelling"
+        } else if let d = currentDownload(id), d.state.isActive {
+            _ = try downloadsCancel(d.id, confirm: true)
+        } else {
+            throw LiftError.invalidState("\(id) isn't installing or downloading")
+        }
         tick()
         return try modelView(id)
     }
@@ -147,30 +140,19 @@ extension Lift {
     func installFinished(_ id: String) {
         installing[id] = nil
         phases[id] = nil
-        progress[id] = nil
         rescan()
         tick()
     }
 
-    /// Downloads the model's weights with `hf download` from its venv, then verifies them.
+    /// Queues the model's weights download (`hf download` from its venv; a stopped or failed one picks up
+    /// from what's in the cache), verified when it's done.
     public func modelsDownloadWeights(_ id: String, confirm: Bool = false, wait: Bool = false) async throws -> Gated<ModelView> {
         guard let r = installed[id] else { throw LiftError.invalidState("\(id) is not installed") }
         guard installing[id] == nil else { throw LiftError.invalidState("\(id) is busy: \(phases[id] ?? "installing")") }
         guard !r.weights.isEmpty else { return .done(try modelView(id)) }
         guard confirm else { return .confirmationRequired(await weightsImpact(r)) }
-        let installer = self.installer, verifier = self.verifier
-        phases[id] = "downloading weights"
-        let task = Task {
-            await self.downloading(r) { try? await installer.downloadWeights(r, onLine: { _ in }) }
-            if !Task.isCancelled {
-                await self.setPhase(id, "verifying weights")
-                await self.verified(id, await verifier.report(r))
-            }
-            await self.installFinished(id)
-        }
-        installing[id] = task
-        tick()
-        if wait { await task.value }
+        try enqueueDownload(r)
+        if wait { await settleDownload(id) }
         return .done(try modelView(id))
     }
 

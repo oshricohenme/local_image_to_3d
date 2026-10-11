@@ -296,6 +296,12 @@ public struct Installer: Sendable {
     /// `hf download <repo> --revision <rev>` for each weight, from the model's venv into the shared cache.
     /// Appends to `install.log`. Only ever started by an explicit user action (spec §6).
     public func downloadWeights(_ recipe: Recipe, onLine: @escaping @Sendable (String) -> Void) async throws {
+        for w in recipe.weights { try await downloadWeight(recipe, w, onLine: onLine) }
+    }
+
+    /// `hf download` for one weight, in its own process group so a pause stops all of it. Run again, it picks
+    /// up from the `.incomplete` files in the cache.
+    public func downloadWeight(_ recipe: Recipe, _ w: Recipe.Weight, onLine: @escaping @Sendable (String) -> Void) async throws {
         let hf = dir(recipe.id).appending(path: "venv/bin/hf").path
         guard FileManager.default.isExecutableFile(atPath: hf) else {
             throw LiftError.prerequisite("\(recipe.id)'s venv has no `hf` (huggingface_hub); add it to the recipe's install steps")
@@ -315,11 +321,9 @@ public struct Installer: Sendable {
         env["VIRTUAL_ENV"] = venv
         env["HF_HUB_CACHE"] = hfHub.path
         if let token = hfToken() { env["HF_TOKEN"] = token }
-        for w in recipe.weights {
-            let command = ShellCommand(hf, ["download", w.repo] + (w.files ?? []) + ["--revision", w.revision], environment: env)
-            lines("$ \(command.display)")
-            try await runner.check(command, onLine: lines)
-        }
+        let command = ShellCommand(hf, ["download", w.repo] + (w.files ?? []) + ["--revision", w.revision], environment: env, ownProcessGroup: true)
+        lines("$ \(command.display)")
+        try await runner.check(command, onLine: lines)
     }
 
     /// Removes `models/<id>/` — Lift's own folder. Weights in the shared Hugging Face cache are never deleted.

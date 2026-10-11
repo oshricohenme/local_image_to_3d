@@ -9,7 +9,8 @@ extension Fixtures {
     /// downloaded, so jobs wait with `model_not_installed`.
     static func lift(_ runner: FakeRunner = FakeRunner(), workdir: URL? = nil, searchDirs: [String] = [],
                      bundle: URL = devRecipes, metadata: FakeMetadata = FakeMetadata(), hub: URL? = nil,
-                     physical: Int = 64 << 30, readme: FakeReadmeHTTP = FakeReadmeHTTP()) async throws -> Lift {
+                     physical: Int = 64 << 30, readme: FakeReadmeHTTP = FakeReadmeHTTP(),
+                     sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) async throws -> Lift {
         let workdir = try workdir ?? tempDir()
         let seed = try Store(path: workdir.appending(path: "lift.sqlite").path)
         try await seed.db.write { try SettingRecord(key: "dev_recipes", value: "true").save($0) }  // only this row
@@ -18,7 +19,7 @@ extension Fixtures {
                                               homebrewPrefix: "/nonexistent-homebrew", rosettaPrefix: "/nonexistent-rosetta",
                                               housekeepingInterval: .seconds(3600), systemFree: { 64_000_000_000 }, physicalMemory: physical,
                                               hfToken: { nil }, hfHub: try hub ?? tempDir(), weightsMetadata: metadata,
-                                              weightsRecheckInterval: .milliseconds(100), readmeHTTP: readme))
+                                              weightsRecheckInterval: .milliseconds(100), readmeHTTP: readme, sleep: sleep))
     }
 }
 

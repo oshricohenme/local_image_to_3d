@@ -112,6 +112,7 @@ extension Lift {
         let s = try settings.setting(key, to: value)
         try saveSettings(s)
         if key == "dev_recipes" { rescan() }
+        if key == "max_downloads" { pumpDownloads() }
         tick()
         return s
     }

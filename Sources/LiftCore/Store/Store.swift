@@ -106,6 +106,24 @@ public final class Store: Sendable {
                 t.add(column: "credits", .text).notNull().defaults(to: "[]")
             }
         }
+        m.registerMigration("downloads") { db in
+            try db.create(table: "download") { t in
+                t.primaryKey("id", .text)
+                t.column("model", .text).notNull().indexed()
+                t.column("weights", .text).notNull()
+                t.column("state", .text).notNull()
+                t.column("totalBytes", .integer)
+                t.column("downloadedBytes", .integer).notNull().defaults(to: 0)
+                t.column("reason", .text)
+                t.column("link", .text)
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+                t.column("resumed", .boolean).notNull().defaults(to: false)
+                t.column("position", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("startedAt", .datetime)
+                t.column("finishedAt", .datetime)
+            }
+        }
         return m
     }
 }

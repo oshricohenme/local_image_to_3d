@@ -457,6 +457,80 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/WeightsReport' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads:
+    get:
+      operationId: downloads_list
+      summary: Every weights download in queue order (queued, downloading, paused, failed, done, cancelled), with bytes so far and the total.
+      description: Weights downloads come from models_install and models_download_weights; max_downloads (setting) run at once. Downloads that were running when Lift quit continue at launch (resumed). Nothing here deletes downloaded files.
+      responses:
+        '200':
+          description: The downloads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/pause:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_pause
+      summary: Pause a running or waiting download (stops hf download's process group). The files stay.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/resume:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_resume
+      summary: Resume a paused download; hf download picks up from its .incomplete files.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_cancel
+      summary: Stop a download. What's downloaded stays in the cache, so downloading it again resumes.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/retry:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_retry
+      summary: Start a failed or cancelled download again, from what is already in the cache.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/position:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_reorder
+      summary: Move a waiting download to a 0-based position among the waiting ones (0 runs next).
+      parameters: [{ name: position, in: query, required: true, description: 0-based position among queued downloads., schema: { type: integer, minimum: 0 } }]
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadList' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/recipes:
     get:
       operationId: recipes_list
@@ -548,7 +622,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: settings_set
-      summary: 'Set one setting: max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats, cleanup_after_export, notifications, launch_at_login, menu_bar or port (port applies on the next server start).'
+      summary: 'Set one setting: max_slots, max_downloads, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats, cleanup_after_export, notifications, launch_at_login, menu_bar or port (port applies on the next server start).'
       requestBody:
         required: true
         content:
@@ -645,6 +719,8 @@ components:
   parameters:
     JobId:
       { name: id, in: path, required: true, description: The job's id., schema: { type: string } }
+    DownloadId:
+      { name: id, in: path, required: true, description: The download id (downloads_list)., schema: { type: string } }
     ModelId:
       { name: id, in: path, required: true, description: 'The model (recipe) id, e.g. pixal3d.', schema: { type: string } }
     Confirm:
@@ -803,6 +879,40 @@ components:
         disk_bytes: { type: integer }
         weights: { $ref: '#/components/schemas/WeightsReport' }
         progress: { $ref: '#/components/schemas/InstallProgress' }
+        download: { $ref: '#/components/schemas/Download' }
+    Download:
+      type: object
+      description: One weights download. state is queued, downloading, paused, failed, done or cancelled; reason says why it failed (or the retry under way) in plain words, and link is the page whose terms to accept for gated access.
+      required: [id, model, weights, state, downloaded_bytes, attempts, resumed, position, created_at]
+      properties:
+        id: { type: string }
+        model: { type: string }
+        weights:
+          type: array
+          items:
+            type: object
+            required: [repo, revision, gated]
+            properties:
+              repo: { type: string }
+              revision: { type: string }
+              gated: { type: boolean }
+              files: { type: array, items: { type: string } }
+        state: { type: string, enum: [queued, downloading, paused, failed, done, cancelled] }
+        total_bytes: { type: integer }
+        downloaded_bytes: { type: integer }
+        reason: { type: string }
+        link: { type: string }
+        attempts: { type: integer }
+        resumed: { type: boolean, description: Picked up again at launch after Lift quit mid-download. }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    DownloadList:
+      type: object
+      required: [downloads]
+      properties:
+        downloads: { type: array, items: { $ref: '#/components/schemas/Download' } }
     InstallProgress:
       type: object
       description: While weights download, the bytes in the Hugging Face cache so far out of the recipe's weights total (from the Hub's file sizes). Absent in other phases, or offline.
@@ -907,6 +1017,7 @@ components:
       additionalProperties: true
       properties:
         max_slots: { type: integer }
+        max_downloads: { type: integer, minimum: 1, maximum: 3, description: Weights downloads that run at once (default 1). }
         memory_budget_gb: { type: number }
         idle_unload_minutes: { type: number }
         dev_recipes: { type: boolean }

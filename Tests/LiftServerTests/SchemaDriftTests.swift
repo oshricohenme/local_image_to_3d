@@ -137,7 +137,13 @@ import Testing
             throw LiftError.invalidState("test-cube recipe didn't load")
         }
         return ModelView(id: "test-cube", name: "Test Cube", source: "bundled", status: .installed(commit: "c"), recipe: recipe, pin: "p",
-                         diskBytes: 1, weights: weights, progress: InstallProgress(downloadedBytes: 1, totalBytes: 2))
+                         diskBytes: 1, weights: weights, progress: InstallProgress(downloadedBytes: 1, totalBytes: 2), download: download)
+    }
+
+    static var download: Download {
+        Download(id: "d1", model: "test-cube", weights: [Recipe.Weight(repo: "o/r", revision: "main", gated: true, files: ["w.bin"])],
+                 state: .failed, totalBytes: 2, downloadedBytes: 1, reason: "Accept o/r's terms on Hugging Face",
+                 link: URL(string: "https://huggingface.co/o/r")!, attempts: 1, resumed: true, position: 1, createdAt: at, startedAt: at, finishedAt: at)
     }
 
     static var worker: WorkerView {
@@ -176,6 +182,8 @@ import Testing
         try Self.verify(UpstreamStatus(pin: "p", head: "h", commitsAhead: 1), "UpstreamStatus")
         let listing = RecipeListing(id: "test-cube", name: "Test Cube", source: "bundled", state: .needsNewerLift, detail: "d")
         try Self.verify(RecipesOut(recipes: [listing]), "RecipeList")
+        try Self.verify(Self.download, "Download")
+        try Self.verify(DownloadListOut(downloads: [Self.download]), "DownloadList")
     }
 
     @Test func workersResourcesAndSystem() throws {

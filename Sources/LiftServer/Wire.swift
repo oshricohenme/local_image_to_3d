@@ -74,6 +74,7 @@ struct QueueOut: Encodable {
 }
 
 struct ModelListOut: Encodable { var models: [ModelView] }
+struct DownloadListOut: Encodable { var downloads: [Download] }
 struct WorkerListOut: Encodable { var workers: [WorkerView] }
 struct UninstalledOut: Encodable { var model: ModelView? }
 struct DeletedOut: Encodable { var deleted: Bool }
