@@ -106,6 +106,8 @@ public struct WeightsReport: Codable, Sendable, Equatable {
     /// Set when Lift was offline and checked against the file lists of the last good check, made at this time.
     public var metadataFrom: Date?
     public var note: String?
+    /// Informational, never blocking: a branch/tag that has moved upstream past the downloaded commit.
+    public var upstreamMoved: [String] = []
 }
 
 extension WeightsReport {
@@ -153,9 +155,33 @@ public struct WeightsVerifier: Sendable {
         self.store = store
     }
 
+    func repoDir(_ repo: String) -> URL { hub.appending(path: "models--" + repo.replacingOccurrences(of: "/", with: "--")) }
+
     /// `models--org--name/snapshots/<commit>` for a repo.
     public func snapshotDir(repo: String, commit: String) -> URL {
-        hub.appending(path: "models--" + repo.replacingOccurrences(of: "/", with: "--")).appending(path: "snapshots/\(commit)")
+        repoDir(repo).appending(path: "snapshots/\(commit)")
+    }
+
+    /// The commit the local cache has for a revision: the revision itself if it's a sha, else `refs/<revision>`.
+    func localCommit(repo: String, revision: String) -> String? {
+        if revision.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) != nil { return revision }
+        let ref = (try? String(contentsOf: repoDir(repo).appending(path: "refs/\(revision)"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ref?.isEmpty == false ? ref : nil
+    }
+
+    /// The file list to check against: that of the locally downloaded commit when there is one (a branch
+    /// moving upstream doesn't make local weights "missing"), else that of the revision as the API resolves it.
+    func snapshot(for w: Recipe.Weight, report: inout WeightsReport) async throws -> RepoSnapshot {
+        guard let local = localCommit(repo: w.repo, revision: w.revision) else {
+            return try await metadata.snapshot(repo: w.repo, revision: w.revision)
+        }
+        var s = try await metadata.snapshot(repo: w.repo, revision: local)
+        s.revision = w.revision
+        if local != w.revision, let head = try? await metadata.snapshot(repo: w.repo, revision: w.revision), head.commit != local {
+            report.upstreamMoved.append("\(w.repo): \(w.revision) is at \(head.commit.prefix(7)) upstream; checked the downloaded \(local.prefix(7))")
+        }
+        return s
     }
 
     /// Total bytes of the recipe's weights, or nil when the file lists can't be fetched.
@@ -174,22 +200,29 @@ public struct WeightsVerifier: Sendable {
         guard !recipe.weights.isEmpty else { return report }
         var snapshots: [RepoSnapshot] = []
         do {
-            for w in recipe.weights { snapshots.append(try await metadata.snapshot(repo: w.repo, revision: w.revision)) }
-        } catch WeightsMetadataError.offline {
+            for w in recipe.weights { snapshots.append(try await snapshot(for: w, report: &report)) }
+        } catch let error as WeightsMetadataError {
+            // Offline, an outage (5xx) or a rate limit (429): fall back to the last good check's file lists.
+            // A refusal (401/403/404) is an answer, not an outage: unknown.
+            let why: String
+            switch error {
+            case .offline: why = "offline"
+            case .http(let status, _) where status == 429 || status >= 500: why = "Hugging Face unavailable (HTTP \(status))"
+            case .http(let status, let repo):
+                report.state = .unknown
+                report.note = "Hugging Face answered \(status) for \(repo)" + ([401, 403].contains(status) ? " (gated: needs a token with access)" : "")
+                return report
+            }
             let wanted = Set(recipe.weights.map { "\($0.repo)@\($0.revision)" })
             guard let last = try await store.db.read({ try WeightCheckRecord.fetchOne($0, key: recipe.id) }),
                   Set(last.snapshots.map { "\($0.repo)@\($0.revision)" }) == wanted else {
                 report.state = .unknown
-                report.note = "offline, and these weights have never been verified"
+                report.note = "\(why), and these weights have never been verified"
                 return report
             }
             snapshots = last.snapshots
             report.metadataFrom = last.at
-            report.note = "offline: checked against the file lists from the last good check"
-        } catch WeightsMetadataError.http(let status, let repo) {
-            report.state = .unknown
-            report.note = "Hugging Face answered \(status) for \(repo)" + ([401, 403].contains(status) ? " (gated: needs a token with access)" : "")
-            return report
+            report.note = "\(why): checked against the file lists from the last good check"
         }
 
         for s in snapshots {

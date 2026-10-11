@@ -7,9 +7,20 @@ import Testing
 /// File lists by `repo@revision`. Never touches the network. Unknown repos answer 404.
 final class FakeMetadata: WeightsMetadata {
     private let answers = Mutex<[String: Result<RepoSnapshot, any Error>]>([:])
+    /// Repo-wide failures (offline, an outage): every revision fails until the next `set`.
+    private let down = Mutex<[String: any Error]>([:])
 
+    /// A snapshot answer is also given for its commit, as the real API does.
     func set(_ repo: String, revision: String = "main", _ answer: Result<RepoSnapshot, WeightsMetadataError>) {
-        answers.withLock { $0["\(repo)@\(revision)"] = answer.mapError { $0 as any Error } }
+        down.withLock { $0[repo] = nil }
+        answers.withLock {
+            $0["\(repo)@\(revision)"] = answer.mapError { $0 as any Error }
+            if case .success(let s) = answer { $0["\(repo)@\(s.commit)"] = .success(s) }
+        }
+    }
+
+    func failAll(_ repo: String, _ error: WeightsMetadataError) {
+        down.withLock { $0[repo] = error }
     }
 
     /// Any error, e.g. a `DecodingError` from a malformed API answer.
@@ -18,6 +29,7 @@ final class FakeMetadata: WeightsMetadata {
     }
 
     func snapshot(repo: String, revision: String) async throws -> RepoSnapshot {
+        if let e = down.withLock({ $0[repo] }) { throw e }
         guard let a = answers.withLock({ $0["\(repo)@\(revision)"] }) else { throw WeightsMetadataError.http(status: 404, repo: repo) }
         return try a.get()
     }
@@ -25,11 +37,15 @@ final class FakeMetadata: WeightsMetadata {
 
 func sha256Hex(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
-/// Writes files the way `hf download` lays them out: `blobs/<sha>` plus `snapshots/<commit>/<path>` symlinks.
-/// Returns the snapshot the API would report.
+/// Writes files the way `hf download` lays them out: `blobs/<sha>`, `snapshots/<commit>/<path>` symlinks and
+/// `refs/<ref>` holding the commit. Returns the snapshot the API would report.
 @discardableResult
-func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data], lfs: Set<String>) throws -> RepoSnapshot {
+func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data], lfs: Set<String>, ref: String? = "main") throws -> RepoSnapshot {
     let root = hub.appending(path: "models--" + repo.replacingOccurrences(of: "/", with: "--"))
+    if let ref {
+        try FileManager.default.createDirectory(at: root.appending(path: "refs"), withIntermediateDirectories: true)
+        try commit.write(to: root.appending(path: "refs/\(ref)"), atomically: true, encoding: .utf8)
+    }
     var remote: [RemoteFile] = []
     for (path, data) in files.sorted(by: { $0.key < $1.key }) {
         let sha = sha256Hex(data)
@@ -101,7 +117,7 @@ func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data],
 
     @Test func revisionsAreRespected() async throws {
         let (meta, hub, v) = try setup()
-        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a": Data([1])], lfs: [])
+        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a": Data([1])], lfs: [], ref: "v2")
         snap.revision = "v2"
         meta.set("org/model", revision: "v2", .success(snap))
         #expect(try await v.verify(try recipe([Recipe.Weight(repo: "org/model", revision: "v2")])).state == .ok)
@@ -113,9 +129,45 @@ func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data],
         let snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1, 2])], lfs: ["a.bin"])
         meta.set("org/model", .success(snap))
         #expect(try await v.verify(try recipe()).state == .ok)
-        meta.set("org/model", .failure(.offline))
+        meta.failAll("org/model", .offline)
         let offline = try await v.verify(try recipe())
         #expect(offline.state == .ok && offline.metadataFrom != nil && offline.note?.contains("offline") == true)
+    }
+
+    /// I5: `main` moved upstream (say, a README push); the commit that was downloaded is what gets checked.
+    @Test func verifiesTheDownloadedCommitNotTheMovingBranch() async throws {
+        let (meta, hub, v) = try setup()
+        let local = String(repeating: "a", count: 40), upstream = String(repeating: "b", count: 40)
+        let snapA = try writeHFCache(hub: hub, repo: "org/model", commit: local, files: ["w.bin": Data([1, 2])], lfs: ["w.bin"])  // refs/main = A
+        meta.set("org/model", revision: local, .success(snapA))
+        meta.set("org/model", .success(RepoSnapshot(repo: "org/model", revision: "main", commit: upstream,
+                                                    files: snapA.files + [RemoteFile(path: "README.md", size: 10)])))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .ok && r.problems.isEmpty)
+        #expect(r.upstreamMoved == ["org/model: main is at bbbbbbb upstream; checked the downloaded aaaaaaa"])
+    }
+
+    /// I6: a Hugging Face outage (5xx) or rate limit (429) behaves like offline.
+    @Test(arguments: [503, 429])
+    func outageFallsBackToTheLastGoodCheck(status: Int) async throws {
+        let (meta, hub, v) = try setup()
+        let snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1])], lfs: ["a.bin"])
+        meta.failAll("org/model", .http(status: status, repo: "org/model"))
+        let never = try await v.verify(try recipe())
+        #expect(never.state == .unknown && never.note?.contains("\(status)") == true)
+        meta.set("org/model", .success(snap))
+        #expect(try await v.verify(try recipe()).state == .ok)
+        meta.failAll("org/model", .http(status: status, repo: "org/model"))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .ok && r.metadataFrom != nil && r.note?.contains("\(status)") == true)
+    }
+
+    @Test func notFoundStaysUnknownEvenAfterAGoodCheck() async throws {
+        let (meta, hub, v) = try setup()
+        meta.set("org/model", .success(try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1])], lfs: [])))
+        #expect(try await v.verify(try recipe()).state == .ok)
+        meta.failAll("org/model", .http(status: 404, repo: "org/model"))
+        #expect(try await v.verify(try recipe()).state == .unknown)
     }
 
     @Test func offlineWithoutAGoodCheckIsUnknown() async throws {
