@@ -69,6 +69,62 @@ import Testing
         #expect(access.repoAccess == ["facebook/dinov3-vitl16-pretrain-lvd1689m": true, "briaai/RMBG-2.0": false] && !access.granted)
     }
 
+    @Test func aValidKeyAlwaysAllowsContinueAndSaysWhichTermsAreStillOpen() async throws {
+        let dino = "facebook/dinov3-vitl16-pretrain-lvd1689m", rmbg = "briaai/RMBG-2.0"
+        for (granted, label, waiting) in [([String: Bool](), "Continue anyway", [rmbg, dino]), ([rmbg: true], "Continue anyway", [dino]),
+                                          ([rmbg: true, dino: true], "Continue", [])] {
+            let app = try await UIFixtures.devApp(hf: FakeHF(users: ["hf_good": "ada"], access: granted))
+            let access = HFAccess(app.models.first { $0.id == "trellis2-mac" }!)
+            access.token = "hf_good"
+            await access.check(app)
+            #expect(access.canContinue && access.continueLabel == label && access.waiting == waiting, "\(granted)")
+            #expect(access.waiting.map(access.notAccepted) == waiting.map {
+                "You haven't accepted the terms for \($0) yet — downloads for it will fail until you do."
+            })
+            await app.close()
+        }
+    }
+
+    @Test func anInvalidKeyKeepsContinueOff() async throws {
+        let app = try await UIFixtures.devApp(hf: FakeHF(users: ["hf_good": "ada"], access: ["briaai/RMBG-2.0": true]))
+        defer { Task { await app.close() } }
+        let access = HFAccess(app.models.first { $0.id == "pixal3d" }!)
+        #expect(!access.canContinue)  // nothing checked yet
+        access.token = "hf_typo"
+        await access.check(app)
+        #expect(!access.canContinue && access.continueLabel == "Continue anyway")
+    }
+
+    @Test func oneRepoThatCantBeCheckedDoesntSinkTheOthers() async throws {
+        struct Flaky: HFAccount {
+            func whoami(token: String) async throws -> String? { "ada" }
+            func canAccess(repo: String, token: String) async throws -> Bool {
+                if repo == "briaai/RMBG-2.0" { throw LiftError.notFound("briaai/RMBG-2.0 on Hugging Face") }
+                return true
+            }
+            func size(of weights: [Recipe.Weight]) async -> Int? { nil }
+        }
+        let app = try await UIFixtures.devApp(hf: Flaky())
+        defer { Task { await app.close() } }
+        let access = HFAccess(app.models.first { $0.id == "trellis2-mac" }!)
+        access.token = "hf_any"
+        await access.check(app)
+        #expect(access.repoAccess == ["facebook/dinov3-vitl16-pretrain-lvd1689m": true] && access.problem == nil)
+        #expect(access.unchecked == ["briaai/RMBG-2.0"] && access.canContinue)
+    }
+
+    /// The answers of `/api/models/<repo>/auth-check`, read the way huggingface_hub's `auth_check` does: the
+    /// `X-Error-Code` header first (a gated repo you haven't accepted is 401 or 403 with `GatedRepo`).
+    @Test func authCheckAnswersMapLikeHuggingFaceHub() throws {
+        #expect(try HuggingFaceAccount.access(status: 200, errorCode: nil))
+        #expect(try !HuggingFaceAccount.access(status: 403, errorCode: "GatedRepo"))
+        #expect(try !HuggingFaceAccount.access(status: 401, errorCode: "GatedRepo"))
+        #expect(try !HuggingFaceAccount.access(status: 403, errorCode: nil))
+        #expect(throws: LiftError.self) { try HuggingFaceAccount.access(status: 404, errorCode: "RepoNotFound") }
+        #expect(throws: LiftError.self) { try HuggingFaceAccount.access(status: 401, errorCode: "RepoNotFound") }
+        #expect(throws: LiftError.self) { try HuggingFaceAccount.access(status: 500, errorCode: nil) }
+    }
+
     @Test func settingsCoversEveryGatedRepoAndChecksTheKeptKey() async throws {
         let app = try await UIFixtures.devApp(hf: FakeHF(users: ["hf_kept": "ada"], access: ["briaai/RMBG-2.0": true]))
         defer { Task { await app.close() } }

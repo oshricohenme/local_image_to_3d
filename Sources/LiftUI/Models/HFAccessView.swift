@@ -16,9 +16,20 @@ struct HFAccessView: View {
                 }
                 ForEach(Array(access.repos.enumerated()), id: \.element) { i, repo in
                     Divider()
-                    row(2 + i, "Accept the terms for \(access.names[i]) (\(repo))", status: access.repoAccess[repo] == true ? "Access granted ✓" : "Waiting") {
+                    row(2 + i, "Accept the terms for \(access.names[i]) (\(repo))", status: repoStatus(repo)) {
                         Button("Open Page") { openURL(URL(string: "https://huggingface.co/\(repo)")!) }
                             .accessibilityLabel("Open the page for \(repo)")
+                    }
+                    if access.user != nil && access.repoAccess[repo] != true {
+                        HStack {
+                            Label(access.unchecked.contains(repo) ? "Lift couldn't check \(repo) just now." : access.notAccepted(repo),
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Check Again") { Task { await access.check(app) } }.disabled(access.busy)
+                                .accessibilityLabel("Check \(repo) again")
+                        }
+                        .padding(.horizontal, 16).padding(.leading, 38).padding(.bottom, 12)
                     }
                 }
                 Divider()
@@ -40,11 +51,12 @@ struct HFAccessView: View {
             if let problem = access.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
-            if access.user != nil && !access.granted {
-                Text("After accepting the terms on each page, press Check Again.").foregroundStyle(.secondary)
-            }
         }
         .task { if access.user == nil && app.secrets.get(.hfToken) != nil { await access.check(app) } }
+    }
+
+    func repoStatus(_ repo: String) -> String {
+        access.repoAccess[repo] == true ? "Access granted ✓" : access.user == nil ? "Waiting for your key" : "Not accepted yet"
     }
 
     func row(_ n: Int, _ title: String, status: String?, @ViewBuilder action: () -> some View) -> some View {
@@ -67,7 +79,7 @@ struct HFAccessView: View {
 }
 
 /// Before installing a model with gated weights while no key is kept: why, the checklist, then Continue on to
-/// the install's own confirmation once every repo is open.
+/// the install's own confirmation once the key is valid ("Continue anyway" while a repo's terms are still open).
 struct HFAccessSheet: View {
     let app: AppModel
     let access: HFAccess
@@ -82,8 +94,8 @@ struct HFAccessSheet: View {
             HStack {
                 Spacer()
                 Button("Not Now", role: .cancel) { app.accessBeforeInstall = nil }.keyboardShortcut(.cancelAction)
-                Button("Continue") { app.continueAfterAccess() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(!access.granted)
+                Button(access.continueLabel) { app.continueAfterAccess() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(!access.canContinue)
             }
         }
         .padding(20)

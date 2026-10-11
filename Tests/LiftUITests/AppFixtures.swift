@@ -18,13 +18,13 @@ extension UIFixtures {
     /// `check` stands in for the toolchain check (every tool present by default), `hf` for Hugging Face, and the
     /// engine's weights metadata is always offline, so no test talks to the network.
     @MainActor static func newApp(_ prefs: MemoryPrefs = MemoryPrefs(), bundle: URL? = nil, check: AppModel.PrereqsCheck? = { _ in readyTools },
-                                  hf: FakeHF = FakeHF()) throws -> AppModel {
+                                  hf: any HFAccount = FakeHF()) throws -> AppModel {
         AppModel(defaults: prefs, paths: AppPaths(bundledRecipes: try bundle ?? cubeBundle(), workerSource: workerSource, bridge: nil),
                  secrets: MemorySecretStore(), serverPort: 0, checkPrereqs: check, hf: hf, weightsMetadata: OfflineHub())
     }
 
     /// An app whose bundle is all of `dev-recipes/` (Pixal3D, TRELLIS.2, UniRig, Test Cube), opened on a temp workdir.
-    @MainActor static func devApp(hf: FakeHF = FakeHF()) async throws -> AppModel {
+    @MainActor static func devApp(hf: any HFAccount = FakeHF()) async throws -> AppModel {
         let app = try newApp(bundle: devRecipes, hf: hf)
         #expect(await app.open(try tempDir().appending(path: "workdir")))
         return app

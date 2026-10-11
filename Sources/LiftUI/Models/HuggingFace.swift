@@ -22,17 +22,25 @@ public struct HuggingFaceAccount: HFAccount {
     /// `GET /api/whoami-v2`: 200 with the account, 401 for a bad key.
     public func whoami(token: String) async throws -> String? {
         struct Who: Decodable { var name: String }
-        let (data, status) = try await get("api/whoami-v2", token: token)
+        let (data, response) = try await request("api/whoami-v2", token: token)
+        let status = response.statusCode
         if status == 401 { return nil }
         guard status == 200 else { throw LiftError.invalidState("Hugging Face answered \(status)") }
         return try JSONDecoder().decode(Who.self, from: data).name
     }
 
-    /// `GET /api/models/<repo>/auth-check` (what `huggingface_hub.auth_check` uses): 200 granted, 401/403 not yet.
+    /// `GET /api/models/<repo>/auth-check` with the key as a bearer token, as `huggingface_hub.auth_check` does.
     public func canAccess(repo: String, token: String) async throws -> Bool {
-        let (_, status) = try await get("api/models/\(repo)/auth-check", token: token)
-        if [401, 403].contains(status) { return false }
-        guard status == 200 else { throw LiftError.invalidState("Hugging Face answered \(status) for \(repo)") }
+        let (_, response) = try await request("api/models/\(repo)/auth-check", token: token)
+        return try Self.access(status: response.statusCode, errorCode: response.value(forHTTPHeaderField: "X-Error-Code"))
+    }
+
+    /// Read like `hf_raise_for_status`: `X-Error-Code` first. 200 is granted; `GatedRepo` (401 or 403) or another
+    /// 401/403 means the terms aren't accepted yet; `RepoNotFound` or 404 means the repo itself is wrong.
+    static func access(status: Int, errorCode: String?) throws -> Bool {
+        if errorCode == "RepoNotFound" || status == 404 { throw LiftError.notFound("that model on Hugging Face") }
+        if errorCode == "GatedRepo" || status == 401 || status == 403 { return false }
+        guard status == 200 else { throw LiftError.invalidState("Hugging Face answered \(status)") }
         return true
     }
 
@@ -47,11 +55,12 @@ public struct HuggingFaceAccount: HFAccount {
         return total
     }
 
-    func get(_ path: String, token: String) async throws -> (Data, Int) {
+    func request(_ path: String, token: String) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: endpoint.appending(path: path), timeoutInterval: 15)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
-        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        guard let http = response as? HTTPURLResponse else { throw LiftError.invalidState("Hugging Face sent no answer") }
+        return (data, http)
     }
 }
 
@@ -68,6 +77,8 @@ public final class HFAccess {
     public private(set) var user: String?
     public private(set) var problem: String?
     public private(set) var repoAccess: [String: Bool] = [:]
+    /// Repos whose access couldn't be checked (e.g. the request failed); the others still are.
+    public private(set) var unchecked: [String] = []
     public private(set) var busy = false
 
     public convenience init(_ model: ModelView) {
@@ -107,13 +118,25 @@ public final class HFAccess {
                 _ = try await app.liveServer.secretsSetHFToken(key)
                 token = ""
             }
+            unchecked = []
             for repo in repos {
-                repoAccess[repo] = try await app.hf.canAccess(repo: repo, token: key)
+                do { repoAccess[repo] = try await app.hf.canAccess(repo: repo, token: key) } catch { unchecked.append(repo) }
             }
         } catch {
             problem = "Lift couldn't reach Hugging Face. Check your internet connection, then press Check again. (\(Format.error(error)))"
         }
     }
 
-    public var granted: Bool { user != nil && repos.allSatisfy { repoAccess[$0] == true } }
+    public var granted: Bool { user != nil && waiting.isEmpty }
+
+    /// Repos whose terms aren't accepted (or couldn't be checked) yet.
+    public var waiting: [String] { repos.filter { repoAccess[$0] != true } }
+
+    /// A valid key is enough to go on: a repo still waiting only makes its downloads fail until it's accepted.
+    public var canContinue: Bool { user != nil }
+    public var continueLabel: String { granted ? "Continue" : "Continue anyway" }
+
+    public func notAccepted(_ repo: String) -> String {
+        "You haven't accepted the terms for \(repo) yet — downloads for it will fail until you do."
+    }
 }
