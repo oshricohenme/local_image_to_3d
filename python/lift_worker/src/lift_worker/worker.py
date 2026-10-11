@@ -18,9 +18,10 @@ from .stages import StageParser
 def load_launcher(cfg: dict):
     """Import the recipe's launcher.py and check its stage patterns compile."""
     StageParser(cfg.get("stages", []))
-    repo = cfg.get("repo_dir")
-    if repo and repo not in sys.path:
-        sys.path.insert(0, repo)
+    # The recipe's own code (files/) and the upstream repo are importable; files/ first.
+    for path in (cfg.get("repo_dir"), os.path.join(cfg["recipe_dir"], "files") if cfg.get("recipe_dir") else None):
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
     spec = importlib.util.spec_from_file_location("lift_launcher", cfg["launcher"])
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

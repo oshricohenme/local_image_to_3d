@@ -6,6 +6,7 @@ import sys
 import time
 
 import trimesh
+from cube_helpers import extents  # from this recipe's files/
 
 
 def load(ctx):
@@ -33,5 +34,5 @@ def run(state, job):
         shutil.copyfile(job.inputs["mesh"], out)
         return [out]
     out = os.path.join(job.out_dir, "cube.glb")
-    trimesh.creation.box(extents=[float(s["size"])] * 3).export(out)
+    trimesh.creation.box(extents=extents(s["size"])).export(out)
     return [out]

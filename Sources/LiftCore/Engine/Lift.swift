@@ -107,7 +107,6 @@ public actor Lift {
     var installing: [String: Task<Void, Never>] = [:]
     /// What an install or download is doing now: installing, downloading weights, verifying weights.
     var phases: [String: String] = [:]
-    var staleSources: Set<String> = []
     /// The last bundled-recipes sync (first launch or app update).
     var bundleSync = BundledRecipes.Result(copied: false, keptLocal: [])
     var weightReports: [String: WeightsReport] = [:]
@@ -197,7 +196,8 @@ public actor Lift {
 
     // MARK: recipes and models
 
-    /// `bundled-local` (your edited bundled recipes) first, then `bundled`, then git sources in the order added.
+    /// `bundled-local` (your edited bundled recipes) first, then `bundled`. Recipes are the only entry point:
+    /// there are no other sources (spec §4).
     var sourceDirs: [RecipeSourceDir] {
         let b = bundled
         var out: [RecipeSourceDir] = []
@@ -207,7 +207,6 @@ public actor Lift {
                                        shared: FileManager.default.fileExists(atPath: localShared.path) ? localShared : b.copyDir.appending(path: "shared")))
         }
         out.append(RecipeSourceDir(name: "bundled", dir: b.copyDir))
-        out += settings.recipeSources.map { RecipeSourceDir(name: $0.name, dir: recipesDir.appending(path: $0.name)) }
         return out
     }
 

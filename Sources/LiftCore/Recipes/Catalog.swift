@@ -15,6 +15,8 @@ public enum CatalogProblem: Codable, Sendable, Equatable {
     case invalid(source: String, folder: String, message: String)
     case needsNewerLift(source: String, id: String, schema: Int)
     case duplicate(id: String, kept: String, ignored: String)
+    /// A developer recipe (the Test Cube) while the `dev_recipes` setting is off.
+    case developerHidden(source: String, id: String)
 }
 
 /// A folder of recipe folders, and the `shared/` its recipes use.
@@ -48,7 +50,7 @@ public struct Catalog: Sendable {
             where !folder.lastPathComponent.hasPrefix(".") && folder.lastPathComponent != "shared" && FileManager.default.fileExists(atPath: folder.appending(path: "recipe.yaml").path) {
                 switch RecipeLoad.read(directory: folder) {
                 case .ok(let recipe) where recipe.developer && !includeDeveloper:
-                    continue
+                    catalog.problems.append(.developerHidden(source: name, id: recipe.id))
                 case .ok(let recipe):
                     if let kept = catalog.entries[recipe.id] {
                         catalog.problems.append(.duplicate(id: recipe.id, kept: kept.source, ignored: name))
@@ -127,50 +129,5 @@ public struct ShimConfig: Codable, Sendable, Equatable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         return String(decoding: try! encoder.encode(self), as: UTF8.self)
-    }
-}
-
-/// Git recipe sources under `<workdir>/recipes/<name>/`.
-public struct RecipeSources: Sendable {
-    let runner: any CommandRunner
-    let root: URL
-    let environment: [String: String]
-    let git: String
-
-    public init(runner: any CommandRunner, root: URL, git: String, environment: [String: String]) {
-        self.runner = runner
-        self.root = root
-        self.git = git
-        self.environment = environment
-    }
-
-    public func directory(_ name: String) -> URL { root.appending(path: name) }
-
-    /// Folder name for a URL: its last path component without `.git`, made unique among `taken`.
-    public static func name(for url: String, taken: Set<String>) -> String {
-        var base = URL(string: url)?.deletingPathExtension().lastPathComponent ?? "source"
-        if base.isEmpty || base == "/" { base = "source" }
-        var name = base
-        var n = 2
-        while taken.contains(name) {
-            name = "\(base)-\(n)"
-            n += 1
-        }
-        return name
-    }
-
-    public func clone(url: String, name: String, onLine: @escaping @Sendable (String) -> Void = { _ in }) async throws {
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try await runner.check(ShellCommand(git, ["clone", "--filter=blob:none", url, directory(name).path], environment: environment), onLine: onLine)
-    }
-
-    /// `git pull --ff-only`. On failure the checkout is untouched, so recipes keep their last good version.
-    public func pull(name: String) async -> Bool {
-        let code = try? await runner.run(ShellCommand(git, ["-C", directory(name).path, "pull", "--ff-only"], environment: environment), onLine: { _ in })
-        return code == 0
-    }
-
-    public func remove(name: String) throws {
-        try FileManager.default.removeItem(at: directory(name))
     }
 }

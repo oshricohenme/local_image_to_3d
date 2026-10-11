@@ -1,11 +1,6 @@
 import Foundation
 import GRDB
 
-public struct RecipeSourceRef: Codable, Sendable, Equatable {
-    public var name: String
-    public var url: String
-}
-
 /// App settings, one `setting` row per key (snake_case key, JSON value). Missing rows mean the default.
 public struct Settings: Codable, Sendable, Equatable {
     public var maxSlots = 1
@@ -13,18 +8,16 @@ public struct Settings: Codable, Sendable, Equatable {
     public var idleUnloadMinutes = 10.0
     public var devRecipes = false
     public var queuePaused = false
-    /// Git recipe sources in the order they were added (first wins on duplicate ids).
-    public var recipeSources: [RecipeSourceRef] = []
     /// Recipe id → commit set by `models_set_pin`.
     public var pinOverrides: [String: String] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case maxSlots = "max_slots", memoryBudgetGB = "memory_budget_gb", idleUnloadMinutes = "idle_unload_minutes"
         case devRecipes = "dev_recipes", queuePaused = "queue_paused"
-        case recipeSources = "recipe_sources", pinOverrides = "pin_overrides"
+        case pinOverrides = "pin_overrides"
     }
 
-    /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, recipes_*, models_set_pin).
+    /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, models_set_pin).
     public static let userKeys: Set<String> = ["max_slots", "memory_budget_gb", "idle_unload_minutes", "dev_recipes"]
 
     public init() {}
@@ -37,7 +30,6 @@ public struct Settings: Codable, Sendable, Equatable {
         idleUnloadMinutes = try c.decodeIfPresent(Double.self, forKey: .idleUnloadMinutes) ?? d.idleUnloadMinutes
         devRecipes = try c.decodeIfPresent(Bool.self, forKey: .devRecipes) ?? d.devRecipes
         queuePaused = try c.decodeIfPresent(Bool.self, forKey: .queuePaused) ?? d.queuePaused
-        recipeSources = try c.decodeIfPresent([RecipeSourceRef].self, forKey: .recipeSources) ?? d.recipeSources
         pinOverrides = try c.decodeIfPresent([String: String].self, forKey: .pinOverrides) ?? d.pinOverrides
     }
 

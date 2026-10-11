@@ -49,7 +49,6 @@ import Testing
         #expect(defaults == Settings())
         #expect(defaults.maxSlots == 1 && defaults.memoryBudgetGB == 48 && defaults.idleUnloadMinutes == 10)
         var s = defaults
-        s.recipeSources = [RecipeSourceRef(name: "lift-recipes", url: "https://example.com/lift-recipes.git")]
         s.pinOverrides = ["pixal3d": String(repeating: "a", count: 40)]
         s.queuePaused = true
         let saved = s

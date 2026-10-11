@@ -126,3 +126,14 @@ def test_unicode_line_separators_stay_inside_one_protocol_line(worker):
     assert {"ev": "log", "job": "j1", "line": "a\u2028b\u2029c\u0085d"} in evs
     # Swift's line splitting treats U+2028/U+2029/U+0085 as line breaks: they must be escaped on the wire.
     assert not any(ch in line for line in w.raw_stdout for ch in "\u2028\u2029\u0085")
+
+
+def test_launcher_imports_from_recipe_files(tmp_path):
+    """A recipe may carry its own code in files/; the launcher imports it like any module."""
+    (tmp_path / "files").mkdir()
+    (tmp_path / "files" / "cube_helper.py").write_text("def answer():\n    return 42\n")
+    (tmp_path / "launcher.py").write_text("from cube_helper import answer\n\ndef run(state, job):\n    return []\n")
+    cfg = json.dumps({"launcher": str(tmp_path / "launcher.py"), "recipe_dir": str(tmp_path)})
+    r = subprocess.run([sys.executable, "-m", "lift_worker", "--check", cfg], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONPATH": str(SRC)})
+    assert r.returncode == 0, r.stderr

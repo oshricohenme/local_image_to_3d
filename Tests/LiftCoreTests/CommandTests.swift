@@ -29,8 +29,6 @@ func weightedBundle() throws -> URL {
         #expect(try await lift.modelsSetPin("test-cube", commit: String(repeating: "a", count: 40)).impact != nil)
         #expect(try await lift.settingsGet().pinOverrides.isEmpty)
         #expect(try await lift.modelsUninstall("test-cube").impact?.contains("stay in the Hugging Face cache") == true)
-        #expect(try await lift.recipesAddSource("https://example.com/recipes.git").impact != nil)
-        #expect(try await lift.recipesListSources().sources.map(\.name) == ["bundled"])
         #expect(try await lift.systemInstallPrereqs().impact?.contains("install native Homebrew") == true)
         #expect(runner.commands.isEmpty)
         #expect(try await lift.modelsGet("test-cube").status == .notInstalled)
@@ -95,25 +93,25 @@ func weightedBundle() throws -> URL {
         #expect(try await lift.modelsList().map(\.id) == ["test-cube"])
     }
 
-    @Test func failedRefreshMarksTheSourceStaleAndKeepsItsRecipes() async throws {
-        let runner = FakeRunner()
-        runner.on("pull --ff-only", code: 1, lines: ["fatal: unable to access: Could not resolve host"])
-        let lift = try await Fixtures.lift(runner, searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
-        _ = try await lift.recipesAddSource("https://example.com/more-recipes.git", confirm: true)
-        // The fake clone wrote nothing; put a recipe where the clone would be.
-        let cube = try String(contentsOf: Fixtures.devRecipes.appending(path: "test-cube/recipe.yaml"), encoding: .utf8)
-        _ = try writeRecipe(cube.replacingOccurrences(of: "id: test-cube", with: "id: cube-two"), id: "cube-two",
-                            in: lift.config.workdir.appending(path: "recipes/more-recipes"))
-        let after = try await lift.recipesRefresh()
-        let source = try #require(after.sources.first { $0.name == "more-recipes" })
-        #expect(source.stale && source.recipes == ["cube-two"])
-    }
-
     @Test func modelsAndRecipesAreListed() async throws {
         let lift = try await Fixtures.lift()
         #expect(try await lift.modelsList().map(\.id) == ["test-cube"])
-        let sources = await lift.recipesListSources()
-        #expect(sources.sources.first?.recipes == ["test-cube"])
-        #expect(sources.problems.isEmpty)
+        #expect(await lift.recipesList() == [RecipeListing(id: "test-cube", name: "Test Cube", source: "bundled", state: .available, detail: nil)])
+    }
+
+    /// Recipes are the only entry point (spec §4): recipes_list shows every recipe found, and why one can't be used.
+    @Test func recipesListShowsProblems() async throws {
+        let b = try Fixtures.tempDir()
+        try BundledRecipes.copy(Fixtures.devRecipes, to: b)
+        _ = try writeRecipe("schema: 9\nid: future\n", id: "future", in: b)
+        _ = try writeRecipe("schema: 1\nid: broken\n", id: "broken", in: b)
+        let lift = try await Fixtures.lift(bundle: b)
+        _ = try await lift.settingsSet("dev_recipes", .bool(false))
+        let listed = Dictionary(uniqueKeysWithValues: await lift.recipesList().map { ($0.id, $0) })
+        #expect(listed["test-cube"]?.state == .developerHidden)
+        #expect(listed["future"]?.state == .needsNewerLift && listed["future"]?.detail?.contains("9") == true)
+        #expect(listed["broken"]?.state == .invalid && listed["broken"]?.detail?.hasPrefix("recipe.yaml:") == true)
+        _ = try await lift.settingsSet("dev_recipes", .bool(true))
+        #expect(await lift.recipesList().first { $0.id == "test-cube" }?.state == .available)
     }
 }

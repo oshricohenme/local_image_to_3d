@@ -81,20 +81,4 @@ import Testing
         none.substitutes = []
         #expect(try ShimConfig.build(none, registry: registry) == nil)
     }
-
-    @Test func sourceNames() {
-        #expect(RecipeSources.name(for: "https://github.com/oshricohenme/lift-recipes.git", taken: []) == "lift-recipes")
-        #expect(RecipeSources.name(for: "https://github.com/x/lift-recipes", taken: ["lift-recipes"]) == "lift-recipes-2")
-    }
-
-    @Test func cloneAndPullRunGit() async throws {
-        let runner = FakeRunner()
-        runner.on("pull --ff-only", code: 1)
-        let root = try Fixtures.tempDir()
-        let sources = RecipeSources(runner: runner, root: root, git: "/usr/bin/git", environment: [:])
-        try await sources.clone(url: "https://example.com/r.git", name: "r")
-        #expect(await sources.pull(name: "r") == false)
-        #expect(runner.displays == ["/usr/bin/git clone --filter=blob:none https://example.com/r.git \(root.path)/r",
-                                    "/usr/bin/git -C \(root.path)/r pull --ff-only"])
-    }
 }

@@ -25,7 +25,10 @@ import Testing
         let entry = try source()
         let inst = try installer(runner)
         let m = inst.dir("pixal3d").path
+        try FileManager.default.createDirectory(at: entry.directory.appending(path: "files"), withIntermediateDirectories: true)
+        try "x = 1\n".write(to: entry.directory.appending(path: "files/helper.py"), atomically: true, encoding: .utf8)
         try await inst.install(entry, pin: nil, onLine: { _ in })
+        #expect(FileManager.default.fileExists(atPath: inst.installedRecipeDir("pixal3d").appending(path: "files/helper.py").path))
         #expect(runner.displays == [
             "/brew/bin/brew install libusb",
             "/bin/git clone --filter=blob:none https://github.com/TencentARC/Pixal3D \(m)/.repo-staging",

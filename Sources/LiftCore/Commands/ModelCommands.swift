@@ -15,18 +15,23 @@ public struct ModelView: Codable, Sendable, Equatable {
     public var weights: WeightsReport?
 }
 
-public struct RecipeSourcesView: Codable, Sendable, Equatable {
-    public struct Source: Codable, Sendable, Equatable {
-        public var name: String
-        /// A git URL, or the local folder for `bundled` / `bundled-local`.
-        public var url: String
-        public var stale: Bool
-        public var recipes: [String]
+/// One recipe found in `bundled-local` / `bundled`, and whether it can be used.
+public struct RecipeListing: Codable, Sendable, Equatable {
+    public enum State: String, Codable, Sendable {
+        case available
+        case needsNewerLift = "needs_newer_lift"
+        case invalid
+        /// A developer recipe (the Test Cube) while the `dev_recipes` setting is off.
+        case developerHidden = "developer_hidden"
+        /// Another source's recipe with the same id is used instead.
+        case shadowed
     }
-    public var sources: [Source]
-    public var problems: [CatalogProblem]
-    /// What the last bundled-recipes sync did (first launch / app update), including edits kept as `bundled-local`.
-    public var bundle: BundledRecipes.Result
+    /// The recipe id (the folder name for an invalid recipe).
+    public var id: String
+    public var name: String?
+    public var source: String
+    public var state: State
+    public var detail: String?
 }
 
 extension Lift {
@@ -200,53 +205,26 @@ extension Lift {
 
     // MARK: recipes
 
-    public func recipesListSources() -> RecipeSourcesView {
-        RecipeSourcesView(
-            sources: sourceDirs.map { s in
-                let url = settings.recipeSources.first { $0.name == s.name }?.url ?? s.dir.path
-                return .init(name: s.name, url: url, stale: staleSources.contains(s.name),
-                             recipes: catalog.entries.values.filter { $0.source == s.name }.map(\.recipe.id).sorted())
-            },
-            problems: catalog.problems, bundle: bundleSync)
-    }
-
-    public func recipesAddSource(_ url: String, confirm: Bool = false) async throws -> Gated<RecipeSourcesView> {
-        guard !url.isEmpty else { throw LiftError.invalidInput([FieldError("url", "required")]) }
-        guard !settings.recipeSources.contains(where: { $0.url == url }) else { throw LiftError.invalidState("source \(url) is already added") }
-        guard confirm else { return .confirmationRequired("Clones \(url) into recipes/ and lists its recipes. Recipes run code from that repo on this Mac.") }
-        guard let git = tools.git else { throw LiftError.prerequisite("git is required; run system_install_prereqs") }
-        let name = RecipeSources.name(for: url, taken: Set(settings.recipeSources.map(\.name) + ["bundled", "bundled-local"]))
-        try await RecipeSources(runner: config.runner, root: recipesDir, git: git, environment: toolchain.environment).clone(url: url, name: name)
-        var s = settings
-        s.recipeSources.append(RecipeSourceRef(name: name, url: url))
-        try saveSettings(s)
-        rescan()
-        tick()
-        return .done(recipesListSources())
-    }
-
-    public func recipesRemoveSource(_ name: String, confirm: Bool = false) throws -> Gated<RecipeSourcesView> {
-        guard settings.recipeSources.contains(where: { $0.name == name }) else { throw LiftError.notFound("source \(name)") }
-        guard confirm else { return .confirmationRequired("Removes recipe source \(name) and its folder. Installed models stay installed.") }
-        try? FileManager.default.removeItem(at: recipesDir.appending(path: name))
-        var s = settings
-        s.recipeSources.removeAll { $0.name == name }
-        try saveSettings(s)
-        staleSources.remove(name)
-        rescan()
-        tick()
-        return .done(recipesListSources())
-    }
-
-    /// Pulls each git source (or just `name`). A failed pull marks the source stale and keeps its last good recipes.
-    public func recipesRefresh(_ name: String? = nil) async throws -> RecipeSourcesView {
-        guard let git = tools.git else { throw LiftError.prerequisite("git is required; run system_install_prereqs") }
-        let sources = RecipeSources(runner: config.runner, root: recipesDir, git: git, environment: toolchain.environment)
-        for ref in settings.recipeSources where name == nil || ref.name == name {
-            if await sources.pull(name: ref.name) { staleSources.remove(ref.name) } else { staleSources.insert(ref.name) }
+    /// Every recipe found, available or not (spec §4: recipes are the only entry point).
+    public func recipesList() -> [RecipeListing] {
+        var out = catalog.entries.values.map {
+            RecipeListing(id: $0.recipe.id, name: $0.recipe.name, source: $0.source, state: .available, detail: nil)
         }
-        rescan()
-        tick()
-        return recipesListSources()
+        for p in catalog.problems {
+            switch p {
+            case .invalid(let source, let folder, let message):
+                out.append(RecipeListing(id: folder, name: nil, source: source, state: .invalid, detail: message))
+            case .needsNewerLift(let source, let id, let schema):
+                out.append(RecipeListing(id: id, name: nil, source: source, state: .needsNewerLift, detail: "recipe schema \(schema); this Lift reads \(Recipe.supportedSchema)"))
+            case .duplicate(let id, let kept, let ignored):
+                out.append(RecipeListing(id: id, name: nil, source: ignored, state: .shadowed, detail: "the copy in \(kept) is used"))
+            case .developerHidden(let source, let id):
+                out.append(RecipeListing(id: id, name: nil, source: source, state: .developerHidden, detail: "turn on the dev_recipes setting to use it"))
+            }
+        }
+        return out.sorted { ($0.id, $0.source) < ($1.id, $1.source) }
     }
+
+    /// What the last bundled-recipes sync did (first launch / app update), incl. edits kept in `bundled-local`.
+    public func recipesBundleSync() -> BundledRecipes.Result { bundleSync }
 }
