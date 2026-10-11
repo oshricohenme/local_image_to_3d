@@ -29,6 +29,19 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: path))
     }
 
+    @Test func aBase64InputNameCannotLeaveTheUploadsFolder() throws {
+        let workdir = try Fixtures.tempDir()
+        let key = "a/../../../escaped"
+        let wire = SubmitWire(steps: [.init(recipe: "test-cube", task: "image_to_3d",
+                                            inputs: ["\(key)_base64": Data("x".utf8).base64EncodedString(), "\(key)_filename": "evil.plist"], settings: nil)])
+        let inputs = Inputs(workdir: workdir)
+        do { _ = try inputs.resolve(wire, source: .http); Issue.record("accepted") } catch let LiftError.invalidInput(e) {
+            #expect(e.map(\.field) == ["steps[0].inputs.\(key)_base64"])
+        }
+        // Nothing lands in the workdir outside uploads/.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: workdir.path).filter { $0 != "uploads" } == [])
+    }
+
     @Test func badInputsAreFieldErrors() throws {
         #expect(errors(["image_base64": "%%%"]) == ["steps[0].inputs.image_base64"])
         #expect(errors(["image_filename": "a.png"]) == ["steps[0].inputs.image_filename"])

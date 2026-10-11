@@ -68,6 +68,11 @@ struct Inputs {
                     set(String(key.dropLast("_path".count)), value, key)
                 } else if key.hasSuffix("_base64") {
                     let name = String(key.dropLast("_base64".count))
+                    // The name becomes a folder under uploads/: letters, digits and _ only, so it can't climb out.
+                    guard name.wholeMatch(of: /[A-Za-z0-9_]+/) != nil else {
+                        errors.append(FieldError("steps[\(i)].inputs.\(key)", "input names use only letters, digits and _"))
+                        continue
+                    }
                     guard let data = Data(base64Encoded: value, options: .ignoreUnknownCharacters), !data.isEmpty else {
                         errors.append(FieldError("steps[\(i)].inputs.\(key)", "is not valid base64"))
                         continue
