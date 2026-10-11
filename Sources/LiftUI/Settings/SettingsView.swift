@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var prereqs: Prereqs?
     @State private var toolLog: [String] = []
     @State private var choosingWorkdir = false
+    @State private var choosingExportDir = false
 
     var body: some View {
         Form {
@@ -165,6 +166,27 @@ struct SettingsView: View {
                     }
                 }
             }
+            LabeledContent("Export folder") {
+                HStack {
+                    Text(app.settings.exportDir ?? "Not chosen").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Button("Choose…") { choosingExportDir = true }
+                }
+            }
+            .fileImporter(isPresented: $choosingExportDir, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result { app.run { _ = try await app.engine.settingsSet("export_dir", .string(url.path)) } }
+            }
+            LabeledContent("Export these formats by default") {
+                HStack {
+                    ForEach(ExportFormat.allCases, id: \.self) { f in
+                        Toggle(Format.export(f), isOn: Binding(get: { app.settings.exportFormats.contains(f) }, set: { on in
+                            let formats = ExportFormat.allCases.filter { $0 == f ? on : app.settings.exportFormats.contains($0) }
+                            app.run { _ = try await app.engine.settingsSet("export_formats", .string(formats.map(\.rawValue).joined(separator: ","))) }
+                        }))
+                    }
+                }
+            }
+            toggle("Free up space after exporting (deletes Lift's own copy once the files are safely exported)", "cleanup_after_export",
+                   app.settings.cleanupAfterExport)
             if let hub = app.lift?.config.hfHub {
                 LabeledContent("Weights (shared Hugging Face cache)") {
                     HStack {
