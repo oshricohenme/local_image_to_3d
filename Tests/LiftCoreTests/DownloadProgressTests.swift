@@ -88,3 +88,35 @@ extension InstallerTests {
         #expect(phases.withLock { $0 } == ["getting the code", "setting up python", "checking the install"])
     }
 }
+
+/// hf download's own progress (tqdm, also with hf_xet, which may write a blob only when a file is done).
+@Suite struct HFProgressTests {
+    @Test func byteBarsAreSummedPerFileAndCountBarsIgnored() {
+        var p = HFProgress()
+        p.read("Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]", repo: "o/r")  // file count, not bytes
+        #expect(p.bytes == 0)
+        p.read("model.safetensors:   0%|          | 0.00/4.00G [00:00<?, ?B/s]", repo: "o/r")
+        p.read("model.safetensors:  42%|████▏     | 1.68G/4.00G [00:30<00:41, 56.2MB/s]", repo: "o/r")
+        p.read("config.json: 100%|██████████| 512/512 [00:00<00:00, 1.20kB/s]", repo: "o/r")
+        #expect(p.bytes == 1_680_000_512)
+        p.read("model.safetensors:  60%|██████    | 2.40G/4.00G [00:42<00:28, 57.0MB/s]", repo: "o/r")  // the same bar, later
+        #expect(p.bytes == 2_400_000_512)
+        p.read("model.safetensors:  10%|█         | 503M/5.03G [00:05<00:45, 98.6MB/s]", repo: "o/other")  // another repo's file
+        #expect(p.bytes == 2_903_000_512)
+        p.read("Downloading 'model.safetensors' to '/hub/models--o--r/blobs/abc.incomplete'", repo: "o/r")  // not a bar
+        p.read("pytorch_model.bin:  33%|███▎      | 330kB/1.00MB [00:01<00:02, 330kB/s]", repo: "o/r")
+        #expect(p.bytes == 2_903_330_512)
+    }
+}
+
+extension DownloadsTests {
+    @Test func progressFollowsHFsOwnCountWhenTheCacheLagsBehind() async throws {
+        let runner = FakeRunner()
+        runner.on("hf download", lines: ["w.bin:  40%|████      | 400/1.00k [00:01<00:01, 400B/s]"], delay: .seconds(30))  // xet: no blob yet
+        let rig = try await Self.rig(runner: runner)
+        _ = try await rig.lift.modelsDownloadWeights("w1", confirm: true)
+        #expect(try await eventually { try await rig.lift.downloadsList().first?.downloadedBytes == 400 })
+        #expect(try await rig.lift.modelsGet("w1").progress == InstallProgress(downloadedBytes: 400, totalBytes: 1000))
+        await rig.lift.close()
+    }
+}

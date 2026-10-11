@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Synchronization
 
 /// One weights download (spec §6), from models_install, models_download_weights or a retry. Kept in the
 /// database, so a quit mid-download picks up at the next launch. Nothing here ever deletes cache files:
@@ -180,9 +181,14 @@ extension Lift {
             d.totalBytes = total
             try? save(d)
         }
+        // Bytes so far: the cache's blobs (finished or .incomplete), or what was there at the start plus hf's own
+        // count when that's more (hf_xet may write a file's blob only once it's done).
+        let reported = Reported()
+        let baseline = WeightsProgress.downloadedBytes(hub: hub, repos: repos)
         let poll = Task {
             while !Task.isCancelled {
-                await self.progressed(id, downloaded: WeightsProgress.downloadedBytes(hub: hub, repos: repos), total: total)
+                let cache = WeightsProgress.downloadedBytes(hub: hub, repos: repos)
+                await self.progressed(id, downloaded: max(cache, baseline + reported.bytes), total: total)
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -191,7 +197,9 @@ extension Lift {
             do {
                 try? attempt(id)
                 for w in r.weights {
-                    do { try await installer.downloadWeight(r, w, onLine: { _ in }) } catch { throw DownloadFailure(repo: w.repo, error: error) }
+                    do {
+                        try await installer.downloadWeight(r, w, onLine: { line in reported.read(line, repo: w.repo) })
+                    } catch { throw DownloadFailure(repo: w.repo, error: error) }
                 }
                 await finished(id, r, .done)
                 return
@@ -281,4 +289,11 @@ struct DownloadFailure: Error {
             kind = .other("The download of \(repo) stopped: \(last.map(String.init) ?? "\(error)")")
         }
     }
+}
+
+/// hf download's own progress, shared between its output and the poll.
+final class Reported: Sendable {
+    let progress = Mutex(HFProgress())
+    var bytes: Int { progress.withLock { $0.bytes } }
+    func read(_ line: String, repo: String) { progress.withLock { $0.read(line, repo: repo) } }
 }

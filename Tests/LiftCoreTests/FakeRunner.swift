@@ -11,7 +11,7 @@ final class FakeRunner: CommandRunner {
         var code: Int32
         var lines: [String]
         var effect: (@Sendable () -> Void)?
-        /// Runs this long (cancellable, like a process that's killed), after `effect`.
+        /// Runs this long (cancellable, like a process that's killed), after `effect` and its lines.
         var delay: Duration?
         /// Applies to this many matching commands, then no more (nil: always).
         var times: Int?
@@ -36,8 +36,8 @@ final class FakeRunner: CommandRunner {
             return s.rules[i]
         }
         rule?.effect?()
+        for line in rule?.lines ?? [] { onLine(line) }  // printed while it runs
         if let delay = rule?.delay { try await Task.sleep(for: delay) }
-        for line in rule?.lines ?? [] { onLine(line) }
         if (rule?.code ?? 0) == 0, command.arguments.contains("clone"), let dest = command.arguments.last {
             try FileManager.default.createDirectory(atPath: dest + "/.git", withIntermediateDirectories: true)  // like git would
         }
