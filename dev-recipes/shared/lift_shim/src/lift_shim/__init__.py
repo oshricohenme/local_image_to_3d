@@ -33,6 +33,8 @@ def install(config: dict | None = None) -> str:
         apply_env(config.get("env"))
         from .modules import install_module_finder
         install_module_finder(config.get("aliases", {}), config.get("standins", []))
+        from .patches import install_patches
+        install_patches(config.get("patches", []))
         import torch
         if torch.cuda.is_available():
             _result = "cuda"

@@ -48,3 +48,29 @@ def test_standin_used_when_missing():
     assert isinstance(mod, types.ModuleType)
     assert callable(mod.flash_attn_func)
     sys.modules.pop("flash_attn", None)
+
+
+def test_standin_submodule_resolves():
+    for k in [k for k in sys.modules if k == "flash_attn" or k.startswith("flash_attn.")]:
+        sys.modules.pop(k)
+    install_module_finder({}, ["flash_attn"])
+    from flash_attn.modules.mha import MHA
+    import flash_attn
+    assert MHA.__module__ == "lift_shim.standins.flash_attn.modules.mha"
+    assert flash_attn.__version__.endswith("+lift_shim")
+    for k in [k for k in sys.modules if k == "flash_attn" or k.startswith("flash_attn.")]:
+        sys.modules.pop(k)
+
+
+def test_after_import_runs_once_module_has_executed(tmp_path, monkeypatch):
+    from lift_shim.modules import after_import
+    (tmp_path / "hookedmod.py").write_text("VALUE = 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    seen = []
+    after_import("hookedmod", lambda m: seen.append(m.VALUE))
+    assert seen == []  # lazy: nothing until the import
+    import hookedmod  # noqa: F401
+    assert seen == [1]
+    after_import("hookedmod", lambda m: seen.append("now"))  # already imported → immediate
+    assert seen == [1, "now"]
+    sys.modules.pop("hookedmod")

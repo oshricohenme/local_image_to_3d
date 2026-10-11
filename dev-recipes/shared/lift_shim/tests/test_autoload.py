@@ -55,3 +55,30 @@ def test_write_and_remove_pth(tmp_path):
     assert p.read_text().strip() == "import lift_shim.autoload"
     remove_pth(tmp_path)
     assert not p.exists()
+
+
+FA2_PROBE = """
+from transformers import AutoModelForCausalLM, OPTConfig
+cfg = OPTConfig(hidden_size=16, num_hidden_layers=1, num_attention_heads=2, ffn_dim=32, vocab_size=50,
+                max_position_embeddings=32, _attn_implementation="flash_attention_2")
+print(AutoModelForCausalLM.from_config(cfg).config._attn_implementation)
+"""
+
+
+def test_autoload_applies_patches():
+    env = {**os.environ, "LIFT_SHIM": json.dumps({"patches": ["transformers_fa2_to_sdpa"]})}
+    r = subprocess.run([sys.executable, "-c", "import lift_shim.autoload\n" + FA2_PROBE],
+                       env=env, capture_output=True, text=True)
+    assert r.stdout.strip() == "sdpa", r.stderr[-2000:]
+
+
+def test_install_applies_patches():
+    code = "import lift_shim; lift_shim.install({'patches': ['transformers_fa2_to_sdpa']})\n" + FA2_PROBE
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.stdout.strip() == "sdpa", r.stderr[-2000:]
+
+
+def test_autoload_unknown_patch_fails():
+    r = run(json.dumps({"patches": ["nope"]}))
+    assert r.returncode != 0
+    assert "unknown patch" in r.stderr

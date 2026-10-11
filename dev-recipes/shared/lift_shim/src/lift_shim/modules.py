@@ -55,6 +55,43 @@ class _Finder(importlib.abc.MetaPathFinder):
 _finder = _Finder()
 
 
+class _PostImport(importlib.abc.MetaPathFinder):
+    """Wraps a module's own loader so callbacks run right after the module finishes executing."""
+
+    def __init__(self):
+        self.pending: dict[str, list] = {}
+
+    def find_spec(self, name, path=None, target=None):
+        callbacks = self.pending.pop(name, None)
+        if callbacks is None:
+            return None
+        spec = importlib.util.find_spec(name)  # re-enters this finder, but name is no longer pending
+        if spec is None or spec.loader is None:
+            return spec
+        original_exec = spec.loader.exec_module
+
+        def exec_module(module):
+            original_exec(module)
+            for fn in callbacks:
+                fn(module)
+
+        spec.loader.exec_module = exec_module
+        return spec
+
+
+_post_import = _PostImport()
+
+
+def after_import(name: str, fn) -> None:
+    """Run fn(module) once `name` has been imported (immediately if it already is)."""
+    if name in sys.modules:
+        fn(sys.modules[name])
+        return
+    _post_import.pending.setdefault(name, []).append(fn)
+    if _post_import not in sys.meta_path:
+        sys.meta_path.insert(0, _post_import)
+
+
 def install_module_finder(aliases: dict[str, str], standins: list[str]) -> None:
     for name in standins:
         if name not in _STANDINS:
