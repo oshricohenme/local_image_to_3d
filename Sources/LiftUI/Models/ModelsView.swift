@@ -2,101 +2,83 @@ import AppKit
 import LiftCore
 import SwiftUI
 
-enum ModelTab: String, CaseIterable {
-    case about = "About", overview = "Overview", options = "Options", install = "Install", shim = "Mac shim"
-}
-
-/// Recipes grouped by the modalities of their tasks (a recipe can appear in several groups).
-enum ModelGroups {
-    static func by(_ models: [ModelView]) -> [(modality: String, models: [ModelView])] {
-        GenerateModel.modalities.map { id, _ in (id, models.filter { m in m.recipe.tasks.contains { $0.modality == id } }) }
-    }
-}
-
-/// Models (mockup Models.dc.html): recipes by modality, and per recipe Overview and Install (weights
-/// download and verify, the install log under Details) with install, reinstall, uninstall and check upstream.
-/// Developer mode adds Options (raw setting keys), the install commands, Change Pin and the Mac shim
-/// (spec §1: the developer view is opt-in). Recipes come only from Lift (spec §4): no sources to add.
+/// Models (the approved redesign): a library of cards by what each model does, with search and filter chips;
+/// a card opens the model's page. Download progress, Pause and Cancel live on the card. Recipes come only
+/// from Lift (spec §4): no sources to add.
 struct ModelsView: View {
     let app: AppModel
-    @State private var selected: String?
-    @State private var tab = ModelTab.about
-    @State private var detail: ModelView?
-    @State private var note: String?
+    @State private var path: [String] = []
+    @State private var filter = LibraryFilter.all
+    @State private var search = ""
     @State private var listings: [RecipeListing] = []
-    @State private var pinning = false
-    @State private var pin = ""
-    @State private var readme: Readme?
-    @State private var loadingReadme = false
-    /// Weight sizes Hugging Face reported, by model id.
-    @State private var weightBytes: [String: Int] = [:]
 
     var body: some View {
-        HSplitView {
-            List(selection: $selected) {
-                ForEach(ModelGroups.by(app.models), id: \.modality) { group in
-                    Section("\(GenerateModel.modalities.first { $0.0 == group.modality }?.1 ?? group.modality) · \(group.models.count)") {
-                        ForEach(group.models, id: \.id) { row($0) }
+        NavigationStack(path: $path) {
+            library
+                .navigationDestination(for: String.self) { id in
+                    ModelPageView(app: app, id: id) { if !path.isEmpty { path.removeLast() } }
+                }
+        }
+        .task(id: app.models.count) { listings = await app.lift?.recipesList() ?? [] }
+    }
+
+    var library: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Models").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
+                    Text("Open-source models you can run on this Mac. Each one is made by its authors — Lift just runs it.")
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    TextField("Search models", text: $search).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                    ForEach(LibraryFilter.allCases, id: \.self) { f in
+                        Toggle(f.rawValue, isOn: Binding(get: { filter == f }, set: { if $0 { filter = f } }))
+                            .toggleStyle(.button).controlSize(.regular)
+                    }
+                }
+                let sections = Library.sections(app.models, filter: filter, search: search)
+                if sections.isEmpty {
+                    ContentUnavailableView(search.isEmpty ? "No models here yet" : "No models match “\(search)”", systemImage: "shippingbox",
+                                           description: Text(filter == .installed ? "Install one from All: it downloads in the background." : ""))
+                }
+                ForEach(sections, id: \.title) { section in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(section.title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                            ForEach(section.models, id: \.id) { m in
+                                ModelCardView(app: app, model: m) { path.append(m.id) }
+                            }
+                        }
+                    }
+                }
+                let coming = Library.comingSoon(app.models)
+                if !coming.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Coming with Lift updates").font(.headline).foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            ForEach(coming, id: \.self) { name in
+                                Text(name).foregroundStyle(.secondary).frame(width: 140, height: 64)
+                                    .background(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5])).foregroundStyle(.tertiary))
+                            }
+                        }
                     }
                 }
                 let problems = listings.filter { $0.state != .available && $0.state != .developerHidden }
                 if !problems.isEmpty {
-                    Section("Recipes Lift can't use") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Recipes Lift can't use").font(.caption.bold())
                         ForEach(problems.indices, id: \.self) { i in
-                            let l = problems[i]
-                            Text("\(l.name ?? l.id): \(problemText(l))").font(.caption)
+                            Text("\(problems[i].name ?? problems[i].id): \(problemText(problems[i]))").font(.caption)
                         }
                     }
+                    .foregroundStyle(.secondary)
                 }
             }
-            .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
-            detailPane.frame(minWidth: 480, maxWidth: .infinity)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Models")
-        .task(id: app.models.count) { listings = await app.lift?.recipesList() ?? [] }
-        .task(id: selected) { await loadDetail(); await loadReadme(); await loadSize() }
-        .onChange(of: app.models) { Task { await loadDetail() } }
-        .onChange(of: app.developer) { if !app.developer && !tabs.contains(tab) { tab = .about } }
-        .alert("Change pin", isPresented: $pinning) {
-            TextField("40-character commit", text: $pin)
-            Button("Reinstall at this commit") {
-                guard let id = selected else { return }
-                let commit = pin
-                app.gated { confirm in try await app.engine.modelsSetPin(id, commit: commit, confirm: confirm) }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-
-    func row(_ m: ModelView) -> some View {
-        VStack(alignment: .leading) {
-            Text(m.name).bold()
-            if case .installing = m.status {
-                InstallProgressRow(app: app, model: m)
-            } else {
-                Text(Format.status(m.status) + (app.developer ? m.pin.map { " · @" + $0.prefix(7) } ?? "" : "")).font(.caption)
-            }
-        }
-        .foregroundStyle(m.isUnsupported ? .secondary : .primary)
-        .tag(m.id)
-    }
-
-    func loadDetail() async {
-        guard let id = selected, let lift = app.lift else { detail = nil; return }
-        detail = try? await lift.modelsGet(id)
-    }
-
-    func loadReadme() async {
-        readme = nil
-        guard let id = selected, let lift = app.lift else { return }
-        loadingReadme = true
-        defer { loadingReadme = false }
-        readme = try? await lift.modelsReadme(id)
-    }
-
-    func loadSize() async {
-        guard let m = detail, weightBytes[m.id] == nil, !m.recipe.weights.isEmpty else { return }
-        if let bytes = await app.hf.size(of: m.recipe.weights) { weightBytes[m.id] = bytes }
     }
 
     func problemText(_ l: RecipeListing) -> String {
@@ -107,241 +89,165 @@ struct ModelsView: View {
         case .available, .developerHidden: ""
         }
     }
+}
 
-    var tabs: [ModelTab] { app.developer ? ModelTab.allCases : [.about, .overview, .install] }
+/// The task's icon, for a model without a preview image.
+func taskSymbol(_ m: ModelView) -> String {
+    Library.isRigging(m) && !Library.isPhotoTo3D(m) ? "figure.walk" : "cube.transparent"
+}
 
-    @ViewBuilder var detailPane: some View {
-        if let m = detail {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading) {
-                        Text(m.name).font(.title2).bold()
-                        Text("by " + m.recipe.attribution.authors.joined(separator: ", ") + " · " + m.recipe.attribution.license.spdx).foregroundStyle(.secondary)
-                        if let d = m.recipe.description { Text(d).font(.callout) }
-                        let card = ModelCard(m, weightsBytes: weightBytes[m.id])
-                        if let size = card.size { Text(size).font(.callout).foregroundStyle(.secondary) }
-                        if !card.gated.isEmpty {
-                            Label("Needs a free Hugging Face account", systemImage: "person.badge.key.fill").font(.callout.bold())
-                        }
-                        ForEach(card.restrictions, id: \.self) { r in
-                            Label(r, systemImage: "exclamationmark.triangle.fill").font(.callout.bold()).foregroundStyle(.orange)
-                        }
-                    }
-                    Spacer()
-                    actions(m)
-                }
-                if case .installing = m.status { InstallProgressRow(app: app, model: m).frame(maxWidth: 420, alignment: .leading) }
-                if case .unsupported(let reason) = m.status {
-                    Label("Unsupported on this Mac: \(reason)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                }
-                if let note { Text(note).font(.callout).foregroundStyle(.secondary) }
-                Picker("Section", selection: $tab) {
-                    ForEach(tabs, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                ScrollView {
-                    switch tab {
-                    case .about: AboutView(attribution: m.recipe.attribution, readme: readme, loadingReadme: loadingReadme)
-                    case .overview: overview(m)
-                    case .options: options(m)
-                    case .install: install(m)
-                    case .shim: shim(m)
-                    }
-                }
-            }
-            .padding()
-        } else {
-            ContentUnavailableView("Select a recipe", systemImage: "shippingbox")
-        }
-    }
+/// A model's preview: its README's first image, else a neutral tile with the task icon.
+struct PreviewImage: View {
+    let url: URL?
+    let symbol: String
 
-    @ViewBuilder func actions(_ m: ModelView) -> some View {
-        HStack {
-            switch m.status {
-            case .notInstalled, .installFailed:
-                Button("Install") { app.install(m) }
-                    .buttonStyle(.borderedProminent)
-            case .installing(let phase):
-                Button("Cancel") { app.run { _ = try await app.engine.modelsCancelInstall(m.id) } }
-                    .disabled(phase == "cancelling")
-                    .help("Stops the install. Downloaded files stay, so it picks up from there next time.")
-            case .unsupported:
-                EmptyView()
-            default:
-                if app.developer { Button("Change Pin…") { pin = m.pin ?? ""; pinning = true } }
-                Button("Reinstall") { app.gated { confirm in try await app.engine.modelsReinstall(m.id, confirm: confirm) } }
-                Button("Reveal in Finder") {
-                    if let workdir = app.workdir { NSWorkspace.shared.activateFileViewerSelecting([workdir.appending(path: "models/\(m.id)")]) }
-                }
-                Button("Uninstall", role: .destructive) { app.gated { confirm in try await app.engine.modelsUninstall(m.id, confirm: confirm) } }
-            }
-            if m.recipe.repo != nil {
-                Button("Check Upstream") {
-                    app.run {
-                        let u = try await app.engine.modelsCheckUpstream(m.id)
-                        note = "Upstream head \(u.head.prefix(7))" + (u.commitsAhead.map { " · \($0) commits past the pin" } ?? "")
-                    }
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.quaternary.opacity(0.6))
+            Image(systemName: symbol).font(.system(size: 36)).foregroundStyle(.secondary)
+            if let url {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image { image.resizable().scaledToFill() }
                 }
             }
         }
-    }
-
-    func facts(_ rows: [(String, String)]) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-            ForEach(rows.indices, id: \.self) { i in
-                GridRow {
-                    Text(rows[i].0).foregroundStyle(.secondary)
-                    Text(rows[i].1).textSelection(.enabled)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    func overview(_ m: ModelView) -> some View {
-        let r = m.recipe
-        var rows: [(String, String)] = [
-            ("Made by", r.attribution.authors.joined(separator: ", ")),
-            ("License", r.attribution.license.spdx),
-            ("Project page", r.attribution.homepage.absoluteString),
-            ("Tasks", r.tasks.map { "\($0.label) (\($0.inputs.map(\.type.rawValue).joined(separator: ", ")) → \($0.output.rawValue))" }.joined(separator: "\n")),
-            ("Python", "\(r.python) · its own environment, separate from the rest of the Mac"),
-            ("Memory", "\(r.resources.memoryGB.formatted()) GB estimate" + r.resources.memoryOverrides.map { o in
-                " · \(o.memoryGB.formatted()) GB when \(o.when.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))"
-            }.joined()),
-            ("Disk", m.diskBytes.map(Format.bytes) ?? "—"),
-        ]
-        if !r.brew.isEmpty { rows.append(("Homebrew packages", r.brew.joined(separator: ", "))) }
-        if app.developer {
-            rows += [("Recipe source", m.source ?? "installed copy only"), ("Repository", r.repo ?? "bundled with Lift"), ("Pinned commit", m.pin ?? "—")]
-        }
-        return VStack(alignment: .leading, spacing: 10) {
-            facts(rows)
-            Text(r.attribution.disclaimer).font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.vertical)
-    }
-
-    func options(_ m: ModelView) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Generated from the recipe's option list. Jobs that don't set an option get its default.").font(.caption).foregroundStyle(.secondary)
-            ForEach(m.recipe.tasks, id: \.id) { t in
-                Text(t.label).font(.headline)
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
-                    GridRow { Text("Option").bold(); Text("Key").bold(); Text("Type").bold(); Text("Default").bold(); Text("Shown").bold() }
-                    ForEach(t.settings, id: \.key) { s in
-                        GridRow {
-                            Text(s.label)
-                            Text(s.key).font(.system(.body, design: .monospaced))
-                            Text(typeText(s))
-                            Text(s.default?.description ?? "—")
-                            Text((s.group ?? "basic").capitalized)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.vertical)
-    }
-
-    func typeText(_ s: SettingDef) -> String {
-        var t = s.type.rawValue
-        if let o = s.options { t += " " + o.map(\.description).joined(separator: " | ") }
-        if s.min != nil || s.max != nil { t += " \(s.min?.formatted() ?? "")–\(s.max?.formatted() ?? "")" }
-        return t
-    }
-
-    func install(_ m: ModelView) -> some View {
-        let r = m.recipe
-        var steps: [String] = r.brew.isEmpty ? [] : ["brew install \(r.brew.joined(separator: " "))"]
-        if let repo = r.repo { steps.append("git clone --filter=blob:none \(repo) repo && git -C repo checkout \(m.pin ?? r.commit ?? "")") }
-        steps.append("uv venv --python \(r.python) venv")
-        steps += r.install
-        if !r.substitutes.isEmpty { steps.append("substitutes: \(r.substitutes.joined(separator: ", "))") }
-        if r.shim != nil { steps.append("uv pip install lift_shim + .pth") }
-        steps.append("python -m lift_worker --check (smoke import)")
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Installing downloads the project's code and sets up its own Python environment (about \(r.resources.diskGB.formatted()) GB). "
-                 + "It runs once; Reinstall repeats it.").font(.caption).foregroundStyle(.secondary)
-            if app.developer {
-                ForEach(steps.indices, id: \.self) { i in
-                    Text("\(i + 1). \(steps[i])").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                }
-            }
-            weights(m)
-            LocalDisclosure("Details: install log") {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text((try? logText(m.id)) ?? "No install log yet.").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .padding(.vertical)
-    }
-
-    /// Read straight from `models/<id>/install.log` so the live view needs no actor hop per tick.
-    func logText(_ id: String) throws -> String {
-        guard let workdir = app.workdir else { return "" }
-        return try String(contentsOf: workdir.appending(path: "models/\(id)/install.log"), encoding: .utf8)
-    }
-
-    @ViewBuilder func weights(_ m: ModelView) -> some View {
-        if !m.recipe.weights.isEmpty {
-            Text("Weights").font(.headline)
-            Text("Downloaded only when you press Download, into the shared Hugging Face cache; checked before every worker start.")
-                .font(.caption).foregroundStyle(.secondary)
-            ForEach(m.recipe.weights, id: \.repo) { w in
-                Text("\(w.repo)@\(w.revision)\(w.gated ? " · gated, needs a Hugging Face token" : "")").font(.system(.callout, design: .monospaced))
-            }
-            if let report = m.weights {
-                Text("Last check: \(report.state.rawValue) · \(report.checkedAt.formatted())\(report.note.map { " · " + $0 } ?? "")").font(.callout)
-                ForEach(report.problems.indices, id: \.self) { i in
-                    let p = report.problems[i]
-                    Text("\(p.repo)/\(p.path): \(p.issue.rawValue)\(p.detail.map { " (\($0))" } ?? "")").font(.caption).foregroundStyle(.red)
-                }
-            }
-            HStack {
-                Button("Download Weights…") { app.gated { confirm in try await app.engine.modelsDownloadWeights(m.id, confirm: confirm) } }
-                    .disabled(!m.isInstalled && !isWeightsProblem(m))
-                Button("Verify Weights") { app.run { _ = try await app.engine.modelsVerifyWeights(m.id) } }
-            }
-        }
-    }
-
-    func isWeightsProblem(_ m: ModelView) -> Bool {
-        switch m.status {
-        case .weightsMissing, .weightsCorrupt: true
-        default: false
-        }
-    }
-
-    func shim(_ m: ModelView) -> some View {
-        let r = m.recipe
-        return VStack(alignment: .leading, spacing: 10) {
-            if let shim = r.shim {
-                Text("CUDA isn't available on this Mac, so Lift loads its shared cuda→mps shim before the project's code. Nothing in the cloned repo is edited.")
-                    .font(.caption).foregroundStyle(.secondary)
-                facts([
-                    ("Device remap", ".cuda(), .to(\"cuda\"), torch.cuda.* → mps"),
-                    ("Attention", "flash_attn → PyTorch SDPA (ATTN_BACKEND=sdpa)"),
-                    ("CPU fallback", "PYTORCH_ENABLE_MPS_FALLBACK=1"),
-                    ("Substitutes", r.substitutes.isEmpty ? "none" : r.substitutes.joined(separator: ", ")),
-                    ("Aliases", shim.aliases.isEmpty ? "none" : shim.aliases.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: "\n")),
-                    ("Stand-ins", shim.standins.isEmpty ? "none" : shim.standins.joined(separator: ", ")),
-                    ("Patches", shim.patches.isEmpty ? "none" : shim.patches.joined(separator: ", ")),
-                    ("Environment", shim.env.isEmpty ? "none" : shim.env.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "\n")),
-                ])
-            } else {
-                Text("This recipe runs as a Mac port already and doesn't use lift_shim.").foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical)
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 
-/// A model's install while it runs: a bar (real bytes while weights download, else indeterminate) and the line
-/// "Downloading the model — 3.2 of 20.1 GB · about 5 min left".
+/// One model in the library: preview, status chip, name and task, description, credit, license and size,
+/// download progress with Pause and Cancel, and one action. Clicking it opens the model's page.
+struct ModelCardView: View {
+    let app: AppModel
+    let model: ModelView
+    let open: () -> Void
+
+    var body: some View {
+        let m = model
+        let card = ModelCard(m, weightsBytes: m.download?.totalBytes ?? app.weightBytes[m.id])
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                PreviewImage(url: app.previews[m.id], symbol: taskSymbol(m)).frame(height: 150).frame(maxWidth: .infinity)
+                Text(Library.chip(m, hfKey: app.secrets.get(.hfToken) != nil)).font(.caption.bold())
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(10)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(m.name).font(.headline)
+                    Text(card.task).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule())
+                }
+                if let d = card.description { Text(d).font(.callout).lineLimit(1) }
+                Text("by " + m.recipe.attribution.authors.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(([m.recipe.attribution.license.spdx] + [card.size].compactMap { $0 }).joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                DownloadControls(app: app, model: m)
+                CardActionButton(app: app, model: m)
+            }
+            .padding(14)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture(perform: open)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(m.name), \(Library.chip(m, hfKey: app.secrets.get(.hfToken) != nil))")
+        .accessibilityAction(named: "Open \(m.name)", open)
+        .task(id: m.id) {
+            await app.loadPreview(m)
+            await app.loadWeightBytes(m)
+        }
+    }
+}
+
+/// The card's one action: Install, Use in Generate, Download now or Retry. While a download runs, its Pause
+/// and Cancel sit next to the progress bar instead (`DownloadControls`).
+struct CardActionButton: View {
+    let app: AppModel
+    let model: ModelView
+
+    var body: some View {
+        switch Library.action(model) {
+        case .install?:
+            Button("Install") { app.install(model) }.buttonStyle(.borderedProminent)
+        case .useInGenerate?:
+            Button("Use in Generate") { app.useInGenerate(model) }.buttonStyle(.borderedProminent)
+        case .downloadNow?:
+            if let d = model.download {
+                Button("Download now") { app.run { _ = try await app.engine.downloadsReorder(d.id, position: 0) } }
+                    .help("Moves it to the front of the download queue")
+            }
+        case .retry?:
+            Button("Try Again") { retry(app, model) }
+        case .pause?, .resume?, nil:
+            EmptyView()
+        }
+    }
+}
+
+/// Try Again for a stopped or failed download, or files found missing: from what's already downloaded.
+@MainActor func retry(_ app: AppModel, _ m: ModelView) {
+    if let d = m.download, d.state == .failed || d.state == .cancelled {
+        app.run { _ = try await app.engine.downloadsRetry(d.id) }
+    } else {
+        app.gated { confirm in try await app.engine.modelsDownloadWeights(m.id, confirm: confirm) }
+    }
+}
+
+/// A model's download on its card, page or the menu bar: the bar, Pause/Resume and Cancel right next to it,
+/// "5.2 of 20.1 GB · 12 MB/s · about 21 min left", and a warning when the disk is too full for the rest.
+/// Code phases (no byte totals) show their plain name with an indeterminate bar.
+struct DownloadControls: View {
+    let app: AppModel
+    let model: ModelView
+
+    var body: some View {
+        if let d = model.download, d.state != .done {
+            VStack(alignment: .leading, spacing: 4) {
+                if d.state.isActive {
+                    HStack(spacing: 6) {
+                        if let total = d.totalBytes, total > 0, d.state != .queued {
+                            ProgressView(value: Double(d.downloadedBytes), total: Double(total))
+                        } else {
+                            ProgressView().progressViewStyle(.linear)
+                        }
+                        if d.state == .paused {
+                            Button { app.run { _ = try await app.engine.downloadsResume(d.id) } } label: { Label("Resume download", systemImage: "play.fill") }
+                                .help("Resume download")
+                        } else {
+                            Button { app.run { _ = try await app.engine.downloadsPause(d.id) } } label: { Label("Pause download", systemImage: "pause.fill") }
+                                .help("Pause download")
+                        }
+                        Button { app.gated { confirm in try await app.engine.downloadsCancel(d.id, confirm: confirm) } } label: {
+                            Label("Cancel download", systemImage: "xmark")
+                        }
+                        .help("Cancel download (what's downloaded stays, so it can resume later)")
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                }
+                Text(Format.downloadLine(d, rate: app.rates[model.id])).font(.caption)
+                    .foregroundStyle(d.state == .failed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+                if d.state == .failed, let link = d.link { Link("Open the terms page", destination: link).font(.caption) }
+                if d.state.isActive, let warning = Format.spaceWarning(free: app.hubFreeBytes, remaining: max(0, (d.totalBytes ?? 0) - d.downloadedBytes)) {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                }
+            }
+            .accessibilityElement(children: .contain)
+        } else if case .installing = model.status {
+            InstallProgressRow(app: app, model: model)
+        }
+    }
+}
+
+/// A model's install while its code is being set up: an indeterminate bar and the phase in plain words.
 struct InstallProgressRow: View {
     let app: AppModel
     let model: ModelView
