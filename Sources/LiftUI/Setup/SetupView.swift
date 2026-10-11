@@ -21,7 +21,7 @@ struct SetupView: View {
             if model.step == .welcome { welcome } else { wizard }
         }
         .font(.system(size: 15))
-        .frame(width: 960, height: 660)
+        .frame(minWidth: 860, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)  // fills a resized window
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.choose(url) }
         }
@@ -167,12 +167,12 @@ struct SetupView: View {
             }
             folderCard(model.workdir) { choosing = true }
             if let problem = model.workdirProblem {
-                DisclosureGroup("Show details") { Text(problem).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                LocalDisclosure("Show details") { Text(problem).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             }
             if let space = model.space {
                 note(space.text, systemImage: space.warning ? "exclamationmark.triangle.fill" : "internaldrive", warning: space.warning)
             }
-            DisclosureGroup("Where finished models are saved", isExpanded: $showExport) {
+            Disclosure("Where finished models are saved", isExpanded: $showExport) {
                 VStack(alignment: .leading, spacing: 12) {
                     folderCard(model.exportDir) { choosingExport = true }
                     Toggle("Save space: after a model is safely copied there, remove Lift's working copy of it.", isOn: $model.cleanupAfterExport)
@@ -233,7 +233,7 @@ struct SetupView: View {
                     .buttonStyle(.borderedProminent).controlSize(.extraLarge)
             }
             if !model.log.isEmpty {
-                DisclosureGroup("Show details") {
+                LocalDisclosure("Show details") {
                     ScrollView {
                         Text(model.log.joined(separator: "\n")).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,7 +278,7 @@ struct SetupView: View {
     var done: some View {
         Group {
             heading("You're all set", "Lift is ready. Next, pick a model in Models: Lift installs it and walks you through anything it needs.")
-            DisclosureGroup("Use Lift from an AI assistant (optional)") {
+            LocalDisclosure("Use Lift from an AI assistant (optional)") {
                 VStack(alignment: .leading, spacing: 8) { assistant }.padding(.top, 8)
             }
         }

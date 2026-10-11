@@ -12,9 +12,11 @@ struct LiftApp: App {
     var body: some Scene {
         Window("Lift", id: "main") {
             RootView(app: delegate.app, onSidebarAppear: delegate.sidebarShown)
-                .frame(minWidth: 960, minHeight: 640)
+                .frame(minWidth: 860, minHeight: 600)
                 .task { await delegate.start() }
         }
+        .defaultSize(width: 1100, height: 720)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Lift") { openWindow(id: "about") }

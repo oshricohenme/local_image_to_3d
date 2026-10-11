@@ -263,7 +263,7 @@ struct ModelsView: View {
                 }
             }
             weights(m)
-            DisclosureGroup("Details: install log") {
+            LocalDisclosure("Details: install log") {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     Text((try? logText(m.id)) ?? "No install log yet.").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -61,7 +61,7 @@ struct AboutView: View {
                     Text("Paper").font(.headline)
                     Link(paper.title, destination: paper.url)
                     if let bibtex = paper.bibtex {
-                        DisclosureGroup("Cite (BibTeX)") {
+                        LocalDisclosure("Cite (BibTeX)") {
                             Text(bibtex).font(.caption.monospaced()).textSelection(.enabled)
                             Button("Copy BibTeX") {
                                 NSPasteboard.general.clearContents()

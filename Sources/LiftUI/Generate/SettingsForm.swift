@@ -20,7 +20,7 @@ struct SettingsForm: View {
         let rest = defs.filter { ($0.group ?? "basic") != "basic" }
         ForEach(basic, id: \.key) { row($0) }
         if !rest.isEmpty {
-            DisclosureGroup("Advanced", isExpanded: $advanced) {
+            Disclosure("Advanced", isExpanded: $advanced) {
                 ForEach(rest, id: \.key) { row($0) }
             }
         }

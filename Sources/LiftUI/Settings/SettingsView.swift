@@ -128,7 +128,7 @@ struct SettingsView: View {
 
     @ViewBuilder var estimates: some View {
         let rows = app.resources?.estimates ?? []
-        DisclosureGroup("Learned memory estimates · \(rows.count)") {
+        LocalDisclosure("Learned memory estimates · \(rows.count)") {
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
                 GridRow { Text("Recipe").bold(); Text("Task").bold(); Text("Settings").bold(); Text("Load").bold(); Text("Per job").bold() }
                 ForEach(rows.indices, id: \.self) { i in

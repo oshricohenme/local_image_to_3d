@@ -90,7 +90,7 @@ struct QueueView: View {
             Text(stepLine(v)).font(.caption).foregroundStyle(.secondary)
             CreditLinks(job: v)
             ProgressView(value: step.fraction ?? 0) { Text(step.stage ?? "Starting…").font(.caption) }
-            DisclosureGroup("Live log") {
+            LocalDisclosure("Live log") {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     ScrollView {
                         Text(app.logTail(v.job.id)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
