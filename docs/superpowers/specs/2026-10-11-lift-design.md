@@ -432,7 +432,7 @@ These are measurements, not decisions.
 - At start-up the launcher duplicates its stdout to a private file descriptor for protocol messages and
   points fd 1 at stderr, so output from native code can't corrupt the protocol. `sys.stdout` and
   `sys.stderr` are replaced by a proxy that tags each line with the job running on the current thread.
-- Messages from the app to the worker: `{"op":"run","job":…,"step":…,"task":…,"inputs":{…},"settings":{…},"out_dir":…}`, `{"op":"cancel","job":…}`, `{"op":"shutdown"}`.
+- Messages from the app to the worker: `{"op":"run","job":…,"step":…,"task":…,"inputs":{…},"settings":{…},"out_dir":…}`, `{"op":"shutdown"}`. There is no cancel op: cancel kills the worker.
 - Messages from the worker to the app:
   - `{"ev":"ready","protocol":1,"load_seconds":…}`
   - `{"ev":"log","job":…,"line":…}`
@@ -442,8 +442,7 @@ These are measurements, not decisions.
   - `{"ev":"heartbeat","mps_allocated":…}`
 - Stages are parsed from upstream's own output (`[Stage]` tags and tqdm lines), using patterns declared in
   the recipe.
-- Cancelling a running job in a worker with concurrency 1 stops the worker process. In a concurrent
-  worker it marks the job cancelled and discards its result; upstream code cannot be interrupted safely.
+- Cancelling a loading or running job kills that worker's process group immediately (one job per worker).
 - A worker crash fails its running steps with the end of the log. The worker is restarted on demand.
 
 ## 9. Exports
