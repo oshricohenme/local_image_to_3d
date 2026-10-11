@@ -201,8 +201,13 @@ A Python package that Lift installs into every model venv. The launcher imports 
 upstream, and only when `torch.cuda.is_available()` is false:
 
 - **Device redirection:** `torch.Tensor.cuda`, `nn.Module.cuda`, `.to("cuda"…)`, `torch.device("cuda")`,
-  `device="cuda"` arguments of tensor factories, `torch.cuda.is_available/empty_cache/synchronize/
-  manual_seed/current_device`, and `torch.autocast("cuda")` are all redirected to `mps`.
+  `device="cuda"` arguments of tensor factories, `torch.cuda.empty_cache/synchronize/manual_seed/current_device`,
+  `torch.autocast("cuda")`, and `torch.load` of checkpoints saved on CUDA are all redirected to `mps`.
+- **`torch.cuda.is_available()` stays `False`** (a deliberate decision from the Plan 0 review). Returning
+  `True` would steer upstream code into CUDA-only paths (streams, `get_device_properties`, NCCL).
+  Upstream code that picks `"cuda" if is_available() else "cpu"` therefore runs on CPU unless its recipe
+  opts in with the `env` / `patches` mechanism. Every v1 recipe calls `.cuda()` unconditionally, so none
+  is affected.
 - **Environment:** `PYTORCH_ENABLE_MPS_FALLBACK=1`, `ATTN_BACKEND=sdpa`, `SPARSE_ATTN_BACKEND=sdpa`.
 - **Substitute registry** (`substitutes.yaml` in Lift): maps each CUDA-only package to an Apple Silicon
   replacement, installed when a recipe lists it:
