@@ -1,0 +1,40 @@
+import Foundation
+import Synchronization
+import Testing
+@testable import LiftCore
+
+/// Records commands and answers from a script: the first rule whose `match` is contained in the
+/// command's display string decides the exit code and output lines. Unmatched commands succeed silently.
+final class FakeRunner: CommandRunner {
+    struct Rule: Sendable {
+        var match: String
+        var code: Int32
+        var lines: [String]
+    }
+
+    private let state = Mutex<(commands: [ShellCommand], rules: [Rule])>(([], []))
+
+    func on(_ match: String, code: Int32 = 0, lines: [String] = []) {
+        state.withLock { $0.rules.append(Rule(match: match, code: code, lines: lines)) }
+    }
+
+    var commands: [ShellCommand] { state.withLock { $0.commands } }
+    var displays: [String] { commands.map(\.display) }
+
+    func run(_ command: ShellCommand, onLine: @escaping @Sendable (String) -> Void) async throws -> Int32 {
+        let rule = state.withLock { s -> Rule? in
+            s.commands.append(command)
+            return s.rules.first { command.display.contains($0.match) }
+        }
+        for line in rule?.lines ?? [] { onLine(line) }
+        return rule?.code ?? 0
+    }
+}
+
+extension Fixtures {
+    /// A uv-managed Python 3.11 (uv downloads it if missing).
+    static func python() async throws -> String {
+        let uv = try #require(Toolchain(runner: SubprocessRunner()).find("uv"), "uv must be installed")
+        return try await SubprocessRunner().output(ShellCommand(uv, ["python", "find", "3.11"])).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
