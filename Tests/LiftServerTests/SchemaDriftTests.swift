@@ -98,7 +98,21 @@ import Testing
 
     static var job: JobRecord {
         JobRecord(id: "j1", title: "t", priority: .high, position: 1, source: .mcp, state: .waiting, waitReason: .memory(needed: 2, free: 1),
-                  forceStart: true, memoryAccepted: true, currentStep: 0, error: "e", createdAt: at, updatedAt: at, finishedAt: at)
+                  forceStart: true, memoryAccepted: true, currentStep: 0, error: "e", createdAt: at, updatedAt: at, finishedAt: at,
+                  export: ExportSpec(dir: "/x", formats: [.glb, .obj], cleanupAfterExport: true),
+                  exports: [ExportResult(format: .obj, path: "/x/t", error: "e", credits: "/x/t.credits.txt")],
+                  exportPending: true, cleanedUp: true, credits: [attribution])
+    }
+
+    /// Every field set, paper and a restricted component included.
+    static var attribution: Attribution {
+        try! JSONDecoder().decode(Attribution.self, from: Data(#"""
+        {"project": "P", "authors": ["A", "B Lab"], "homepage": "https://p.org", "repo": "https://github.com/a/p",
+         "paper": {"title": "T", "url": "https://arxiv.org/abs/1", "bibtex": "@article{x}"},
+         "license": {"spdx": "MIT", "url": "https://p.org/L"},
+         "components": [{"name": "W", "role": "model weights", "url": "https://hf.co/w",
+                         "license": {"spdx": "CC-BY-NC-4.0", "url": "https://creativecommons.org/licenses/by-nc/4.0/"}, "restrictions": ["non-commercial"]}]}
+        """#.utf8))
     }
 
     static var step: StepRecord {
@@ -147,6 +161,10 @@ import Testing
         try Self.verify(QueueOut(queue), "QueueStatus", mirrors: [queue])
         try Self.verify(MemoryWarningOut(memoryWarning: Self.memoryWarning), "MemoryWarningResult")
         try Self.verify(DeletedOut(deleted: true), "Deleted")
+    }
+
+    @Test func readme() throws {
+        try Self.verify(Readme(text: "# P", baseURL: URL(string: "https://raw.githubusercontent.com/a/p/c/")!, cached: true), "Readme")
     }
 
     @Test func modelsAndRecipes() throws {
