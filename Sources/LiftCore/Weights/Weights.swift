@@ -108,6 +108,20 @@ public struct WeightsReport: Codable, Sendable, Equatable {
     public var note: String?
 }
 
+extension WeightsReport {
+    /// The check itself threw (a malformed API answer, a read or database error).
+    static func failedCheck(_ error: any Error) -> WeightsReport {
+        WeightsReport(state: .unknown, problems: [], checkedAt: Date(), hashedFiles: 0, note: "the check failed: \(error)")
+    }
+}
+
+extension WeightsVerifier {
+    /// `verify`, with a thrown error turned into an `unknown` report.
+    func report(_ recipe: Recipe) async -> WeightsReport {
+        do { return try await verify(recipe) } catch { return .failedCheck(error) }
+    }
+}
+
 /// A cached SHA-256 of one weight file, valid while its size and mtime are unchanged.
 public struct WeightHashRecord: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "weightHash"

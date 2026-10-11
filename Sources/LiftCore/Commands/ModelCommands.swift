@@ -84,7 +84,7 @@ extension Lift {
             }
             if ok {
                 await self.setPhase(id, "verifying weights")
-                await self.verified(id, try? await verifier.verify(r))
+                await self.verified(id, await verifier.report(r))
             }
             await self.installFinished(id)
         }
@@ -123,7 +123,7 @@ extension Lift {
         let task = Task {
             try? await installer.downloadWeights(r, onLine: { _ in })
             await self.setPhase(id, "verifying weights")
-            await self.verified(id, try? await verifier.verify(r))
+            await self.verified(id, await verifier.report(r))
             await self.installFinished(id)
         }
         installing[id] = task
@@ -136,9 +136,14 @@ extension Lift {
     public func modelsVerifyWeights(_ id: String) async throws -> WeightsReport {
         guard let r = recipe(id) else { throw LiftError.notFound("model \(id)") }
         verifying.insert(id)
-        let report = try await verifier.verify(r)
-        verified(id, report)
-        return report
+        do {
+            let report = try await verifier.verify(r)
+            verified(id, report)
+            return report
+        } catch {
+            verified(id, .failedCheck(error))  // never leave the id in `verifying`
+            throw error
+        }
     }
 
     public func modelsReinstall(_ id: String, confirm: Bool = false, wait: Bool = false) async throws -> Gated<ModelView> {

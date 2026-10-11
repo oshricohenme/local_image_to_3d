@@ -58,6 +58,24 @@ func weightedBundle() throws -> URL {
         #expect(try await eventually { try await lift.jobsGet(id).job.state != .waiting })
     }
 
+    @Test func aCheckThatThrowsDoesNotBlockLaterChecks() async throws {
+        let meta = FakeMetadata()
+        let hub = try Fixtures.tempDir()
+        meta.fail("org/weights", with: DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "malformed API answer")))
+        let lift = try await Fixtures.lift(FakeRunner(), searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path],
+                                           bundle: try weightedBundle(), metadata: meta, hub: hub)
+        _ = try await lift.modelsInstall("weighted", confirm: true, wait: true, downloadWeights: false)
+        await #expect(throws: DecodingError.self) { try await lift.modelsVerifyWeights("weighted") }
+        #expect(await !lift.verifying.contains("weighted"))
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "weighted", task: "image_to_3d",
+                                                                              inputs: ["image": try Fixtures.image()])])).job.id
+        #expect(try await eventually { try await lift.jobsGet(id).job.waitReason == .weightsUnverified })
+        // The API recovers and the files are there: the background recheck must run and let the job go.
+        let snap = try writeHFCache(hub: hub, repo: "org/weights", commit: commit, files: ["w.bin": Data([1])], lfs: ["w.bin"])
+        meta.set("org/weights", .success(snap))
+        #expect(try await eventually { try await lift.jobsGet(id).job.state != .waiting })
+    }
+
     @Test func settingsAndResources() async throws {
         let lift = try await Fixtures.lift()
         #expect(try await lift.resourcesSet(maxSlots: 2, memoryBudgetGB: 32).maxSlots == 2)

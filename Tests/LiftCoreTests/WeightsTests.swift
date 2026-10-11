@@ -4,12 +4,17 @@ import Synchronization
 import Testing
 @testable import LiftCore
 
-/// File lists by `repo@revision`; `nil` value = offline. Never touches the network.
+/// File lists by `repo@revision`. Never touches the network. Unknown repos answer 404.
 final class FakeMetadata: WeightsMetadata {
-    private let answers = Mutex<[String: Result<RepoSnapshot, WeightsMetadataError>]>([:])
+    private let answers = Mutex<[String: Result<RepoSnapshot, any Error>]>([:])
 
     func set(_ repo: String, revision: String = "main", _ answer: Result<RepoSnapshot, WeightsMetadataError>) {
-        answers.withLock { $0["\(repo)@\(revision)"] = answer }
+        answers.withLock { $0["\(repo)@\(revision)"] = answer.mapError { $0 as any Error } }
+    }
+
+    /// Any error, e.g. a `DecodingError` from a malformed API answer.
+    func fail(_ repo: String, revision: String = "main", with error: any Error) {
+        answers.withLock { $0["\(repo)@\(revision)"] = .failure(error) }
     }
 
     func snapshot(repo: String, revision: String) async throws -> RepoSnapshot {

@@ -112,6 +112,8 @@ public actor Lift {
     /// Recipes whose weights passed a check since their last worker start (spec §6: before every start).
     var verifiedForStart: Set<String> = []
     var lastVerify: [String: ContinuousClock.Instant] = [:]
+    /// Recipes with a tick scheduled for when their recheck interval ends.
+    var recheckScheduled: Set<String> = []
     var workers: [String: WorkerHandle] = [:]
     var logs: [String: LogFile] = [:]
     var housekeeping: Task<Void, Never>?
@@ -338,14 +340,26 @@ public actor Lift {
     /// Starts a background weights check, at most once per `weightsRecheckInterval` per recipe.
     func requestVerify(_ r: Recipe) {
         if verifying.contains(r.id) { return }
-        if let last = lastVerify[r.id], ContinuousClock.now - last < config.weightsRecheckInterval { return }
+        if let last = lastVerify[r.id], ContinuousClock.now - last < config.weightsRecheckInterval {
+            // Too soon: come back when the interval ends, or a waiting job would wait for the next unrelated event.
+            if recheckScheduled.insert(r.id).inserted {
+                let wait = config.weightsRecheckInterval - (ContinuousClock.now - last)
+                Task {
+                    try? await Task.sleep(for: wait)
+                    await self.recheckDue(r.id)
+                }
+            }
+            return
+        }
         verifying.insert(r.id)
         lastVerify[r.id] = .now
         let verifier = self.verifier
-        Task {
-            let report = try? await verifier.verify(r)
-            await self.verified(r.id, report)
-        }
+        Task { await self.verified(r.id, await verifier.report(r)) }
+    }
+
+    func recheckDue(_ id: String) {
+        recheckScheduled.remove(id)
+        tick()
     }
 
     func verified(_ id: String, _ report: WeightsReport?) {
