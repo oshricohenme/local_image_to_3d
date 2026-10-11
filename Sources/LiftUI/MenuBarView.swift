@@ -2,8 +2,8 @@ import AppKit
 import LiftCore
 import SwiftUI
 
-/// The menu bar extra (mockup MenuBar.dc.html): server, the running job, up next, the last finished
-/// job, and Open / Pause / Unload / Quit.
+/// The menu bar extra (mockup MenuBar.dc.html): server, the running job, models installing, up next, the last
+/// finished job, and Open / Pause / Unload / Quit.
 public struct MenuBarView: View {
     let app: AppModel
     let openWindow: () -> Void
@@ -29,6 +29,12 @@ public struct MenuBarView: View {
                     Text(v.job.title).bold()
                     Text("\(step.recipe) · \(step.stage ?? Format.state(v.job.state))").font(.caption).foregroundStyle(.secondary)
                     ProgressView(value: step.fraction ?? 0)
+                }
+            }
+            ForEach(app.models.filter { if case .installing = $0.status { true } else { false } }, id: \.id) { m in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(m.name).bold()
+                    InstallProgressRow(app: app, model: m)
                 }
             }
             if !waiting.isEmpty {

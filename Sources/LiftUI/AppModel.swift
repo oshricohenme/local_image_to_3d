@@ -109,6 +109,8 @@ public final class AppModel {
     public var aboutBeforeInstall: ModelView?
     /// The Hugging Face walkthrough before installing a model with gated weights while no key is kept.
     public var accessBeforeInstall: HFAccess?
+    /// Download rates by model id, while its weights download (for the time left).
+    public private(set) var rates: [String: RateEstimate] = [:]
     /// What setup shows at this launch, and the tools check it was based on (nil when skipped).
     public private(set) var needs = SetupNeeds()
     public private(set) var prereqs: Prereqs?
@@ -310,6 +312,7 @@ public final class AppModel {
             // Assign only changes: every assignment re-renders the views that read it.
             if self.queue != queue { self.queue = queue }
             if self.resources != resources { self.resources = resources }
+            sample(models)
             if self.models != models { self.models = models; generate.models = models }
             if self.settings != settings { self.settings = settings; generate.adoptExportDefaults(settings) }
             if serverStatus != status { serverStatus = status }
@@ -317,6 +320,19 @@ public final class AppModel {
         } catch {
             if alert == nil { alert = Format.error(error) }  // once, not every second
         }
+    }
+
+    /// Adds each downloading model's bytes to its rate; drops the rates of the others.
+    func sample(_ models: [ModelView], at date: Date = Date()) {
+        for m in models {
+            if let p = m.progress { rates[m.id, default: RateEstimate()].add(p.downloadedBytes, at: date) } else { rates[m.id] = nil }
+        }
+    }
+
+    /// While a model installs: its phase in plain words, with bytes and time left while its weights download.
+    public func installLine(_ m: ModelView) -> String? {
+        guard case .installing(let phase) = m.status else { return nil }
+        return Format.installLine(phase, progress: m.progress, secondsLeft: m.progress.flatMap { rates[m.id]?.secondsLeft(total: $0.totalBytes) })
     }
 
     /// Finished jobs leave the queue: each one that left is fetched, then reported with any new memory waits.

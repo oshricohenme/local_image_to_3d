@@ -71,7 +71,11 @@ struct ModelsView: View {
     func row(_ m: ModelView) -> some View {
         VStack(alignment: .leading) {
             Text(m.name).bold()
-            Text(Format.status(m.status) + (app.developer ? m.pin.map { " · @" + $0.prefix(7) } ?? "" : "")).font(.caption)
+            if case .installing = m.status {
+                InstallProgressRow(app: app, model: m)
+            } else {
+                Text(Format.status(m.status) + (app.developer ? m.pin.map { " · @" + $0.prefix(7) } ?? "" : "")).font(.caption)
+            }
         }
         .foregroundStyle(m.isUnsupported ? .secondary : .primary)
         .tag(m.id)
@@ -126,6 +130,7 @@ struct ModelsView: View {
                     Spacer()
                     actions(m)
                 }
+                if case .installing = m.status { InstallProgressRow(app: app, model: m).frame(maxWidth: 420, alignment: .leading) }
                 if case .unsupported(let reason) = m.status {
                     Label("Unsupported on this Mac: \(reason)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 }
@@ -157,8 +162,10 @@ struct ModelsView: View {
             case .notInstalled, .installFailed:
                 Button("Install") { app.install(m) }
                     .buttonStyle(.borderedProminent)
-            case .installing:
-                ProgressView().controlSize(.small)
+            case .installing(let phase):
+                Button("Cancel") { app.run { _ = try await app.engine.modelsCancelInstall(m.id) } }
+                    .disabled(phase == "cancelling")
+                    .help("Stops the install. Downloaded files stay, so it picks up from there next time.")
             case .unsupported:
                 EmptyView()
             default:
@@ -330,5 +337,27 @@ struct ModelsView: View {
             }
         }
         .padding(.vertical)
+    }
+}
+
+/// A model's install while it runs: a bar (real bytes while weights download, else indeterminate) and the line
+/// "Downloading the model — 3.2 of 20.1 GB · about 5 min left".
+struct InstallProgressRow: View {
+    let app: AppModel
+    let model: ModelView
+
+    var body: some View {
+        if let line = app.installLine(model) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let p = model.progress, p.totalBytes > 0 {
+                    ProgressView(value: Double(p.downloadedBytes), total: Double(p.totalBytes))
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+                Text(line).font(.caption).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(model.name): \(line)")
+        }
     }
 }
