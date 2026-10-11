@@ -44,7 +44,7 @@ public struct Candidate: Sendable, Equatable {
 
 public struct WorkerSnapshot: Sendable, Equatable {
     public var recipe: String
-    /// `max_concurrent_per_process` minus steps on it.
+    /// 1 when it's idle (one job per worker), else 0.
     public var freeCapacity: Int
     /// Bytes this worker holds: max(measured footprint, baseline + running claims).
     public var reserved: Int

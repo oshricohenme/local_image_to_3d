@@ -217,10 +217,10 @@ extension Lift {
         let step = v.steps[v.job.currentStep]
         if v.job.state.isActive {
             guard confirm else { return .confirmationRequired("Job \"\(v.job.title)\" is \(v.job.state.rawValue); cancelling stops its work and discards any result.") }
-            try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
+            _ = try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
             if let w = workers.values.first(where: { $0.job?.jobId == id }) { kill(w) }
         } else {
-            try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
+            _ = try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
         }
         tick()
         return .done(try view(id))

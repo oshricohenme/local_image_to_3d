@@ -14,7 +14,6 @@ substitutes: [flash_attn]
 resources:
   memory_gb: 0.5
   memory_keys: [size]
-  max_concurrent_per_process: 1
   disk_gb: 0.5
 stages:
   - { pattern: '^\[Stage\] (?P<name>.+)$' }

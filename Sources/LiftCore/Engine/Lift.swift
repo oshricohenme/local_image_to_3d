@@ -341,7 +341,7 @@ public actor Lift {
         step.startedAt = Date()
         step.stage = nil
         step.fraction = nil
-        try store.db.write { db in try self.setState(db, job: job, step: step, worker.ready ? .running : .loading) }
+        _ = try store.db.write { db in try self.setState(db, job: job, step: step, worker.ready ? .running : .loading) }
         if worker.ready { try send(worker) }
     }
 
