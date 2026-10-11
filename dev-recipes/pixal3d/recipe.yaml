@@ -80,7 +80,7 @@ errors:   # plain messages for known failures (shown instead of the raw error; t
   - { match: "MPS backend out of memory|Invalid buffer size|out of memory", message: "Your Mac ran out of memory for this model. Turn on Low memory mode, or close other apps and try again." }
   - { match: "views=four_view needs images named", message: "For the 4-view layout, name the photos front, right, back and left." }
   - { match: "views=transforms needs", message: "This folder has no transforms.json. Choose the 4-view or orbit layout instead." }
-  - { match: "403|401|gated", message: "Your Hugging Face account doesn't have access to RMBG-2.0 yet. Open the model page, accept its terms, then try again." }
+  - { match: "GatedRepoError|401 Client Error|403 Client Error|Cannot access gated repo|Access to model .* is restricted", message: "Your Hugging Face account doesn't have access to RMBG-2.0 yet. Open the model page, accept its terms, then try again." }
 tasks:
   - id: image_to_3d
     modality: 3d

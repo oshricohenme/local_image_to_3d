@@ -157,4 +157,18 @@ import Testing
         #expect(try entry("unirig").recipe.weights.first { $0.repo == "facebook/opt-350m" }?.files == ["config.json"])
 
     }
+
+    /// Only a real Hugging Face auth failure blames access; numbers in an unrelated crash's log don't.
+    @Test func huggingFaceAccessMessageNeedsARealAuthFailure() throws {
+        for id in ["pixal3d", "trellis2-mac"] {
+            let r = try entry(id).recipe
+            let crash = r.plainError("worker exited with code 137", log: ["Mesh: 1,403,221 vertices, 2,806,401 faces", "Baking: 401/1024"])
+            #expect(crash?.contains("Hugging Face") != true, "\(id): \(crash ?? "")")
+            for line in ["huggingface_hub.errors.GatedRepoError: 403 Client Error. Cannot access gated repo for url https://huggingface.co/briaai/RMBG-2.0",
+                         "requests.exceptions.HTTPError: 401 Client Error: Unauthorized for url: https://huggingface.co/x",
+                         "Access to model briaai/RMBG-2.0 is restricted. You must have access to it and be authenticated to access it."] {
+                #expect(r.plainError("worker exited with code 1", log: [line])?.contains("Hugging Face") == true, "\(id): \(line)")
+            }
+        }
+    }
 }
