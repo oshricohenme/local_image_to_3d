@@ -166,7 +166,8 @@ import Testing
         #expect(try await lift.jobsList().isEmpty)
         var accepted = job
         accepted["accept_memory_warning"] = true
-        #expect(try await http.call("POST", "/v1/jobs", json: accepted).status == 202)
+        let queued = try await http.call("POST", "/v1/jobs", json: accepted)
+        #expect(queued.status == 202 && (queued.json["job"] as? [String: Any])?["memory_accepted"] as? Bool == true)
         #expect(try await lift.jobsList().count == 1)
         await server.stop()
     }

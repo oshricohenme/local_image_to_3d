@@ -681,6 +681,7 @@ components:
         state: { $ref: '#/components/schemas/JobState' }
         wait_reason: { $ref: '#/components/schemas/WaitReason' }
         force_start: { type: boolean }
+        memory_accepted: { type: boolean, description: Submitted with accept_memory_warning; it may start only when nothing else runs. }
         current_step: { type: integer }
         error: { type: string }
         created_at: { type: string, format: date-time }
