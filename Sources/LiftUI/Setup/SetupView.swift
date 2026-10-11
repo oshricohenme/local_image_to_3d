@@ -278,33 +278,25 @@ struct SetupView: View {
     var done: some View {
         Group {
             heading("You're all set", "Lift is ready. Next, pick a model in Models: Lift installs it and walks you through anything it needs.")
-            LocalDisclosure("Use Lift from an AI assistant (optional)") {
-                VStack(alignment: .leading, spacing: 8) { assistant }.padding(.top, 8)
-            }
+            assistants
         }
     }
 
-    @ViewBuilder var assistant: some View {
-        if let s = app.serverStatus {
-            Text("AI assistants such as Claude Code can use Lift too. To connect Claude Code, run this once in Terminal:")
-            snippet("claude mcp add --transport http lift \(s.urls.mcp)")
-            if let entry = s.mcpConfig["mcpServers"]?["lift"], let command = entry.command {
-                Text("Assistants that start a program instead of using a web address can run:")
-                snippet(([command] + (entry.args ?? [])).joined(separator: " "))
+    /// Optional and off by default: nothing is connected until a click, and Start Using Lift never waits for it.
+    var assistants: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Use Lift from an AI assistant (optional)").font(.headline)
+            Text("Claude or Codex can use Lift to make 3D models for you. Connect one now or later in Settings.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if app.serverStatus == nil {
+                Text("Lift's assistant connection didn't start. Settings shows why.").foregroundStyle(.secondary)
+            } else {
+                AssistantRows(app: app, installedOnly: true)
             }
-        } else {
-            Text("Lift's assistant connection didn't start. Settings shows why, and the command once it's running.")
         }
-    }
-
-    func snippet(_ text: String) -> some View {
-        HStack {
-            Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-            Button("Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
-            }
-            .accessibilityLabel("Copy command")
-        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .task(id: app.serverStatus?.urls.mcp) { app.checkAssistants() }
     }
 }

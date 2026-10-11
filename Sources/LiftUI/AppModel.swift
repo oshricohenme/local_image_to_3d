@@ -117,6 +117,8 @@ public final class AppModel {
     public var alert: String?
     public var section = AppSection.generate
     public let generate = GenerateModel()
+    /// Claude Code, Claude Desktop and Codex: one-click connect (Settings, setup's last step).
+    public let assistants = AssistantsModel()
 
     /// Called with each finished job and each new memory wait (the app posts notifications).
     public var onEvent: (@MainActor (JobEvent) -> Void)?
@@ -208,6 +210,13 @@ public final class AppModel {
         phase = needs.any ? .setup : .ready
     }
 
+    /// Re-detects the assistants against the running server's address: one connected to an old port then
+    /// shows Update connection. In the background; it can take a few seconds.
+    public func checkAssistants() {
+        let (url, bridge) = (serverStatus?.urls.mcp, paths.bridge?.path)
+        Task { await assistants.check(mcpURL: url, bridge: bridge) }
+    }
+
     /// Runs the tools check, with the Metal Toolchain when a recipe needs it (the bundled ones before Lift opens).
     @discardableResult
     public func checkTools() async -> Prereqs? {
@@ -256,6 +265,7 @@ public final class AppModel {
             if self.workdir != workdir { defaults.set(workdir.path, forKey: Self.workdirKey) }
             do {
                 serverStatus = try await server.start()
+                checkAssistants()
             } catch {
                 self.server = nil  // the badge and Settings then say it isn't running
                 alert = "The HTTP/MCP server didn't start: \(Format.error(error))"

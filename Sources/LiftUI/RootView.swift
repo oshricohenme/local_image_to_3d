@@ -85,6 +85,12 @@ public struct RootView: View {
             if let s = app.serverStatus {
                 Text("\(s.bind):\(s.port) · /mcp").font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
             }
+            // Lift's port changed since an assistant was connected: one click points it at the new one.
+            let outdated = app.assistants.needingUpdate
+            if !outdated.isEmpty {
+                Text("\(outdated.map(\.name).formatted()) still uses Lift's old address.").font(.caption).padding(.top, 6)
+                Button("Update Connection") { Task { for a in outdated { await app.assistants.connect(a) } } }.controlSize(.small)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)

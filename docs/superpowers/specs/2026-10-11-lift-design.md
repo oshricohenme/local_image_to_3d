@@ -506,7 +506,11 @@ Without it they return `confirmation_required` with a description of the impact 
   `cleanup_after_export`. Opening it copies the bundled recipes into `<workdir>/recipes/bundled/`.
 - **Your Mac:** native brew, git or uv isn't working, or the Metal Toolchain is absent while a bundled recipe
   needs it (§6). One button installs what's missing.
-- **Welcome** and a one-line **You're all set** (with the MCP snippet, collapsed) on a true first run only.
+- **Welcome** and a one-line **You're all set** on a true first run only. It has an optional "Use Lift from an AI
+  assistant" section listing the Claude Code, Claude Desktop and Codex installs it finds, each with a Connect button
+  (nothing is connected by default, and finishing never waits for it). Settings → AI assistants has the same rows,
+  with Disconnect, Update (after a port change) and the do-it-yourself command under Show details. These edit the
+  user's own assistant settings, so they run only from a click and are not exposed over HTTP or MCP.
 
 Nothing missing goes straight to the main window. A later launch that finds something missing shows a short
 setup with only that step ("A helper tool is missing"). Choosing, installing and trying a model are not part of

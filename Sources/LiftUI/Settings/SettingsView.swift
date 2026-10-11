@@ -19,6 +19,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             server
+            assistants
             lan
             queue
             app_
@@ -69,7 +70,6 @@ struct SettingsView: View {
                 LabeledContent("Listening", value: "\(s.bind):\(s.port)" + (s.port != s.configuredPort ? " (\(s.configuredPort) was taken)" : ""))
                 copyRow("Base URL", s.urls.api)
                 Link("Open API reference", destination: URL(string: s.urls.docs)!)
-                copyRow("Claude Code", "claude mcp add --transport http lift \(s.urls.mcp)")
                 if let entry = s.mcpConfig["mcpServers"]?["lift"], let command = entry.command {
                     copyRow("stdio bridge", ([command] + (entry.args ?? [])).joined(separator: " "))
                 }
@@ -84,6 +84,20 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// One click per assistant; the do-it-yourself command stays under Show details.
+    @ViewBuilder var assistants: some View {
+        Section("AI assistants") {
+            Text("Let an AI assistant use Lift to make 3D models for you. Nothing changes until you click a button.")
+                .foregroundStyle(.secondary)
+            if app.serverStatus == nil {
+                Text("Lift's assistant connection isn't running, so assistants can't be connected yet.").foregroundStyle(.secondary)
+            } else {
+                AssistantRows(app: app)
+            }
+        }
+        .task(id: app.serverStatus?.urls.mcp) { app.checkAssistants() }
     }
 
     @ViewBuilder var lan: some View {
