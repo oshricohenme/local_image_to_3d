@@ -71,3 +71,90 @@ def test_mha_unsupported_options_raise(kw):
     from lift_shim.standins.flash_attn.modules.mha import MHA
     with pytest.raises(NotImplementedError, match="lift_shim"):
         MHA(embed_dim=16, num_heads=4, **{"cross_attn": True, **kw})
+
+
+def naive_bottom_right(q, k, v):
+    # flash-attn >= 2.1 causal: mask aligned to the bottom-right corner; fully masked rows output 0
+    q, k, v = (x.transpose(1, 2).float() for x in (q, k, v))
+    sq, sk = q.shape[2], k.shape[2]
+    keep = torch.ones(sq, sk, dtype=torch.bool).tril(sk - sq)
+    w = ((q @ k.transpose(-1, -2)) / q.shape[-1] ** 0.5).masked_fill(~keep, float("-inf"))
+    out = (w.softmax(-1).nan_to_num(0.0) @ v)
+    return out.transpose(1, 2)
+
+
+@pytest.mark.parametrize("sq,sk", [(3, 7), (7, 3), (1, 5)])
+def test_causal_bottom_right_when_lengths_differ(sq, sk):
+    torch.manual_seed(0)
+    q, k, v = torch.randn(2, sq, 3, 8), torch.randn(2, sk, 3, 8), torch.randn(2, sk, 3, 8)
+    assert torch.allclose(fa.flash_attn_func(q, k, v, causal=True), naive_bottom_right(q, k, v), atol=1e-5)
+
+
+def test_varlen_causal_bottom_right():
+    torch.manual_seed(0)
+    cq, ck = torch.tensor([0, 2, 5], dtype=torch.int32), torch.tensor([0, 4, 9], dtype=torch.int32)
+    q, k, v = torch.randn(5, 2, 4), torch.randn(9, 2, 4), torch.randn(9, 2, 4)
+    out = fa.flash_attn_varlen_func(q, k, v, cq, ck, 3, 5, causal=True)
+    for (qs, qe), (ks, ke) in [((0, 2), (0, 4)), ((2, 5), (4, 9))]:
+        ref = naive_bottom_right(q[None, qs:qe], k[None, ks:ke], v[None, ks:ke])[0]
+        assert torch.allclose(out[qs:qe], ref, atol=1e-5)
+
+
+def _calls():
+    q, k, v = (torch.randn(1, 4, 2, 8) for _ in range(3))
+    cu = torch.tensor([0, 4], dtype=torch.int32)
+    return {
+        "flash_attn_func": lambda **kw: fa.flash_attn_func(q, k, v, **kw),
+        "flash_attn_qkvpacked_func": lambda **kw: fa.flash_attn_qkvpacked_func(torch.stack([q, k, v], 2), **kw),
+        "flash_attn_kvpacked_func": lambda **kw: fa.flash_attn_kvpacked_func(q, torch.stack([k, v], 2), **kw),
+        "flash_attn_varlen_func": lambda **kw: fa.flash_attn_varlen_func(q[0], k[0], v[0], cu, cu, 4, 4, **kw),
+        "flash_attn_varlen_qkvpacked_func":
+            lambda **kw: fa.flash_attn_varlen_qkvpacked_func(torch.stack([q[0], k[0], v[0]], 1), cu, 4, **kw),
+    }
+
+
+@pytest.mark.parametrize("fn", list(_calls()))
+@pytest.mark.parametrize("kw", [dict(window_size=(2, 2)), dict(softcap=1.0), dict(alibi_slopes=torch.ones(2)),
+                                dict(return_attn_probs=True)])
+def test_unsupported_numerics_args_raise(fn, kw):
+    with pytest.raises(NotImplementedError, match="lift_shim"):
+        _calls()[fn](**kw)
+
+
+@pytest.mark.parametrize("fn", list(_calls()))
+def test_neutral_args_accepted_unknown_rejected(fn):
+    call = _calls()[fn]
+    call(window_size=(-1, -1), softcap=0.0, alibi_slopes=None, deterministic=True, return_attn_probs=False)
+    with pytest.raises(TypeError):
+        call(no_such_arg=1)
+
+
+def test_varlen_block_table_raises():
+    with pytest.raises(NotImplementedError, match="lift_shim"):
+        _calls()["flash_attn_varlen_func"](block_table=torch.zeros(1, 1, dtype=torch.int32))
+
+
+@pytest.mark.parametrize("kw", [dict(cu_seqlens=torch.tensor([0, 5], dtype=torch.int32)), dict(max_seqlen=5),
+                                dict(inference_params=object()), dict(mixer_subset=slice(0, 1)),
+                                dict(key_padding_mask=torch.ones(2, 7, dtype=torch.bool)), dict(causal=True)])
+def test_mha_forward_unsupported_args_raise(kw):
+    from lift_shim.standins.flash_attn.modules.mha import MHA
+    m = MHA(embed_dim=16, num_heads=4, cross_attn=True)
+    with pytest.raises(NotImplementedError, match="lift_shim"):
+        m(torch.randn(2, 5, 16), x_kv=torch.randn(2, 7, 16), **kw)
+
+
+def test_mha_forward_positional_order_matches_upstream():
+    # upstream: forward(x, x_kv, key_padding_mask, cu_seqlens, max_seqlen, mixer_subset, inference_params)
+    from lift_shim.standins.flash_attn.modules.mha import MHA
+    m = MHA(embed_dim=16, num_heads=4, cross_attn=True)
+    with pytest.raises(NotImplementedError, match="cu_seqlens"):
+        m(torch.randn(2, 5, 16), None, None, torch.tensor([0, 5], dtype=torch.int32))
+
+
+def test_mha_init_accepts_neutral_upstream_args_rejects_unknown():
+    from lift_shim.standins.flash_attn.modules.mha import MHA
+    MHA(embed_dim=16, num_heads=4, cross_attn=True, use_flash_attn=True, fused_bias_fc=True, checkpointing=True,
+        rotary_emb_base=10000.0, rotary_emb_scale_base=None, rotary_emb_interleaved=False)
+    with pytest.raises(TypeError):
+        MHA(embed_dim=16, num_heads=4, cross_attn=True, no_such_arg=1)
