@@ -145,9 +145,9 @@ public final class AppModel {
     }
 
     /// The wizard step reached so far, so an interrupted setup resumes where it stopped (spec §1).
-    public var setupStep: Int {
-        get { Int(defaults.string(forKey: Self.setupStepKey) ?? "") ?? 0 }
-        set { defaults.set(String(newValue), forKey: Self.setupStepKey) }
+    public var setupStep: String? {
+        get { defaults.string(forKey: Self.setupStepKey) }
+        set { defaults.set(newValue, forKey: Self.setupStepKey) }
     }
 
     /// Developer mode (Settings → Developer): shows the Test Cube and the recipes' raw details (spec §1).
