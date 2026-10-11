@@ -20,9 +20,7 @@ public final class WorkerProcess: Sendable {
         let (opsIn, ops) = AsyncStream.makeStream(of: String.self)
         self.events = events
         self.ops = ops
-        var overrides: [Environment.Key: String?] = [:]
-        for (k, v) in environment { overrides[Environment.Key(rawValue: k)!] = v }
-        let env = Environment.inherit.updating(overrides)
+        let env = Environment.lift(environment)
         var options = PlatformOptions()
         options.processGroupID = 0  // its own process group (pgid = pid), so kill() takes grandchildren too
         let pid = self.pid
@@ -60,8 +58,12 @@ public final class WorkerProcess: Sendable {
                     try? await stderr
                 }
                 code = result.terminationStatus.code
-            } catch {
+            } catch is CancellationError {
                 code = 128 + SIGKILL  // cancelled before start: swift-subprocess tears it down with SIGKILL
+            } catch {
+                // A missing python, a bad working directory…: say so, it becomes the step's error (M4).
+                eventsOut.yield(.stderr("could not start the worker: \(error)"))
+                code = 127
             }
             pid.value.withLock { $0 = 0 }  // never signal a reused pid
             eventsOut.yield(.exited(code))

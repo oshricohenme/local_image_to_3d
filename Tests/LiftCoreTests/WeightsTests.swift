@@ -97,6 +97,17 @@ func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data],
         #expect(r.problems == [WeightProblem(repo: "org/model", path: "sub/b.bin", issue: .missing)])
     }
 
+    /// M2: a snapshot symlink whose blob is gone is missing, not corrupt.
+    @Test func aBrokenSnapshotLinkIsMissing() async throws {
+        let (meta, hub, v) = try setup()
+        let data = Data(repeating: 3, count: 64)
+        let snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["w.bin": data], lfs: ["w.bin"])
+        try FileManager.default.removeItem(at: hub.appending(path: "models--org--model/blobs/\(sha256Hex(data))"))
+        meta.set("org/model", .success(snap))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .missing && r.problems == [WeightProblem(repo: "org/model", path: "w.bin", issue: .missing)])
+    }
+
     @Test func revisionNotDownloadedMeansAllMissing() async throws {
         let (meta, _, v) = try setup()
         meta.set("org/model", .success(RepoSnapshot(repo: "org/model", revision: "main", commit: commit, files: [RemoteFile(path: "a", size: 1), RemoteFile(path: "b", size: 2)])))

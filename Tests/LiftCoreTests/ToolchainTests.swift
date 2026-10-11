@@ -24,7 +24,7 @@ import Testing
         runner.on("\(second.path)/uv --version", code: 1)  // present but broken
         let t = Toolchain(runner: runner, searchDirs: [first.path, second.path], homebrewPrefix: "/nonexistent-brew", rosettaPrefix: "/nonexistent-rosetta")
         #expect(await t.detect() == ToolPaths(git: first.path + "/git"))
-        #expect(t.environment["PATH"] == "\(first.path):\(second.path)")
+        #expect(t.environment["PATH"] == "\(first.path):\(second.path)" && t.environment["GIT_TERMINAL_PROMPT"] == "0")
     }
 
     @Test func nonExecutableIsIgnored() throws {
@@ -62,15 +62,24 @@ import Testing
         try await t.installHomebrew(git: "/usr/bin/git", onLine: { _ in })
         let d = runner.displays
         #expect(d.count == 7)
-        #expect(d[0].hasPrefix("/usr/bin/osascript -e do shell script \"/bin/mkdir -p /opt/homebrew && /usr/sbin/chown -R "))
-        #expect(d[0].hasSuffix(":admin /opt/homebrew\" with administrator privileges"))
+        #expect(d[0].hasPrefix(#"/usr/bin/osascript -e do shell script "/bin/mkdir -p " & quoted form of "/opt/homebrew" & " && /usr/sbin/chown -R ""#))
+        #expect(d[0].hasSuffix(#":admin" & " " & quoted form of "/opt/homebrew" with administrator privileges"#))
         #expect(d[1...5] == ["/usr/bin/git -C /opt/homebrew init -q",
                              "/usr/bin/git -C /opt/homebrew config remote.origin.url https://github.com/Homebrew/brew",
                              "/usr/bin/git -C /opt/homebrew config remote.origin.fetch +refs/heads/*:refs/remotes/origin/*",
                              "/usr/bin/git -C /opt/homebrew fetch --force --quiet origin",
                              "/usr/bin/git -C /opt/homebrew checkout --force -B main origin/main"])
         #expect(d[6] == "/opt/homebrew/bin/brew update --force --quiet")
-        #expect(!d.contains { $0.contains("rm ") })
+        #expect(!d.contains { $0.contains("/bin/rm") || $0.hasPrefix("rm ") })  // nothing is deleted
+    }
+
+    /// M16: the user name and prefix reach the admin shell script quoted, whatever they contain.
+    @Test func theAdminScriptQuotesTheUserName() async throws {
+        let runner = FakeRunner()
+        let t = Toolchain(runner: runner, searchDirs: [], homebrewPrefix: "/opt/homebrew", userName: #"o'shri "x" $(id)"#)
+        try await t.installHomebrew(git: "/usr/bin/git", onLine: { _ in })
+        let script = try #require(runner.commands.first?.arguments.last)
+        #expect(script == #"do shell script "/bin/mkdir -p " & quoted form of "/opt/homebrew" & " && /usr/sbin/chown -R " & quoted form of "o'shri \"x\" $(id):admin" & " " & quoted form of "/opt/homebrew" with administrator privileges"#)
     }
 
     @Test func brewAndMetalInstallsGoThroughTheRunner() async throws {

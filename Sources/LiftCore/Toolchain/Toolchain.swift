@@ -33,9 +33,12 @@ public struct Toolchain: Sendable {
     let searchDirs: [String]
     public let homebrewPrefix: String
     let rosettaPrefix: String
+    let userName: String
 
-    public init(runner: any CommandRunner, searchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local") {
+    public init(runner: any CommandRunner, searchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local",
+                userName: String = NSUserName()) {
         self.runner = runner
+        self.userName = userName
         self.homebrewPrefix = homebrewPrefix
         self.rosettaPrefix = rosettaPrefix
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -79,7 +82,8 @@ public struct Toolchain: Sendable {
 
     /// PATH for child processes: the search directories, so `uv` and `git` resolve inside install steps.
     public var environment: [String: String] {
-        ["PATH": searchDirs.joined(separator: ":")]
+        // GIT_TERMINAL_PROMPT=0: a GUI app has no terminal; a repo needing credentials fails instead of hanging.
+        ["PATH": searchDirs.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0"]
     }
 
     public func metalToolchainInstalled() async -> Bool {
@@ -92,8 +96,10 @@ public struct Toolchain: Sendable {
     /// overwritten by Homebrew's own, nothing is deleted) and `brew update` runs.
     public func installHomebrew(git: String, onLine: @escaping @Sendable (String) -> Void) async throws {
         let p = homebrewPrefix
-        let admin = "/bin/mkdir -p \(p) && /usr/sbin/chown -R \(NSUserName()):admin \(p)"
-        try await runner.check(ShellCommand("/usr/bin/osascript", ["-e", "do shell script \"\(admin)\" with administrator privileges"]), onLine: onLine)
+        // AppleScript's `quoted form of` shell-quotes the values, whatever they contain (M16).
+        func q(_ s: String) -> String { "quoted form of \"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+        let script = "do shell script \"/bin/mkdir -p \" & \(q(p)) & \" && /usr/sbin/chown -R \" & \(q(userName + ":admin")) & \" \" & \(q(p)) with administrator privileges"
+        try await runner.check(ShellCommand("/usr/bin/osascript", ["-e", script]), onLine: onLine)
         for args in [["init", "-q"], ["config", "remote.origin.url", Self.brewRepo],
                      ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
                      ["fetch", "--force", "--quiet", "origin"], ["checkout", "--force", "-B", "main", "origin/main"]] {

@@ -55,12 +55,11 @@ public struct SubprocessRunner: CommandRunner {
     public init() {}
 
     public func run(_ command: ShellCommand, onLine: @escaping @Sendable (String) -> Void) async throws -> Int32 {
-        var overrides: [Environment.Key: String?] = [:]
-        for (k, v) in command.environment { overrides[Environment.Key(rawValue: k)!] = v }
+        let env = Environment.lift(command.environment)
         let result = try await Subprocess.run(
             .path(FilePath(command.executable)),
             arguments: Arguments(command.arguments),
-            environment: .inherit.updating(overrides),
+            environment: env,
             workingDirectory: command.workingDirectory.map { FilePath($0) },
             input: .none,
             output: .sequence,

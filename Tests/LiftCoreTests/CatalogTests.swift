@@ -29,6 +29,15 @@ import Testing
         #expect(c.problems.contains { if case .invalid("b", "broken", _) = $0 { true } else { false } })
     }
 
+    /// M17: hidden folders (kept copies like `.a-123`, `.bundled-previous`) are never scanned as recipes.
+    @Test func hiddenFoldersAreSkipped() throws {
+        let dir = try Fixtures.tempDir()
+        _ = try writeRecipe(cubeYAML, id: "test-cube", in: dir)
+        try FileManager.default.copyItem(at: dir.appending(path: "test-cube"), to: dir.appending(path: ".test-cube-123"))
+        let c = Catalog.scan([RecipeSourceDir(name: "bundled-local", dir: dir)], includeDeveloper: true)
+        #expect(c.entries.keys.sorted() == ["test-cube"] && c.problems.isEmpty)
+    }
+
     @Test func missingSourceFolderIsEmpty() {
         #expect(Catalog.scan([RecipeSourceDir(name: "gone", dir: URL(filePath: "/nonexistent-lift-source"))]).entries.isEmpty)
     }

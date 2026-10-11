@@ -108,6 +108,22 @@ extension Fixtures {
         #expect(!FileManager.default.fileExists(atPath: lift.config.workdir.appending(path: "models").path))  // nothing installed
     }
 
+    /// M14: a chained step whose previous step produced nothing fails with a clear message.
+    @Test func aChainedStepWithNoInputFailsClearly() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        _ = try await lift.modelsInstall("test-cube", confirm: true, wait: true)  // fake install
+        _ = try await lift.queuePause()
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")])).job.id
+        try await lift.store.db.write { db in
+            try db.execute(sql: "UPDATE step SET state = 'succeeded', outputs = '[]' WHERE jobId = ? AND idx = 0", arguments: [id])
+            try db.execute(sql: "UPDATE job SET currentStep = 1 WHERE id = ?", arguments: [id])
+        }
+        _ = try await lift.queueResume()
+        let v = try await lift.jobsWait(id, timeout: .seconds(10))
+        #expect(v.job.state == .failed && v.steps[1].error == "the previous step produced no output to pass on")
+        #expect(await lift.workersList().isEmpty)  // no worker was started for it
+    }
+
     @Test func forceStartNeedsConfirm() async throws {
         let lift = try await Fixtures.lift()
         let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).job.id

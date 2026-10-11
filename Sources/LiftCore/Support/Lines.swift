@@ -39,6 +39,16 @@ public final class LogFile: Sendable {
     }
 }
 
+extension Environment {
+    /// Lift's own environment minus what would redirect a child's Python or shim, plus `explicit` (M1).
+    /// `LIFT_SHIM` etc. reach a child only when Lift sets them for it.
+    static func lift(_ explicit: [String: String]) -> Environment {
+        var overrides: [Environment.Key: String?] = ["LIFT_SHIM": nil, "PYTHONPATH": nil, "PYTHONHOME": nil, "VIRTUAL_ENV": nil]
+        for (k, v) in explicit { overrides[Environment.Key(rawValue: k)!] = v }
+        return .inherit.updating(overrides)
+    }
+}
+
 extension TerminationStatus {
     /// The exit code, or 128 + signal like a shell.
     var code: Int32 {

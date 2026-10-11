@@ -24,6 +24,8 @@ struct InstallState: Codable {
     var digest: String
     var failedCommand: String?
     var exitCode: Int32?
+    /// Why it failed, for any failure.
+    var reason: String?
     var at: Date
 }
 
@@ -97,7 +99,7 @@ public struct Installer: Sendable {
             }
             return .notInstalled
         }
-        guard state.installed else { return .installFailed(command: state.failedCommand ?? "", exitCode: state.exitCode ?? -1) }
+        guard state.installed else { return .installFailed(command: state.failedCommand ?? state.reason ?? "", exitCode: state.exitCode ?? -1) }
         if let source, state.digest != Self.digest(source.directory) || state.commit != (pin ?? source.recipe.commit) {
             return .updateAvailable(installedCommit: state.commit, recipeCommit: pin ?? source.recipe.commit)
         }
@@ -189,9 +191,12 @@ public struct Installer: Sendable {
             try await runner.check(smoke, onLine: lines)
             try writeState(InstallState(installed: true, commit: commit, digest: Self.digest(entry.directory), at: Date()), id: recipe.id)
             lines("installed \(recipe.id)")
-        } catch let error as LiftError {
-            if case .commandFailed(let command, let code, _) = error {
-                try? writeState(InstallState(installed: false, commit: commit, digest: "", failedCommand: command, exitCode: code, at: Date()), id: recipe.id)
+        } catch {
+            // Any failure, not only a failing command, leaves a failed state with its reason (M10).
+            if case LiftError.commandFailed(let command, let code, _) = error {
+                try? writeState(InstallState(installed: false, commit: commit, digest: "", failedCommand: command, exitCode: code, reason: "\(error)", at: Date()), id: recipe.id)
+            } else {
+                try? writeState(InstallState(installed: false, commit: commit, digest: "", failedCommand: nil, exitCode: -1, reason: "\(error)", at: Date()), id: recipe.id)
             }
             lines("install failed: \(error)")
             throw error
@@ -291,8 +296,15 @@ public struct Installer: Sendable {
             log.write(line)
             onLine(line)
         }
+        // Not the worker environment: no LIFT_SHIM or PYTHONPATH for a tool (M1).
+        let venv = dir(recipe.id).appending(path: "venv").path
+        var env = toolEnvironment
+        env["PATH"] = "\(venv)/bin:" + (toolEnvironment["PATH"] ?? "/usr/bin:/bin")
+        env["VIRTUAL_ENV"] = venv
+        env["HF_HUB_CACHE"] = hfHub.path
+        if let token = hfToken() { env["HF_TOKEN"] = token }
         for w in recipe.weights {
-            let command = ShellCommand(hf, ["download", w.repo, "--revision", w.revision], environment: workerEnvironment(recipe))
+            let command = ShellCommand(hf, ["download", w.repo, "--revision", w.revision], environment: env)
             lines("$ \(command.display)")
             try await runner.check(command, onLine: lines)
         }

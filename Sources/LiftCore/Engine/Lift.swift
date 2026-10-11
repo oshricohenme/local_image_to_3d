@@ -311,18 +311,22 @@ public actor Lift {
 
     func startStep(job: JobRecord, step: StepRecord) throws {
         guard let recipe = installed[step.recipe] else { return }
-        let need = try store.db.read { try Estimates.need($0, recipe: recipe, task: step.task, settings: step.settings) }
-        let worker = workers.values.first { $0.recipe.id == recipe.id && $0.available } ?? spawn(recipe, baseline: need.load)
-        worker.idleSince = nil
-        worker.job = Assignment(jobId: job.id, step: step.idx, task: step.task,
-                                keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
         var step = step
         // A chained step's first input comes from the previous step's first output (refilled on every start, so retries see new outputs).
         let stepsDir = jobsDir.appending(path: "\(job.id)/steps").path
         if step.idx > 0, let first = recipe.task(step.task)?.inputs.first, step.inputs[first.name]?.hasPrefix(stepsDir) != false {
             let previous = try store.db.read { try StepRecord.fetchOne($0, key: ["jobId": job.id, "idx": step.idx - 1]) }
-            step.inputs[first.name] = previous?.outputs.first
+            guard let output = previous?.outputs.first else {
+                try store.db.write { db in try self.setState(db, job: job, step: step, .failed, error: "the previous step produced no output to pass on") }
+                return
+            }
+            step.inputs[first.name] = output
         }
+        let need = try store.db.read { try Estimates.need($0, recipe: recipe, task: step.task, settings: step.settings) }
+        let worker = workers.values.first { $0.recipe.id == recipe.id && $0.available } ?? spawn(recipe, baseline: need.load)
+        worker.idleSince = nil
+        worker.job = Assignment(jobId: job.id, step: step.idx, task: step.task,
+                                keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
         step.workerId = worker.id
         step.startedAt = Date()
         step.stage = nil

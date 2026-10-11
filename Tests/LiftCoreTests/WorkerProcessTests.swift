@@ -78,6 +78,14 @@ func isExited(_ e: WorkerEvent) -> Bool { if case .exited = e { true } else { fa
         #expect(try await r.wait(for: isExited).last == .exited(7))
     }
 
+    /// M4: a worker that can't start says why.
+    @Test func aSpawnErrorIsDescribed() async throws {
+        let w = WorkerProcess(executable: "/nonexistent-lift/python", arguments: [], environment: [:], workingDirectory: nil)
+        let evs = try await EventRecorder(w).wait(for: isExited)
+        #expect(evs.last == .exited(127))
+        #expect(evs.contains { if case .stderr(let l) = $0 { l.hasPrefix("could not start the worker: ") } else { false } })
+    }
+
     @Test func heartbeatsArrive() async throws {
         let dir = try Fixtures.tempDir()
         let w = try await launch(dir)

@@ -43,8 +43,9 @@ public struct Catalog: Sendable {
         for source in sources {
             let (name, dir) = (source.name, source.dir)
             let folders = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            // Hidden folders are Lift's kept copies (`.a-123`, `.bundled-previous`), never recipes (M17).
             for folder in folders.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-            where folder.lastPathComponent != "shared" && FileManager.default.fileExists(atPath: folder.appending(path: "recipe.yaml").path) {
+            where !folder.lastPathComponent.hasPrefix(".") && folder.lastPathComponent != "shared" && FileManager.default.fileExists(atPath: folder.appending(path: "recipe.yaml").path) {
                 switch RecipeLoad.read(directory: folder) {
                 case .ok(let recipe) where recipe.developer && !includeDeveloper:
                     continue

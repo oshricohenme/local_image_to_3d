@@ -54,8 +54,10 @@ func weightedBundle() throws -> URL {
         try writeHFCache(hub: hub, repo: "org/weights", commit: commit, files: ["w.bin": Data([1, 2, 3])], lfs: ["w.bin"])  // the user downloaded it
         #expect(try await lift.modelsVerifyWeights("weighted").state == .ok)
         #expect(try await lift.modelsGet("weighted").status == .installed(commit: nil))
-        // Verified, so the job leaves the queue. (Its fake venv can't start a worker; it then fails, which is fine here.)
-        #expect(try await eventually { try await lift.jobsGet(id).job.state != .waiting })
+        // Verified, so the job leaves the queue. Its fake venv has no python, so the worker can't start: the
+        // step must say why (M4), not just "exit 137".
+        #expect(try await eventually { try await lift.jobsGet(id).job.state == .failed })
+        #expect(try await lift.jobsGet(id).job.error?.contains("could not start the worker") == true)
     }
 
     @Test func aCheckThatThrowsDoesNotBlockLaterChecks() async throws {

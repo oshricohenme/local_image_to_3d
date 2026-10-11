@@ -228,8 +228,10 @@ public struct WeightsVerifier: Sendable {
         for s in snapshots {
             let dir = snapshotDir(repo: s.repo, commit: s.commit)
             for f in s.files {
-                let url = dir.appending(path: f.path).resolvingSymlinksInPath()
-                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                let link = dir.appending(path: f.path)
+                let url = link.resolvingSymlinksInPath()
+                // fileExists follows the link: a snapshot link whose blob is gone is missing, not corrupt (M2).
+                guard FileManager.default.fileExists(atPath: link.path), let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
                     report.problems.append(WeightProblem(repo: s.repo, path: f.path, issue: .missing))
                     continue
                 }

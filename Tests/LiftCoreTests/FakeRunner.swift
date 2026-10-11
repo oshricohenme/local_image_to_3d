@@ -10,12 +10,14 @@ final class FakeRunner: CommandRunner {
         var match: String
         var code: Int32
         var lines: [String]
+        var effect: (@Sendable () -> Void)?
     }
 
     private let state = Mutex<(commands: [ShellCommand], rules: [Rule])>(([], []))
 
-    func on(_ match: String, code: Int32 = 0, lines: [String] = []) {
-        state.withLock { $0.rules.append(Rule(match: match, code: code, lines: lines)) }
+    /// `effect` runs when the rule matches (e.g. to break something mid-install).
+    func on(_ match: String, code: Int32 = 0, lines: [String] = [], effect: (@Sendable () -> Void)? = nil) {
+        state.withLock { $0.rules.append(Rule(match: match, code: code, lines: lines, effect: effect)) }
     }
 
     var commands: [ShellCommand] { state.withLock { $0.commands } }
@@ -26,6 +28,7 @@ final class FakeRunner: CommandRunner {
             s.commands.append(command)
             return s.rules.first { command.display.contains($0.match) }
         }
+        rule?.effect?()
         for line in rule?.lines ?? [] { onLine(line) }
         if (rule?.code ?? 0) == 0, command.arguments.contains("clone"), let dest = command.arguments.last {
             try FileManager.default.createDirectory(atPath: dest + "/.git", withIntermediateDirectories: true)  // like git would

@@ -69,6 +69,20 @@ import Testing
         #expect(runner.commands.isEmpty)
     }
 
+    /// M10: any failure (not only a failing command) marks the install failed, with the reason, in state and log.
+    @Test func anyInstallFailureIsRecorded() async throws {
+        let runner = FakeRunner()
+        let entry = try source()
+        runner.on("uv pip install torch", effect: { try? FileManager.default.removeItem(at: entry.directory) })  // the recipe folder vanishes
+        let inst = try installer(runner)
+        await #expect(throws: (any Error).self) { try await inst.install(entry, pin: nil, onLine: { _ in }) }
+        guard case .installFailed(let reason, let code) = inst.status(id: "pixal3d", source: nil, pin: nil) else {
+            Issue.record("status \(inst.status(id: "pixal3d", source: nil, pin: nil))"); return
+        }
+        #expect(code == -1 && !reason.isEmpty)
+        #expect(try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8).contains("install failed: "))
+    }
+
     @Test func gatedWeightsNeedAToken() async throws {
         let runner = FakeRunner()
         let inst = try installer(runner, token: nil)
