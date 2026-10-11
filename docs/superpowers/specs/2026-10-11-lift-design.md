@@ -324,7 +324,10 @@ recipe's `brew:` packages (first, so native builds can link against them) →
 `git clone --filter=blob:none` + `checkout <commit>` → `uv venv --python <python>` → `install` steps →
 substitutes → `lift_shim` + `launcher.py` → a smoke import. Each step is logged to `install.log` and
 streamed live. Any failure leaves the model `install_failed` with the log kept; a partial install never
-counts as installed.
+counts as installed. `install_failed` carries a `reason` in plain words (the step, then the cause picked
+out of its output), which the app shows on the card and the model page. Lift's tools run without the
+user's or the system's git config (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`): a git-lfs
+filter there broke UniRig's checkout, and Lift doesn't need LFS files.
 
 **Weights: you start the download; Lift verifies it.**
 - Lift never downloads weights on its own. Each recipe's `weights:` list (repo and optional revision) is

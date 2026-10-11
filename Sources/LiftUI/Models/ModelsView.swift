@@ -243,6 +243,9 @@ struct DownloadControls: View {
             .accessibilityElement(children: .contain)
         } else if case .installing = model.status {
             InstallProgressRow(app: app, model: model)
+        } else if case .installFailed(_, _, let reason) = model.status {
+            Label(reason, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                .lineLimit(3).help(reason)
         }
     }
 }

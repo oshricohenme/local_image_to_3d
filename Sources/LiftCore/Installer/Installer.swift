@@ -9,7 +9,8 @@ public enum ModelStatus: Codable, Sendable, Equatable {
     case installed(commit: String?)
     /// Installed, but the source recipe (or its pin) changed since. Reinstall to update.
     case updateAvailable(installedCommit: String?, recipeCommit: String?)
-    case installFailed(command: String, exitCode: Int32)
+    /// `reason`: which step failed and why, in plain words (`InstallFailure`); the full output is in install.log.
+    case installFailed(command: String, exitCode: Int32, reason: String)
     case unsupported(reason: String)
     /// Installed, but the last weights check found files missing / wrong.
     case weightsMissing([WeightProblem])
@@ -27,6 +28,36 @@ struct InstallState: Codable {
     /// Why it failed, for any failure.
     var reason: String?
     var at: Date
+}
+
+/// A failed install step in plain words: the step, then the cause, picked out of the command's output.
+enum InstallFailure {
+    static func explain(command: String?, output: String) -> String {
+        let tool = command?.split(separator: " ").first.map { URL(fileURLWithPath: String($0)).lastPathComponent }
+        let step = switch tool {
+        case "git"?: "Getting the code from GitHub"
+        case "uv"?: "Setting up Python"
+        case "brew"?: "Installing tools with Homebrew"
+        case nil: "The install"
+        default: "Checking the install"
+        }
+        return "\(step) failed: \(cause(output))"
+    }
+
+    static func cause(_ output: String) -> String {
+        if let m = output.firstMatch(of: /([\w.+-]+): command not found/) { return "a program it needs, \(m.1), isn't installed." }
+        if output.contains("No space left on device") { return "your Mac is out of disk space. Free up some space and try again." }
+        if ["Could not resolve host", "Failed to connect", "Network is unreachable", "Connection timed out"].contains(where: output.contains) {
+            return "Lift couldn't reach the internet. Check your connection and try again."
+        }
+        // Otherwise the last error line, else the last line that isn't the command itself or progress.
+        let lines = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("`") && !$0.contains("%") }
+        let errorLine = lines.last { $0.lowercased().hasPrefix("error") || $0.hasPrefix("fatal:") }
+        var line = errorLine ?? lines.last ?? "no details were given."
+        for prefix in ["fatal: ", "error: ", "Error: ", "ERROR: "] where line.hasPrefix(prefix) { line.removeFirst(prefix.count) }
+        return String(line.prefix(300))
+    }
 }
 
 public struct UpstreamStatus: Codable, Sendable, Equatable {
@@ -99,7 +130,10 @@ public struct Installer: Sendable {
             }
             return .notInstalled
         }
-        guard state.installed else { return .installFailed(command: state.failedCommand ?? state.reason ?? "", exitCode: state.exitCode ?? -1) }
+        guard state.installed else {
+            return .installFailed(command: state.failedCommand ?? state.reason ?? "", exitCode: state.exitCode ?? -1,
+                                  reason: InstallFailure.explain(command: state.failedCommand, output: state.reason ?? ""))
+        }
         if let source, state.digest != Self.digest(source.directory) || state.commit != (pin ?? source.recipe.commit) {
             return .updateAvailable(installedCommit: state.commit, recipeCommit: pin ?? source.recipe.commit)
         }

@@ -110,7 +110,7 @@ import Testing
         #expect(ModelPage.action(with(pixal, .installing(phase: "getting the code"))) == .installing)
         #expect(ModelPage.action(with(pixal, .installed(commit: "c"))) == .ready(updateAvailable: false))
         #expect(ModelPage.action(with(pixal, .updateAvailable(installedCommit: "a", recipeCommit: "b"))) == .ready(updateAvailable: true))
-        #expect(ModelPage.action(with(pixal, .installFailed(command: "uv pip install x", exitCode: 1))) == .failed("The install stopped at a step that failed. The install log has the details."))
+        #expect(ModelPage.action(with(pixal, .installFailed(command: "uv pip install x", exitCode: 1, reason: "Setting up Python failed: no network"))) == .failed("Setting up Python failed: no network"))
         #expect(ModelPage.action(with(pixal, .weightsMissing([])))  == .failed("Some of the model's files are missing. Download them again to fix it."))
         #expect(ModelPage.action(with(pixal, .unsupported(reason: "needs CUDA"))) == .unsupported("needs CUDA"))
         #expect(ModelPage.action(with(pixal, .installed(commit: "c"), download(.failed, reason: "No network"))) == .failed("No network"))

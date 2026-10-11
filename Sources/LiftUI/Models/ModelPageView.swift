@@ -22,7 +22,7 @@ public enum ModelPage {
         case .installing: return .installing
         case .installed: return .ready(updateAvailable: false)
         case .updateAvailable: return .ready(updateAvailable: true)
-        case .installFailed: return .failed("The install stopped at a step that failed. The install log has the details.")
+        case .installFailed(_, _, let reason): return .failed(reason)
         case .weightsMissing: return .failed("Some of the model's files are missing. Download them again to fix it.")
         case .weightsCorrupt: return .failed("Some of the model's files are damaged. Download them again to fix it.")
         case .unsupported(let reason): return .unsupported(reason)

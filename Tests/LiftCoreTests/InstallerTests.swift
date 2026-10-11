@@ -60,10 +60,30 @@ import Testing
         await #expect(throws: LiftError.commandFailed(command: "uv pip install torch torchvision", exitCode: 1, tail: ["error: no matching distribution"])) {
             try await inst.install(entry, pin: nil, onLine: { _ in })
         }
-        #expect(inst.status(id: "pixal3d", source: entry, pin: nil) == .installFailed(command: "uv pip install torch torchvision", exitCode: 1))
+        #expect(inst.status(id: "pixal3d", source: entry, pin: nil) == .installFailed(command: "uv pip install torch torchvision", exitCode: 1,
+                                                                                   reason: "Setting up Python failed: no matching distribution"))
         #expect(inst.installedRecipe("pixal3d") == nil)
         #expect(try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8).contains("error: no matching distribution"))
         #expect(!runner.displays.contains { $0.contains("lift_worker --check") })
+    }
+
+    /// UniRig's real clone failure (first real run): the reason names the step and the error, not the progress lines.
+    @Test func aFailedStepIsExplainedInPlainWords() {
+        let output = """
+        `/usr/bin/git clone --filter=blob:none https://github.com/VAST-AI-Research/UniRig /x/.repo-staging` failed with exit code 128
+        Cloning into '/x/.repo-staging'...
+        Updating files:  24% (34/141)
+        git-lfs filter-process: git-lfs: command not found
+        fatal: the remote end hung up unexpectedly
+        warning: Clone succeeded, but checkout failed.
+        """
+        #expect(InstallFailure.explain(command: "/usr/bin/git clone --filter=blob:none https://github.com/VAST-AI-Research/UniRig /x", output: output)
+                == "Getting the code from GitHub failed: a program it needs, git-lfs, isn't installed.")
+        #expect(InstallFailure.explain(command: "/usr/bin/git clone x", output: "fatal: unable to access 'https://github.com/a/b/': Could not resolve host: github.com")
+                == "Getting the code from GitHub failed: Lift couldn't reach the internet. Check your connection and try again.")
+        #expect(InstallFailure.explain(command: "/opt/homebrew/bin/brew install cmake", output: "Error: No space left on device")
+                == "Installing tools with Homebrew failed: your Mac is out of disk space. Free up some space and try again.")
+        #expect(InstallFailure.explain(command: nil, output: "the recipe folder is gone") == "The install failed: the recipe folder is gone")
     }
 
     @Test func brewPackagesNeedNativeHomebrew() async throws {
@@ -79,7 +99,7 @@ import Testing
         runner.on("uv pip install torch", effect: { try? FileManager.default.removeItem(at: entry.directory) })  // the recipe folder vanishes
         let inst = try installer(runner)
         await #expect(throws: (any Error).self) { try await inst.install(entry, pin: nil, onLine: { _ in }) }
-        guard case .installFailed(let reason, let code) = inst.status(id: "pixal3d", source: nil, pin: nil) else {
+        guard case .installFailed(_, let code, let reason) = inst.status(id: "pixal3d", source: nil, pin: nil) else {
             Issue.record("status \(inst.status(id: "pixal3d", source: nil, pin: nil))"); return
         }
         #expect(code == -1 && !reason.isEmpty)

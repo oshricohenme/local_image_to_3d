@@ -16,7 +16,7 @@ extension Fixtures {
         if installCube {
             let model = try await lift.modelsInstall("test-cube", confirm: true, wait: true).value
             guard case .installed = model?.status else {
-                throw LiftError.invalidState("test-cube install failed:\n\((try? await lift.modelsInstallLog("test-cube")) ?? "")")
+                throw LiftError.invalidState("test-cube install failed: \(String(describing: model?.status))\n\((try? await lift.modelsInstallLog("test-cube")) ?? "")")
             }
         }
         return lift

@@ -25,6 +25,8 @@ import Testing
         let t = Toolchain(runner: runner, searchDirs: [first.path, second.path], homebrewPrefix: "/nonexistent-brew", rosettaPrefix: "/nonexistent-rosetta")
         #expect(await t.detect() == ToolPaths(git: first.path + "/git"))
         #expect(t.environment["PATH"] == "\(first.path):\(second.path)" && t.environment["GIT_TERMINAL_PROMPT"] == "0")
+        // The user's own git config never applies: an LFS filter there, with git-lfs off Lift's PATH, broke UniRig's clone.
+        #expect(t.environment["GIT_CONFIG_GLOBAL"] == "/dev/null" && t.environment["GIT_CONFIG_NOSYSTEM"] == "1")
     }
 
     @Test func nonExecutableIsIgnored() throws {

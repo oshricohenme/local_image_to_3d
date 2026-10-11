@@ -91,7 +91,8 @@ public struct Toolchain: Sendable {
     /// PATH for child processes: the search directories, so `uv` and `git` resolve inside install steps.
     public var environment: [String: String] {
         // GIT_TERMINAL_PROMPT=0: a GUI app has no terminal; a repo needing credentials fails instead of hanging.
-        ["PATH": searchDirs.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0"]
+        // No user or system git config: an LFS filter there (with git-lfs off this PATH) broke UniRig's checkout.
+        ["PATH": searchDirs.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
     }
 
     public func metalToolchainInstalled() async -> Bool {
