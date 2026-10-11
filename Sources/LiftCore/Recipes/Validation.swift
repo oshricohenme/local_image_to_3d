@@ -18,6 +18,11 @@ extension Recipe {
         for w in weights where w.repo.split(separator: "/").count != 2 {
             out.append("weights: \(w.repo) must be owner/name")
         }
+        for w in weights where w.files?.isEmpty == true { out.append("weights: \(w.repo): files must list at least one path") }
+        out += attribution.problems
+        for e in errors where (try? NSRegularExpression(pattern: e.match)) == nil || e.message.isEmpty {
+            out.append("errors: \(e.match) needs a valid regular expression and a message")
+        }
         // Bounds keep every number convertible to bytes without trapping.
         func gbOK(_ v: Double) -> Bool { v.isFinite && v > 0 && v <= 4096 }
         if !gbOK(resources.memoryGB) { out.append("resources.memory_gb must be > 0 and ≤ 4096") }

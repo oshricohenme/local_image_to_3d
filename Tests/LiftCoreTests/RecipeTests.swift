@@ -27,6 +27,15 @@ install:
 substitutes: [flash_attn]
 shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }
 brew: [libusb]
+attribution:
+  project: Pixal3D
+  authors: [TencentARC]
+  homepage: https://ldyang694.github.io/projects/pixal3d/
+  license: { spdx: MIT, url: https://github.com/TencentARC/Pixal3D/blob/master/LICENSE }
+  components:
+    - { name: RMBG-2.0, role: background removal, url: https://huggingface.co/briaai/RMBG-2.0, license: { spdx: CC-BY-NC-4.0, url: https://creativecommons.org/licenses/by-nc/4.0/ }, restrictions: [non-commercial] }
+errors:
+  - { match: "out of memory", message: "Your Mac ran out of memory for this model." }
 weights:
   - { repo: TencentARC/Pixal3D, gated: false }
   - { repo: briaai/RMBG-2.0, revision: 1f3e2a7c, gated: true }
@@ -66,6 +75,44 @@ tasks:
         #expect(t.settings.first?.options == [.int(1024), .int(1536)])
         #expect(t.settings.first { $0.key == "manual_fov" }?.default == .float(-1.0))
         #expect(r.stages == [Recipe.StagePattern(pattern: #"^\[Stage\] (?P<name>.+)$"#)])
+    }
+
+    @Test func plan4FieldsParse() throws {
+        let yaml = pixalYAML.replacingOccurrences(of: "  - { repo: TencentARC/Pixal3D, gated: false }",
+                                                  with: "  - { repo: TencentARC/Pixal3D, gated: false, files: [pipeline.json, ckpts/a.safetensors] }")
+            + "\nmetal_toolchain: true\ndescription: Turns a photo into a 3D model.\n"
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.metalToolchain && r.description == "Turns a photo into a 3D model.")
+        #expect(r.weights[0].files == ["pipeline.json", "ckpts/a.safetensors"] && r.weights[1].files == nil)
+        #expect(r.attribution.credit == "Pixal3D by TencentARC (MIT)" && r.attribution.components.first?.restrictions == ["non-commercial"])
+        guard case .ok(let plain) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { return }
+        #expect(!plain.metalToolchain && plain.description == nil)
+    }
+
+    @Test func attributionIsRequiredAndComplete() throws {
+        let start = pixalYAML.range(of: "attribution:")!.lowerBound, end = pixalYAML.range(of: "errors:")!.lowerBound
+        guard case .invalid(let missing) = RecipeLoad.read(directory: try writeRecipe(pixalYAML.replacingCharacters(in: start..<end, with: ""),
+                                                                                       id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(missing.contains("attribution is required"))
+        let blank = pixalYAML.replacingOccurrences(of: "  authors: [TencentARC]", with: "  authors: []")
+        guard case .invalid(let problems) = RecipeLoad.read(directory: try writeRecipe(blank, id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(problems.contains("attribution.authors must list who made it"))
+    }
+
+    @Test func plainErrorsMatchTheErrorOrTheLog() throws {
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { return }
+        #expect(r.plainError("RuntimeError: MPS backend out of memory") == "Your Mac ran out of memory for this model.")
+        #expect(r.plainError("worker exited with code 9", log: ["...", "torch: out of memory"]) == "Your Mac ran out of memory for this model.")
+        #expect(r.plainError("ValueError: boom") == nil)
+        let bad = pixalYAML.replacingOccurrences(of: #"match: "out of memory""#, with: #"match: "out of (memory""#)
+        guard case .invalid(let problems) = RecipeLoad.read(directory: try writeRecipe(bad, id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(problems.contains("needs a valid regular expression"))
     }
 
     @Test func newerSchemaIsReportedNotParsed() throws {

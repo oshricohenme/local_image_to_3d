@@ -69,11 +69,14 @@ public struct Recipe: Codable, Sendable, Equatable {
         public var repo: String
         public var revision: String
         public var gated: Bool
+        /// Only these files of the repo (exact paths), when upstream uses a few of many; nil means the whole repo.
+        public var files: [String]?
 
-        public init(repo: String, revision: String = "main", gated: Bool = false) {
+        public init(repo: String, revision: String = "main", gated: Bool = false, files: [String]? = nil) {
             self.repo = repo
             self.revision = revision
             self.gated = gated
+            self.files = files
         }
 
         public init(from decoder: any Decoder) throws {
@@ -81,6 +84,7 @@ public struct Recipe: Codable, Sendable, Equatable {
             repo = try c.decode(String.self, forKey: .repo)
             revision = try c.decodeIfPresent(String.self, forKey: .revision) ?? "main"
             gated = try c.decodeIfPresent(Bool.self, forKey: .gated) ?? false
+            files = try c.decodeIfPresent([String].self, forKey: .files)
         }
     }
 
@@ -127,6 +131,13 @@ public struct Recipe: Codable, Sendable, Equatable {
         }
     }
 
+    /// `errors:` — a plain-language message for a known failure (principle 4). `match` is a regular
+    /// expression tried against the step's error and log tail; the raw error stays in the log.
+    public struct ErrorMessage: Codable, Sendable, Equatable {
+        public var match: String
+        public var message: String
+    }
+
     public struct StagePattern: Codable, Sendable, Equatable {
         /// Python `re` syntax; named groups `name`, `pct`, or `n` + `total`.
         public var pattern: String
@@ -138,6 +149,8 @@ public struct Recipe: Codable, Sendable, Equatable {
     public var publisher: String?
     public var license: String?
     public var homepage: String?
+    /// One or two plain sentences: what the model is good at and its limits.
+    public var description: String?
     public var repo: String?
     public var commit: String?
     public var python: String
@@ -148,7 +161,12 @@ public struct Recipe: Codable, Sendable, Equatable {
     public var shim: Shim?
     /// Native Homebrew packages (e.g. `libusb`); their `lib/` goes on the worker's `DYLD_FALLBACK_LIBRARY_PATH`.
     public var brew: [String]
+    /// The install builds Metal shaders, so it needs the Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`).
+    public var metalToolchain: Bool
     public var weights: [Weight]
+    /// Who made it and under which licenses (spec §4a). Required: a recipe without it doesn't load.
+    public var attribution: Attribution
+    public var errors: [ErrorMessage]
     /// Developer-only (the Test Cube): hidden unless the `dev_recipes` setting or `LIFT_DEV_RECIPES=1` is on.
     public var developer: Bool
     public var resources: Resources
@@ -163,6 +181,7 @@ public struct Recipe: Codable, Sendable, Equatable {
         publisher = try c.decodeIfPresent(String.self, forKey: .publisher)
         license = try c.decodeIfPresent(String.self, forKey: .license)
         homepage = try c.decodeIfPresent(String.self, forKey: .homepage)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
         repo = try c.decodeIfPresent(String.self, forKey: .repo)
         commit = try c.decodeIfPresent(String.self, forKey: .commit)
         python = try c.decodeIfPresent(String.self, forKey: .python) ?? "3.11"
@@ -171,14 +190,32 @@ public struct Recipe: Codable, Sendable, Equatable {
         substitutes = try c.decodeIfPresent([String].self, forKey: .substitutes) ?? []
         shim = try c.decodeIfPresent(Shim.self, forKey: .shim)
         brew = try c.decodeIfPresent([String].self, forKey: .brew) ?? []
+        metalToolchain = try c.decodeIfPresent(Bool.self, forKey: .metalToolchain) ?? false
         weights = try c.decodeIfPresent([Weight].self, forKey: .weights) ?? []
+        guard let attribution = try c.decodeIfPresent(Attribution.self, forKey: .attribution) else {
+            throw DecodingError.dataCorruptedError(forKey: .attribution, in: c,
+                debugDescription: "attribution is required: who made it, where it comes from and its license (spec §4a)")
+        }
+        self.attribution = attribution
+        errors = try c.decodeIfPresent([ErrorMessage].self, forKey: .errors) ?? []
         developer = try c.decodeIfPresent(Bool.self, forKey: .developer) ?? false
         resources = try c.decode(Resources.self, forKey: .resources)
         stages = try c.decodeIfPresent([StagePattern].self, forKey: .stages) ?? []
         tasks = try c.decode([RecipeTask].self, forKey: .tasks)
     }
 
+    enum CodingKeys: String, CodingKey {
+        case schema, id, name, publisher, license, homepage, description, repo, commit, python, platform, install, substitutes, shim, brew
+        case metalToolchain = "metal_toolchain", weights, attribution, errors, developer, resources, stages, tasks
+    }
+
     public func task(_ id: String) -> RecipeTask? { tasks.first { $0.id == id } }
+
+    /// The recipe's plain message for a failure, if one of its `errors` matches the error or the log tail.
+    public func plainError(_ error: String, log: [String] = []) -> String? {
+        let text = ([error] + log).joined(separator: "\n")
+        return errors.first { text.range(of: $0.match, options: .regularExpression) != nil }?.message
+    }
 }
 
 /// The outcome of reading one recipe folder.
