@@ -15,6 +15,15 @@ struct LiftApp: App {
                 .frame(minWidth: 960, minHeight: 640)
                 .task { await delegate.start() }
         }
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Lift") { openWindow(id: "about") }
+            }
+        }
+        // About Lift → Credits (spec §4a): every model Lift runs, who made it and its license.
+        Window("About Lift", id: "about") {
+            CreditsView(app: delegate.app)
+        }
         MenuBarExtra("Lift", systemImage: "cube.transparent", isInserted: menuBarInserted) {
             MenuBarView(app: delegate.app) {
                 openWindow(id: "main")
