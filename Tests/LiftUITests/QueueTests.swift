@@ -19,3 +19,13 @@ import Testing
         #expect(Format.waitReason(.weightsUnverified) == "Weights not verified")
     }
 }
+
+@Suite struct QueueCreditTests {
+    @Test func aJobCreditsTheModelItRuns() async throws {
+        let lift = try await UIFixtures.lift()
+        let v = try await lift.jobsSubmit(UIFixtures.cube(try UIFixtures.file("chair.png").path)).accepted()
+        let links = Credits.links(v)
+        #expect(links.map(\.text) == ["Made with Test Cube (Lift test fixture) by " + (v.attribution?.authors.joined(separator: ", ") ?? "")])
+        #expect(links.first?.url == v.attribution?.homepage)
+    }
+}

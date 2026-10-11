@@ -85,6 +85,7 @@ struct QueueView: View {
                 .tint(.red)
             }
             Text(stepLine(v)).font(.caption).foregroundStyle(.secondary)
+            CreditLinks(job: v)
             ProgressView(value: step.fraction ?? 0) { Text(step.stage ?? "Starting…").font(.caption) }
             DisclosureGroup("Live log") {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in

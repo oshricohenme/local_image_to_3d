@@ -15,6 +15,22 @@ public enum Credits {
     public static func madeWith(_ a: Attribution) -> String {
         "Made with \(a.project) by \(a.authors.joined(separator: ", "))"
     }
+
+    /// One credit line and project link per model the job runs, in step order.
+    public static func links(_ v: JobView) -> [(text: String, url: URL)] {
+        v.job.credits.map { (madeWith($0), $0.homepage) }
+    }
+}
+
+/// The credit lines of a job, each linking to its project page (Queue's running jobs).
+struct CreditLinks: View {
+    let job: JobView
+
+    var body: some View {
+        ForEach(Credits.links(job), id: \.text) { link in
+            Link(link.text, destination: link.url).font(.caption)
+        }
+    }
 }
 
 /// Models → About (spec §4a): who made the model, its paper and licenses, everything it uses, the
