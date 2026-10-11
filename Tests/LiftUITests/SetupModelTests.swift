@@ -1,61 +1,86 @@
 import Foundation
-@testable import LiftCore
+import LiftCore
 import LiftServer
 import Testing
 @testable import LiftUI
 
-/// Hugging Face without the network: `users` maps keys to account names, `access` gated repos to whether they're open.
-struct FakeHF: HFAccount {
-    var users: [String: String] = [:]
-    var access: [String: Bool] = [:]
-    var bytes: Int? = nil
+/// What launch decides (spec §11, the user's rule): setup appears only when something it sets up is missing,
+/// with only those steps. Nothing missing goes straight to the main window, whatever `setupDone` says.
+@MainActor @Suite struct LaunchTests {
+    static let noUV: AppModel.PrereqsCheck = { _ in Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git"), metalToolchain: nil) }
 
-    func whoami(token: String) async throws -> String? { users[token] }
-    func canAccess(repo: String, token: String) async throws -> Bool { users[token] != nil && access[repo] == true }
-    func size(of weights: [Recipe.Weight]) async -> Int? { bytes }
-}
-
-/// Every tool present: what a Mac that's ready looks like.
-let readyTools = Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git", uv: "/opt/homebrew/bin/uv"), metalToolchain: nil)
-
-extension UIFixtures {
-    /// An app whose bundle is all of `dev-recipes/` (Pixal3D, TRELLIS.2, UniRig, Test Cube), opened on a temp workdir.
-    @MainActor static func devApp(developer: Bool = false) async throws -> AppModel {
-        let app = AppModel(defaults: MemoryPrefs(), paths: AppPaths(bundledRecipes: devRecipes, workerSource: workerSource, bridge: nil),
-                           secrets: MemorySecretStore(), serverPort: 0)
-        #expect(await app.open(try tempDir().appending(path: "workdir"), ready: false))
-        if developer { _ = try await app.engine.settingsSet("dev_recipes", .bool(true)) }
-        await app.refresh()
-        return app
+    func existingWorkdir(_ prefs: MemoryPrefs) throws -> URL {
+        let dir = try UIFixtures.tempDir().appending(path: "lift")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        prefs.set(dir.path, forKey: "workdir")
+        return dir
     }
-}
 
-@MainActor @Suite struct SetupModelTests {
-    @Test func firstLaunchRunsTheWizardUntilItsFinished() async throws {
+    @Test func nothingMissingGoesStraightToTheMainWindow() async throws {
+        let prefs = MemoryPrefs()
+        let dir = try existingWorkdir(prefs)  // and no setupDone flag at all
+        let app = try UIFixtures.newApp(prefs)
+        await app.start()
+        defer { Task { await app.close() } }
+        #expect(app.phase == .ready && !app.needs.any && app.workdir == dir && app.lift != nil)
+    }
+
+    @Test func onlyAMissingToolShowsJustYourMacThenTheMainWindow() async throws {
+        let prefs = MemoryPrefs()
+        _ = try existingWorkdir(prefs)
+        let app = try UIFixtures.newApp(prefs, check: Self.noUV)
+        await app.start()
+        defer { Task { await app.close() } }
+        #expect(app.phase == .setup && app.lift != nil)
+        let setup = SetupModel(app: app)
+        #expect(setup.steps == [.mac] && setup.step == .mac)
+        #expect(setup.railTitle == "Lift needs to fix one thing" && setup.heading == "A helper tool is missing")
+        #expect(setup.toolRows.map(\.state) == [.ready, .ready, .needed])
+        await setup.next(app)
+        #expect(app.phase == .setup)  // Continue waits until the tool is there
+        setup.prereqs = readyTools  // what Set Up My Mac returns once it's installed
+        await setup.next(app)
+        #expect(app.phase == .ready)  // a repair run has no "all set" screen
+    }
+
+    @Test func aWorkdirGoneOnALaterLaunchShowsJustYourFiles() async throws {
+        let prefs = MemoryPrefs()
+        prefs.set(try UIFixtures.tempDir().appending(path: "deleted").path, forKey: "workdir")
+        prefs.set(true, forKey: "setupDone")
+        let app = try UIFixtures.newApp(prefs)
+        await app.start()
+        defer { Task { await app.close() } }
+        #expect(app.phase == .setup && app.lift == nil && app.alert == nil)
+        let setup = SetupModel(app: app)
+        #expect(setup.steps == [.files] && setup.heading == "Lift can't find its folder")
+        setup.workdir = try UIFixtures.tempDir().appending(path: "lift")
+        await setup.next(app)
+        #expect(app.phase == .ready && app.workdir == setup.workdir && app.lift != nil)
+    }
+
+    @Test func aFirstRunWithEverythingElsePresentIsWelcomeFilesDone() async throws {
         let prefs = MemoryPrefs()
         let app = try UIFixtures.newApp(prefs)
         await app.start()
-        #expect(app.phase == .setup)
-        let setup = SetupModel(app: app, hf: FakeHF())
-        #expect(setup.step == .welcome)
+        defer { Task { await app.close() } }
+        #expect(app.phase == .setup && app.needs.firstRun)
+        let setup = SetupModel(app: app)
+        #expect(setup.steps == [.welcome, .files, .done] && setup.step == .welcome && setup.railTitle == "Set up Lift")
         await setup.next(app)
-        #expect(setup.step == .files)
+        #expect(setup.step == .files && setup.heading == "Where should Lift keep its files?")
         setup.workdir = try UIFixtures.tempDir().appending(path: "lift")
-        #expect(setup.exportDir.lastPathComponent == "Lift Exports" && !setup.cleanupAfterExport)
         setup.exportDir = try UIFixtures.tempDir().appending(path: "exports")
         setup.cleanupAfterExport = true
-        await setup.next(app)  // opens the folder: bundled recipes copied, tools checked, server up
-        #expect(setup.step == .mac && app.phase == .setup && setup.prereqs != nil)
+        await setup.next(app)  // opens the folder: bundled recipes copied, server up
+        #expect(setup.step == .done && app.phase == .setup)
         #expect(app.settings.exportDir == setup.exportDir.path && app.settings.cleanupAfterExport)
         #expect(app.generate.exportDir == setup.exportDir.path)  // Generate starts from it
         #expect(FileManager.default.fileExists(atPath: setup.workdir.appending(path: "recipes/bundled/shared").path))
-        setup.prereqs = readyTools
+        await setup.back(app)
+        #expect(setup.step == .files)
         await setup.next(app)
-        #expect(setup.step == .model)
-        await setup.skipModel(app)
-        #expect(setup.step == .done && setup.chosen == nil)
         await setup.next(app)
-        #expect(app.phase == .ready && prefs.bool(forKey: "setupDone") && prefs.string(forKey: "workdir") == setup.workdir.path)
+        #expect(app.phase == .ready && app.section == .generate && prefs.string(forKey: "workdir") == setup.workdir.path)
         await app.close()
 
         let again = try UIFixtures.newApp(prefs)
@@ -64,8 +89,54 @@ extension UIFixtures {
         await again.close()
     }
 
+    @Test func aFirstRunMissingAToolAddsYourMac() async throws {
+        let app = try UIFixtures.newApp(check: Self.noUV)
+        await app.start()
+        #expect(SetupModel(app: app).steps == [.welcome, .files, .mac, .done])
+    }
+
+    @Test func theMetalToolchainCountsOnlyWhenABundledRecipeNeedsIt() async throws {
+        let noMetal: AppModel.PrereqsCheck = { metal in Prereqs(tools: readyTools.tools, metalToolchain: metal ? false : nil) }
+        let cube = try UIFixtures.newApp(check: noMetal)  // the Test Cube needs no Metal
+        await cube.start()
+        #expect(SetupModel(app: cube).steps == [.welcome, .files, .done])
+        let dev = try UIFixtures.newApp(bundle: UIFixtures.devRecipes, check: noMetal)  // Pixal3D and TRELLIS.2 do
+        await dev.start()
+        #expect(SetupModel(app: dev).steps == [.welcome, .files, .mac, .done])
+    }
+
+    @Test func withoutAToolsCheckLaunchTrustsTheTools() async throws {
+        // The launch smoke test passes no check (AppDelegate under -LiftSmokeTest): the sidebar must come up.
+        let prefs = MemoryPrefs()
+        _ = try existingWorkdir(prefs)
+        let app = try UIFixtures.newApp(prefs, check: nil)
+        await app.start()
+        defer { Task { await app.close() } }
+        #expect(app.phase == .ready && app.prereqs == nil)
+    }
+
+    @Test func aSetupQuitAfterYourFilesResumesWithOnlyWhatsLeft() async throws {
+        let prefs = MemoryPrefs()
+        let app = try UIFixtures.newApp(prefs, check: Self.noUV)
+        await app.start()
+        let setup = SetupModel(app: app)
+        await setup.next(app)
+        setup.workdir = try UIFixtures.tempDir().appending(path: "lift")
+        await setup.next(app)
+        #expect(setup.step == .mac)
+        await app.close()  // quit
+
+        let again = try UIFixtures.newApp(prefs, check: Self.noUV)
+        await again.start()
+        defer { Task { await again.close() } }
+        let resumed = SetupModel(app: again)
+        #expect(again.phase == .setup && resumed.steps == [.mac] && again.workdir == setup.workdir)
+    }
+}
+
+@MainActor @Suite struct SetupModelTests {
     @Test func aChosenFolderGetsALiftFolderInside() async throws {
-        let setup = SetupModel(app: try UIFixtures.newApp(), hf: FakeHF())
+        let setup = SetupModel(app: try UIFixtures.newApp())
         let documents = try UIFixtures.tempDir()
         setup.choose(documents)  // e.g. ~/Documents: Lift's files go in their own folder, never loose among the user's
         #expect(setup.workdir == documents.appending(path: "Lift"))
@@ -83,7 +154,7 @@ extension UIFixtures {
 
     @Test func freeSpaceSaysHowManyModelsFitAndWarnsUnder25GB() async throws {
         var free: Int64 = 130_000_000_000
-        let setup = SetupModel(app: try UIFixtures.newApp(), hf: FakeHF(), freeSpace: { _ in free })
+        let setup = SetupModel(app: try UIFixtures.newApp(), freeSpace: { _ in free })
         #expect(setup.space?.text == "Models are large — each one needs about 6 to 20 GB. This Mac has 130 GB free, enough for about 6 models.")
         #expect(setup.space?.warning == false)
         free = 24_000_000_000
@@ -94,7 +165,7 @@ extension UIFixtures {
     }
 
     @Test func theMacStepGoesFromMissingToInstallingToReady() async throws {
-        let setup = SetupModel(app: try UIFixtures.newApp(), hf: FakeHF())
+        let setup = SetupModel(app: try UIFixtures.newApp())
         setup.prereqs = Prereqs(tools: ToolPaths(git: "/usr/bin/git"), metalToolchain: false)
         #expect(setup.toolRows.map(\.state) == [.needed, .ready, .needed, .needed])
         #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "uv", "Apple's graphics compiler"])
@@ -112,7 +183,7 @@ extension UIFixtures {
     }
 
     @Test func aMacThatHasEverythingShowsNoButtonAndNoMetalRowUnlessNeeded() async throws {
-        let setup = SetupModel(app: try UIFixtures.newApp(), hf: FakeHF())
+        let setup = SetupModel(app: try UIFixtures.newApp())
         setup.prereqs = readyTools
         #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "uv"])
         #expect(setup.macReady && !setup.offerSetUp && !setup.askPasswordNote)
@@ -120,7 +191,7 @@ extension UIFixtures {
     }
 
     @Test func anIntelHomebrewIsExplainedAndTheNativeOneStillAdded() async throws {
-        let setup = SetupModel(app: try UIFixtures.newApp(), hf: FakeHF())
+        let setup = SetupModel(app: try UIFixtures.newApp())
         setup.prereqs = Prereqs(tools: ToolPaths(git: "/usr/bin/git", uv: "/x/uv", rosettaBrew: "/usr/local/bin/brew"), metalToolchain: nil)
         #expect(setup.rosettaNote == "We found an older copy of Homebrew made for Intel Macs. Lift leaves it alone and adds the Apple-silicon version.")
         #expect(setup.offerSetUp && setup.askPasswordNote)
@@ -128,147 +199,13 @@ extension UIFixtures {
         #expect(setup.rosettaNote == nil)
     }
 
-    @Test func modelCardsAreImageTo3DRecipesWithAddOnsApart() async throws {
-        let app = try await UIFixtures.devApp()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF())
-        #expect(setup.cards(app).map(\.id) == ["pixal3d", "trellis2-mac"])  // no Test Cube (developer only), no UniRig
-        #expect(setup.addOns(app).map(\.id) == ["unirig"])
-        let pixal = try #require(setup.cards(app).first)
-        #expect(pixal.task == "Photo → 3D model" && pixal.credit.hasPrefix("by Dong-Yang Li") && pixal.credit.hasSuffix("· MIT"))
-        #expect(pixal.gated == ["briaai/RMBG-2.0"] && pixal.description?.contains("one photo") == true)
-        #expect(pixal.restrictions.contains("Not for commercial use: RMBG-2.0 by BRIA AI (CC-BY-NC-4.0)"))
-        #expect(pixal.restrictions.filter { $0.hasPrefix("DINOv3") }.count == 1)  // one line per component
-        #expect(pixal.size == "About 3 GB")  // the recipe's estimate while the weights' size is unknown
-        #expect(setup.addOns(app).first?.gated == [])
-
-        let dev = try await UIFixtures.devApp(developer: true)
-        defer { Task { await dev.close() } }
-        #expect(SetupModel(app: dev, hf: FakeHF()).cards(dev).map(\.id).contains("test-cube"))
-    }
-
-    @Test func aModelsSizeIsItsWeightsOnceHuggingFaceSaysSo() async throws {
-        let app = try await UIFixtures.devApp()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF(bytes: 14_200_000_000))
-        setup.step = .model
-        await setup.load(app)
-        #expect(setup.cards(app).first?.size == "About 14.2 GB")
-    }
-
-    @Test func aModelWithoutGatedWeightsSkipsTheAccessStep() async throws {
-        let app = try await UIFixtures.app()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF())
-        setup.step = .model
-        setup.selected = "test-cube"
-        await setup.installChosen(app)
-        #expect(setup.step == .done && setup.chosen?.id == "test-cube")
-        #expect(app.aboutBeforeInstall?.id == "test-cube")  // the one-time About sheet, then the install's own confirmation
-        await setup.back(app)
-        #expect(setup.step == .model)
-    }
-
-    @Test func aGatedModelGoesThroughAccessAndInstallsOnlyOnceItsGranted() async throws {
-        let app = try await UIFixtures.devApp()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF(users: ["hf_good": "ada"], access: ["briaai/RMBG-2.0": true]))
-        setup.step = .model
-        setup.selected = "pixal3d"
-        await setup.installChosen(app)
-        #expect(setup.step == .access && app.aboutBeforeInstall == nil)  // the install needs the key first
-        #expect(setup.accessComponents == "RMBG-2.0 by BRIA AI")
-        #expect(!setup.accessGranted)
-        setup.hfToken = "hf_good"
-        await setup.checkToken(app)
-        #expect(setup.hfUser == "ada" && setup.repoAccess == ["briaai/RMBG-2.0": true] && setup.accessGranted)
-        await setup.next(app)
-        #expect(setup.step == .done && app.aboutBeforeInstall?.id == "pixal3d")
-        await setup.back(app)
-        #expect(setup.step == .access)
-    }
-
-    @Test func aBadKeyIsRefusedAndNotKept() async throws {
-        let app = try await UIFixtures.devApp()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF(users: ["hf_good": "ada"]))
-        setup.chosen = setup.cards(app).first { $0.id == "trellis2-mac" }
-        setup.step = .access
-        setup.hfToken = "hf_typo"
-        await setup.checkToken(app)
-        #expect(setup.hfUser == nil && setup.tokenProblem != nil && !setup.accessGranted)
-        #expect(app.secrets.get(.hfToken) == nil)
-    }
-
-    @Test func aGoodKeyWithOneRepoStillWaitingKeepsContinueOff() async throws {
-        let app = try await UIFixtures.devApp()
-        defer { Task { await app.close() } }
-        let hf = FakeHF(users: ["hf_good": "ada"], access: ["facebook/dinov3-vitl16-pretrain-lvd1689m": true, "briaai/RMBG-2.0": false])
-        let setup = SetupModel(app: app, hf: hf)
-        setup.chosen = setup.cards(app).first { $0.id == "trellis2-mac" }
-        setup.step = .access
-        setup.hfToken = "hf_good"
-        await setup.checkToken(app)
-        #expect(setup.hfUser == "ada" && setup.tokenProblem == nil && app.secrets.get(.hfToken) == "hf_good" && setup.hfToken.isEmpty)
-        #expect(setup.repoAccess == ["facebook/dinov3-vitl16-pretrain-lvd1689m": true, "briaai/RMBG-2.0": false] && !setup.accessGranted)
-        await setup.next(app)
-        #expect(setup.step == .access)  // Continue waits for every repo
-        await setup.skipAccess(app)
-        #expect(setup.step == .done && app.aboutBeforeInstall == nil)  // nothing installs without access
-    }
-
-    @Test func aSetupQuitHalfwayResumesWhereItStopped() async throws {
-        let prefs = MemoryPrefs()
-        let app = try UIFixtures.newApp(prefs)
-        await app.start()
-        let setup = SetupModel(app: app, hf: FakeHF())
-        setup.step = .files
-        setup.workdir = try UIFixtures.tempDir().appending(path: "lift")
-        await setup.next(app)
-        setup.prereqs = readyTools
-        await setup.next(app)
-        #expect(setup.step == .model)
-        await app.close()  // quit
-
-        let again = try UIFixtures.newApp(prefs)
-        await again.start()
-        defer { Task { await again.close() } }
-        #expect(again.phase == .setup && again.lift != nil)
-        let resumed = SetupModel(app: again, hf: FakeHF())
-        #expect(resumed.step == .model && resumed.workdir == setup.workdir)
-    }
-
-    @Test func aStepSavedByTheOlderWizardResumesAtItsNewPlace() async throws {
-        for (old, new) in [("0", SetupModel.Step.files), ("1", .mac), ("2", .model), ("3", .model), ("4", .done), ("access", .model)] {
-            let prefs = MemoryPrefs()
-            prefs.set(try UIFixtures.tempDir().appending(path: "lift").path, forKey: "workdir")
-            prefs.set(old, forKey: "setupStep")
-            let app = try UIFixtures.newApp(prefs)
-            await app.start()
-            #expect(SetupModel(app: app, hf: FakeHF()).step == new, "saved \(old)")  // Access without a chosen model goes back to Model
-            await app.close()
-        }
-    }
-
     @Test func aFolderThatCantOpenKeepsTheWizard() async throws {
         let app = try UIFixtures.newApp()
         await app.start()
-        let setup = SetupModel(app: app, hf: FakeHF())
-        setup.step = .files
+        let setup = SetupModel(app: app)
+        await setup.next(app)
         setup.workdir = try UIFixtures.file("not-a-folder")
         await setup.next(app)
         #expect(setup.step == .files && app.phase == .setup && app.alert != nil)
-    }
-
-    @Test func droppingAPhotoAtTheEndOpensGenerateWithIt() async throws {
-        let app = try await UIFixtures.app()
-        defer { Task { await app.close() } }
-        let setup = SetupModel(app: app, hf: FakeHF())
-        setup.chosen = setup.cards(app).first { $0.id == "test-cube" }
-        setup.step = .done
-        let photo = try UIFixtures.file("mug.png")
-        setup.drop([photo], app)
-        #expect(app.phase == .ready && app.section == .generate)
-        #expect(app.generate.current == TaskRef(recipe: "test-cube", task: "image_to_3d") && app.generate.files == [photo])
     }
 }

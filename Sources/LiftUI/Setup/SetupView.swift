@@ -2,20 +2,18 @@ import AppKit
 import LiftCore
 import SwiftUI
 
-/// The first-launch wizard (spec §11): a welcome, then a step rail (Your files, Your Mac, First model,
-/// Access if needed, Done) with Back and Continue. Plain language; logs sit under Show details (spec §1).
+/// Setup (spec §11): only the steps for what's missing, on a step rail with Back and Continue. A first run
+/// adds the welcome and "You're all set". Plain language; logs sit under Show details (spec §1).
 struct SetupView: View {
     let app: AppModel
     @State private var model: SetupModel
     @State private var choosing = false
     @State private var choosingExport = false
-    @State private var choosingPhoto = false
     @State private var showExport = false
-    @Environment(\.openURL) private var openURL
 
     init(app: AppModel) {
         self.app = app
-        _model = State(initialValue: SetupModel(app: app, hf: HuggingFaceAccount()))
+        _model = State(initialValue: SetupModel(app: app))
     }
 
     var body: some View {
@@ -24,7 +22,6 @@ struct SetupView: View {
         }
         .font(.system(size: 15))
         .frame(width: 960, height: 660)
-        .task { await model.load(app) }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { model.choose(url) }
         }
@@ -35,7 +32,7 @@ struct SetupView: View {
     var welcome: some View {
         VStack(spacing: 22) {
             Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 96, height: 96).accessibilityHidden(true)
-            Text("Turn photos into 3D models, right on your Mac").font(.system(size: 30, weight: .bold)).multilineTextAlignment(.center)
+            Text(model.heading).font(.system(size: 30, weight: .bold)).multilineTextAlignment(.center)
             Text("Lift runs free, open-source models made by researchers. Everything happens on this Mac — your photos never leave it.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 560)
             HStack(alignment: .top, spacing: 16) {
@@ -87,10 +84,10 @@ struct SetupView: View {
     }
 
     var rail: some View {
-        let steps = SetupModel.Step.allCases.filter { $0 != .welcome }
+        let steps = model.steps.filter { $0 != .welcome }
         let current = steps.firstIndex(of: model.step) ?? 0
         return VStack(alignment: .leading, spacing: 4) {
-            Text("Set up Lift").font(.headline).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 10)
+            Text(model.railTitle).font(.headline).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 10)
             ForEach(Array(steps.enumerated()), id: \.element) { i, s in
                 HStack(spacing: 10) {
                     Image(systemName: i < current ? "checkmark.circle.fill" : i == current ? "circle.inset.filled" : "circle")
@@ -113,17 +110,12 @@ struct SetupView: View {
 
     var footer: some View {
         HStack {
-            Button("Back") { Task { await model.back(app) } }.keyboardShortcut(.cancelAction).disabled(model.busy)
+            if model.canGoBack {
+                Button("Back") { Task { await model.back(app) } }.keyboardShortcut(.cancelAction).disabled(model.busy)
+            }
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
             switch model.step {
-            case .model:
-                Button("Skip — I'll choose later") { Task { await model.skipModel(app) } }.buttonStyle(.link)
-                let name = model.cards(app).first { $0.id == model.selected }?.name
-                primary(name.map { "Install \($0)" } ?? "Install", enabled: name != nil)
-            case .access:
-                Button("Skip for now") { Task { await model.skipAccess(app) } }.buttonStyle(.link)
-                primary("Continue", enabled: model.accessGranted)
             case .mac: primary("Continue", enabled: model.macReady)
             case .done: primary("Start Using Lift", enabled: true)
             default: primary("Continue", enabled: true)
@@ -142,8 +134,6 @@ struct SetupView: View {
         case .welcome: EmptyView()
         case .files: files
         case .mac: mac
-        case .model: firstModel
-        case .access: access
         case .done: done
         }
     }
@@ -169,9 +159,16 @@ struct SetupView: View {
 
     var files: some View {
         Group {
-            heading("Where should Lift keep its files?",
-                    "Models, results and Lift's own records live in one folder. This spot works for most people.")
+            if model.firstRun {
+                heading(model.heading, "Models, results and Lift's own records live in one folder. This spot works for most people.")
+            } else {
+                heading(model.heading, "Lift can't open the folder it used before. It may have been moved, renamed or deleted. "
+                        + "Choose where Lift should keep its files; the same spot starts it afresh there.")
+            }
             folderCard(model.workdir) { choosing = true }
+            if let problem = model.workdirProblem {
+                DisclosureGroup("Show details") { Text(problem).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+            }
             if let space = model.space {
                 note(space.text, systemImage: space.warning ? "exclamationmark.triangle.fill" : "internaldrive", warning: space.warning)
             }
@@ -207,7 +204,8 @@ struct SetupView: View {
 
     var mac: some View {
         Group {
-            heading("Get your Mac ready", "Lift needs a few free tools to download and run models. It installs them for you.")
+            heading(model.heading, model.firstRun ? "Lift needs a few free tools to download and run models. It installs them for you."
+                    : "Lift needs these free tools to download and run models. It puts back what's missing for you.")
             if model.prereqs == nil { ProgressView("Checking your Mac…").controlSize(.small) }
             VStack(spacing: 0) {
                 ForEach(Array(model.toolRows.enumerated()), id: \.element.name) { i, row in
@@ -275,155 +273,11 @@ struct SetupView: View {
         }
     }
 
-    // MARK: first model
-
-    var firstModel: some View {
-        Group {
-            heading("Pick your first model", "Each one is a free, open-source project. You can add others later in Models.")
-            ForEach(model.cards(app)) { card in modelCard(card) }
-            let addOns = model.addOns(app)
-            if !addOns.isEmpty {
-                Text("Add-ons, can be added later").font(.headline).padding(.top, 8)
-                ForEach(addOns) { a in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Text(a.name).bold()) \(Text("· \(a.task)").foregroundStyle(.secondary))")
-                        if let d = a.description { Text(d).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-    }
-
-    func modelCard(_ card: SetupModel.ModelCard) -> some View {
-        let selected = model.selected == card.id
-        return Button { model.selected = card.id } label: {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle").font(.title2)
-                    .foregroundStyle(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(card.name).font(.title3.bold())
-                        Text(card.task).font(.callout).padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
-                        Spacer()
-                        if let size = card.size { Text(size).foregroundStyle(.secondary) }
-                    }
-                    if let d = card.description { Text(d).fixedSize(horizontal: false, vertical: true) }
-                    Text(card.credit).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    if !card.gated.isEmpty {
-                        Label("Needs a free Hugging Face account", systemImage: "person.badge.key.fill").font(.callout.bold())
-                            .padding(.horizontal, 8).padding(.vertical, 3).background(Color.accentColor.opacity(0.12), in: Capsule())
-                    }
-                    ForEach(card.restrictions, id: \.self) { r in
-                        Label(r, systemImage: "exclamationmark.triangle.fill").font(.callout.bold()).foregroundStyle(.orange)
-                    }
-                    if let why = card.unsupported { Text("Doesn't run on this Mac: \(why)").foregroundStyle(.secondary) }
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Color.accentColor.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), lineWidth: selected ? 2 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .disabled(card.unsupported != nil)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    // MARK: access
-
-    @ViewBuilder var access: some View {
-        if let chosen = model.chosen {
-            heading("One more step for \(chosen.name)",
-                    "\(chosen.name) uses \(model.accessComponents), whose authors ask you to accept their terms first. It's free.")
-            VStack(alignment: .leading, spacing: 0) {
-                accessRow(1, "Sign in to or create a free Hugging Face account", status: model.hfUser.map { "Connected as \($0) ✓" }) {
-                    Button("Open Hugging Face") { openURL(URL(string: "https://huggingface.co/join")!) }
-                }
-                ForEach(Array(chosen.gated.enumerated()), id: \.element) { i, repo in
-                    Divider()
-                    accessRow(2 + i, "Accept the terms for \(repo)", status: model.repoAccess[repo] == true ? "Access granted ✓" : "Waiting") {
-                        Button("Open Page") { openURL(URL(string: "https://huggingface.co/\(repo)")!) }
-                            .accessibilityLabel("Open the page for \(repo)")
-                    }
-                }
-                Divider()
-                accessRow(2 + chosen.gated.count, "Create a key (Hugging Face calls it an access token) — choose “Read”", status: nil) {
-                    Button("Open Token Page") { openURL(URL(string: "https://huggingface.co/settings/tokens/new?tokenType=read")!) }
-                }
-                Divider()
-                accessRow(3 + chosen.gated.count, "Paste the key here. Lift keeps it in your Mac's Keychain.", status: nil) {
-                    HStack {
-                        SecureField("hf_…", text: $model.hfToken).frame(width: 240).accessibilityLabel("Hugging Face key")
-                            .onSubmit { Task { await model.checkToken(app) } }
-                        Button("Check") { Task { await model.checkToken(app) } }
-                    }
-                    .fixedSize()
-                }
-            }
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-            if let user = model.hfUser { Label("Connected as \(user) ✓", systemImage: "person.crop.circle.badge.checkmark").foregroundStyle(.green) }
-            if let problem = model.tokenProblem { note(problem, systemImage: "exclamationmark.triangle.fill", warning: true) }
-            if model.hfUser != nil && !model.accessGranted {
-                Text("After accepting the terms on each page, press Check again.").foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    func accessRow(_ n: Int, _ title: String, status: String?, @ViewBuilder action: () -> some View) -> some View {
-        HStack(spacing: 12) {
-            Text("\(n)").font(.headline).foregroundStyle(.white).frame(width: 26, height: 26).background(Circle().fill(.tint))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).fixedSize(horizontal: false, vertical: true)
-                if let status {
-                    Text(status).font(.callout).foregroundStyle(status.hasSuffix("✓") ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Step \(n): \(title)\(status.map { ". \($0)" } ?? "")")
-            Spacer()
-            action()
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-    }
-
     // MARK: done
 
     var done: some View {
         Group {
-            heading("You're all set", nil)
-            VStack(spacing: 12) {
-                Image(systemName: "photo.badge.plus").font(.system(size: 44)).foregroundStyle(.tint).accessibilityHidden(true)
-                Text("Drop a photo of an object to make your first 3D model").font(.title3.bold()).multilineTextAlignment(.center)
-                Button("Choose a Photo…") { choosingPhoto = true }
-            }
-            .frame(maxWidth: .infinity, minHeight: 200)
-            .background(RoundedRectangle(cornerRadius: 14).strokeBorder(.tint, style: StrokeStyle(lineWidth: 2, dash: [8, 6])))
-            .dropDestination(for: URL.self) { urls, _ in
-                model.drop(urls, app)
-                return app.phase == .ready
-            }
-            .fileImporter(isPresented: $choosingPhoto, allowedContentTypes: [.image]) { result in
-                if case .success(let url) = result { model.drop([url], app) }
-            }
-            if let status = model.installStatus(app), let chosen = model.chosen {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        if case .installing = app.models.first(where: { $0.id == chosen.id })?.status { ProgressView().controlSize(.small) }
-                        Text(status)
-                        if case .notInstalled = app.models.first(where: { $0.id == chosen.id })?.status, chosen.gated.isEmpty || model.accessGranted {
-                            Button("Install \(chosen.name)") { model.install(app) }
-                        }
-                    }
-                    if let m = app.models.first(where: { $0.id == chosen.id }) {
-                        Text(Credits.madeWith(m.recipe.attribution)).font(.callout).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            heading("You're all set", "Lift is ready. Next, pick a model in Models: Lift installs it and walks you through anything it needs.")
             DisclosureGroup("Use Lift from an AI assistant (optional)") {
                 VStack(alignment: .leading, spacing: 8) { assistant }.padding(.top, 8)
             }

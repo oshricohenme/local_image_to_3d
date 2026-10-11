@@ -61,6 +61,20 @@ public struct Confirmation: Identifiable {
     @MainActor public func confirm() async { await run() }
 }
 
+/// What setup has to do at this launch (spec §11): only what's missing. Nothing missing, no setup.
+public struct SetupNeeds: Equatable, Sendable {
+    /// No workdir was saved: the first launch ever, which also gets the Welcome and "You're all set" screens.
+    public var firstRun = false
+    /// No workdir yet, or the saved one is gone or won't open.
+    public var files = false
+    /// Native brew, git or uv isn't working, or the Metal Toolchain is absent while a recipe needs it.
+    public var mac = false
+    /// Why the saved workdir didn't open (nil when it's simply gone, or on a first run).
+    public var workdirProblem: String?
+
+    public var any: Bool { files || mac }
+}
+
 /// Something a notification reports (spec §8, §11).
 public enum JobEvent: Equatable, Sendable {
     case finished(JobView)
@@ -93,6 +107,11 @@ public final class AppModel {
     public var confirmation: Confirmation?
     /// The one-time "About this model" sheet before a model's first install (spec §4a).
     public var aboutBeforeInstall: ModelView?
+    /// The Hugging Face walkthrough before installing a model with gated weights while no key is kept.
+    public var accessBeforeInstall: HFAccess?
+    /// What setup shows at this launch, and the tools check it was based on (nil when skipped).
+    public private(set) var needs = SetupNeeds()
+    public private(set) var prereqs: Prereqs?
     public var alert: String?
     public var section = AppSection.generate
     public let generate = GenerateModel()
@@ -107,22 +126,37 @@ public final class AppModel {
     let paths: AppPaths
     let secrets: any SecretStore
     let serverPort: Int?
+    let checkPrereqs: PrereqsCheck?
+    let hf: any HFAccount
+    let weightsMetadata: (any WeightsMetadata)?
     var refresher: Task<Void, Never>?
     var seen: [String: JobView] = [:]
     /// A menu-bar choice made before Lift opened (first launch), saved once the engine opens.
     var pendingMenuBar: Bool?
 
     static let workdirKey = "workdir"
-    static let setupKey = "setupDone"
-    static let setupStepKey = "setupStep"
 
-    /// `serverPort`: nil uses the `port` setting; 0 picks any free port (tests).
+    /// Checks the tools (`metal`: also the Metal Toolchain). Runs off the main thread.
+    public typealias PrereqsCheck = @Sendable (_ metal: Bool) async -> Prereqs
+
+    /// The real check: native Homebrew, git and uv working, and the Metal Toolchain when asked.
+    public static let detectPrereqs: PrereqsCheck = { metal in
+        let toolchain = Toolchain(runner: SubprocessRunner())
+        return Prereqs(tools: await toolchain.detect(), metalToolchain: metal ? await toolchain.metalToolchainInstalled() : nil)
+    }
+
+    /// `serverPort`: nil uses the `port` setting; 0 picks any free port (tests). `checkPrereqs` nil skips the
+    /// tools check at launch (the launch smoke test); `hf` and `weightsMetadata` are Hugging Face (fakes in tests).
     public init(defaults: any PreferenceStore = UserDefaults.standard, paths: AppPaths = .main, secrets: any SecretStore = KeychainSecretStore(),
-                serverPort: Int? = nil) {
+                serverPort: Int? = nil, checkPrereqs: PrereqsCheck? = AppModel.detectPrereqs, hf: any HFAccount = HuggingFaceAccount(),
+                weightsMetadata: (any WeightsMetadata)? = nil) {
         self.defaults = defaults
         self.paths = paths
         self.secrets = secrets
         self.serverPort = serverPort
+        self.checkPrereqs = checkPrereqs
+        self.hf = hf
+        self.weightsMetadata = weightsMetadata
     }
 
     /// The open engine, for actions; throws when Lift isn't open (the views only offer actions when it is).
@@ -144,12 +178,6 @@ public final class AppModel {
         defaults.string(forKey: Self.workdirKey).map { URL(filePath: $0) }
     }
 
-    /// The wizard step reached so far, so an interrupted setup resumes where it stopped (spec §1).
-    public var setupStep: String? {
-        get { defaults.string(forKey: Self.setupStepKey) }
-        set { defaults.set(newValue, forKey: Self.setupStepKey) }
-    }
-
     /// Developer mode (Settings → Developer): shows the Test Cube and the recipes' raw details (spec §1).
     public var developer: Bool { settings.devRecipes }
 
@@ -157,27 +185,53 @@ public final class AppModel {
     public var needsMetalToolchain: Bool { Self.needsMetalToolchain(models) }
     nonisolated static func needsMetalToolchain(_ models: [ModelView]) -> Bool { models.contains { $0.recipe.metalToolchain } }
 
-    /// At launch: open the saved workdir, or show the first-launch wizard (spec §11) until it's finished.
-    /// A wizard stopped after its first step reopens the workdir and resumes.
+    /// At launch: works out what's missing (spec §11) and shows setup only for that. The saved workdir opens
+    /// silently; the main window is up while the tools are checked. A setup quit halfway resumes with only
+    /// what's still missing, since what it finished is no longer missing.
     public func start() async {
-        guard let workdir else { phase = .setup; return }
-        if defaults.bool(forKey: Self.setupKey) {
-            await open(workdir)
+        var needs = SetupNeeds(firstRun: workdir == nil)
+        if let workdir {
+            if FileManager.default.fileExists(atPath: workdir.path), await open(workdir, ready: false) {
+                phase = .ready
+            } else {
+                needs.files = true
+                needs.workdirProblem = alert
+                alert = nil
+            }
         } else {
-            await open(workdir, ready: false)
-            phase = .setup
+            needs.files = true
+        }
+        if let p = await checkTools(), p.missing { needs.mac = true }
+        self.needs = needs
+        phase = needs.any ? .setup : .ready
+    }
+
+    /// Runs the tools check, with the Metal Toolchain when a recipe needs it (the bundled ones before Lift opens).
+    @discardableResult
+    public func checkTools() async -> Prereqs? {
+        guard let checkPrereqs else { return nil }
+        let metal = lift == nil ? Self.bundleNeedsMetal(paths.bundledRecipes) : needsMetalToolchain
+        let p = await checkPrereqs(metal)
+        prereqs = p
+        return p
+    }
+
+    nonisolated static func bundleNeedsMetal(_ bundle: URL) -> Bool {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: bundle, includingPropertiesForKeys: nil)) ?? []
+        return folders.contains { dir in
+            if case .ok(let r) = RecipeLoad.read(directory: dir) { r.metalToolchain && !r.developer } else { false }
         }
     }
 
-    /// Back to the wizard, e.g. after the workdir failed to open.
+    /// Back to setup's folder step, e.g. after the workdir failed to open.
     public func restartSetup() {
-        defaults.set(false, forKey: Self.setupKey)
+        needs = SetupNeeds(files: true)
         phase = .setup
     }
 
-    /// The wizard's last step.
+    /// Setup's last step.
     public func finishSetup() {
-        defaults.set(true, forKey: Self.setupKey)
+        needs = SetupNeeds()
         phase = .ready
     }
 
@@ -189,7 +243,7 @@ public final class AppModel {
         do {
             let runtime = try installRuntime(in: workdir)
             let lift = try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: runtime, bundledRecipes: paths.bundledRecipes,
-                                                      hfToken: secrets.hfTokenReader))
+                                                      hfToken: secrets.hfTokenReader, weightsMetadata: weightsMetadata))
             let server = LiftServer(lift: lift, configuration: .init(secrets: secrets, port: serverPort, bridgePath: paths.bridge?.path))
             self.lift = lift
             self.server = server
@@ -376,14 +430,24 @@ public final class AppModel {
         }
     }
 
-    /// Install, from Generate or Models. The first time for a model it shows "About this model" first;
-    /// Continue there goes on to the install's own confirmation.
+    /// Install, from Generate or Models. The first time for a model it shows "About this model" first; then,
+    /// for gated weights while no Hugging Face key is kept, the access walkthrough (the install needs the key);
+    /// then the install's own confirmation.
     public func install(_ model: ModelView) {
-        if defaults.bool(forKey: "aboutShown." + model.id) {
-            gated { confirm in try await self.engine.modelsInstall(model.id, confirm: confirm) }
-        } else {
+        if !defaults.bool(forKey: "aboutShown." + model.id) {
             aboutBeforeInstall = model
+        } else if model.recipe.weights.contains(where: \.gated) && secrets.get(.hfToken) == nil {
+            accessBeforeInstall = HFAccess(model)
+        } else {
+            gated { confirm in try await self.engine.modelsInstall(model.id, confirm: confirm) }
         }
+    }
+
+    /// Continue in the access walkthrough, once the key is kept.
+    public func continueAfterAccess() {
+        guard let model = accessBeforeInstall?.model else { return }
+        accessBeforeInstall = nil
+        install(model)
     }
 
     public func continueInstall() {

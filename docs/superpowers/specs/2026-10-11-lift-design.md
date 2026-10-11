@@ -500,14 +500,17 @@ Without it they return `confirmation_required` with a description of the impact 
 
 ## 11. Settings and first launch
 
-**First-launch wizard:**
-1. Toolchain check/installs (§6).
-2. Choose the **working directory** (holds recipes, models, jobs and the database) and the **export
-   folder**, plus the default for `cleanup_after_export`.
-3. Copy the bundled recipes into `<workdir>/recipes/bundled/`. Models are not installed here; each is
-   installed when you first choose it.
-4. Optional Hugging Face token.
-5. Show the MCP setup snippet.
+**Setup appears only when something it sets up is missing, with only those steps** (checked at every launch):
+- **Your files:** no saved working directory, or the saved one is gone or won't open. Choose the **working
+  directory** (holds recipes, models, jobs and the database) and the **export folder**, plus the default for
+  `cleanup_after_export`. Opening it copies the bundled recipes into `<workdir>/recipes/bundled/`.
+- **Your Mac:** native brew, git or uv isn't working, or the Metal Toolchain is absent while a bundled recipe
+  needs it (§6). One button installs what's missing.
+- **Welcome** and a one-line **You're all set** (with the MCP snippet, collapsed) on a true first run only.
+
+Nothing missing goes straight to the main window. A later launch that finds something missing shows a short
+setup with only that step ("A helper tool is missing"). Choosing, installing and trying a model are not part of
+setup: they happen in Models (with the About sheet and, for gated weights, the Hugging Face walkthrough) and Generate.
 
 All settings can be changed later in Settings, HTTP and MCP: working directory (moving it needs confirm
 and moves the data), export folder, default export

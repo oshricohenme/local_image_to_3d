@@ -43,10 +43,13 @@ struct LiftApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// `-LiftSmokeTest YES`: quit once the sidebar is on screen (App/smoke-test.sh). The smoke test passes
-    /// `-workdir` on the command line too, and keeps tokens in memory instead of the Keychain.
+    /// `-LiftSmokeTest YES`: quit once the sidebar is on screen (App/smoke-test.sh). The smoke test passes an
+    /// existing `-workdir` on the command line too, and keeps tokens in memory instead of the Keychain.
     let smokeTest = UserDefaults.standard.bool(forKey: "LiftSmokeTest")
-    lazy var app = AppModel(secrets: smokeTest ? MemorySecretStore() : KeychainSecretStore())
+    /// The smoke test skips the launch tools check (`checkPrereqs: nil`), so a Mac or CI runner without native
+    /// Homebrew, git or uv still lands on the sidebar: it tests that the app starts, not this Mac's tools.
+    lazy var app = AppModel(secrets: smokeTest ? MemorySecretStore() : KeychainSecretStore(),
+                            checkPrereqs: smokeTest ? nil : AppModel.detectPrereqs)
     var notifier: Notifier?
 
     func start() async {

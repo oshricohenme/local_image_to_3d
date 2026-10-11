@@ -3,11 +3,13 @@
 # the sidebar is on screen. Nothing is written outside the temp folder: the workdir and the setup flag
 # come in on the command line (UserDefaults reads them without saving), and CFFIXED_USER_HOME sends
 # AppKit's own preference writes (window and split-view frames) to the temp folder.
+# Setup appears only for what's missing: the workdir exists (a gone one would be "missing"), and -LiftSmokeTest
+# skips the launch tools check (see AppDelegate), so the sidebar comes up on any Mac. -setupDone is no longer read.
 # Usage: App/smoke-test.sh path/to/Lift.app
 set -eu
 app="$1"
 tmp="$(mktemp -d)"
-mkdir -p "$tmp/home"
+mkdir -p "$tmp/home" "$tmp/workdir"
 CFFIXED_USER_HOME="$tmp/home" "$app/Contents/MacOS/Lift" -LiftSmokeTest YES -workdir "$tmp/workdir" -setupDone YES \
     -ApplePersistenceIgnoreState YES > "$tmp/smoke.log" 2>&1 &
 pid=$!

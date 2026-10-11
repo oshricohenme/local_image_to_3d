@@ -21,6 +21,14 @@ public struct Prereqs: Codable, Sendable, Equatable {
     public var tools: ToolPaths
     /// Checked only when asked for (a recipe needs it): `nil` means not checked.
     public var metalToolchain: Bool?
+
+    public init(tools: ToolPaths, metalToolchain: Bool?) {
+        self.tools = tools
+        self.metalToolchain = metalToolchain
+    }
+
+    /// Native brew, git or uv not working, or the Metal Toolchain checked and absent.
+    public var missing: Bool { tools.brew == nil || tools.git == nil || tools.uv == nil || metalToolchain == false }
 }
 
 /// Finds and installs native Homebrew / git / uv / the Metal Toolchain (spec §6).
