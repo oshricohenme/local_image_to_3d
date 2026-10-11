@@ -69,8 +69,9 @@ Lift.app (Swift 6, SwiftUI)
 <export dir>/                                  chosen separately at first launch
 ```
 
-The app bundle contains no recipes. It ships only `lift_worker`, the Python runtime for the worker
-protocol (§8). That's versioned with the app because the protocol is the app's contract.
+The app bundle ships the v1 recipes and `shared/` as the **bundled source** (§4), plus `lift_worker`,
+the Python runtime for the worker protocol (§8), which is versioned with the app. Nothing is cloned or
+downloaded until you choose to use a model.
 
 ### Packages
 
@@ -94,12 +95,17 @@ protocol (§8). That's versioned with the app because the protocol is the app's 
 
 ## 4. Recipes
 
-A recipe is a folder: `recipe.yaml`, `launcher.py`, optional `files/`. Recipes are not part of the app.
-They live in **recipe sources**: git repos cloned into `<workdir>/recipes/<source>/`.
+A recipe is a folder: `recipe.yaml`, `launcher.py`, optional `files/`. Recipes live in **recipe sources**
+under `<workdir>/recipes/<source>/`.
 
-- **Default source:** the public repo `oshricohenme/lift-recipes`, open to community contributions. It
-  holds the v1 recipes plus `shared/` (the `lift_shim` package and `substitutes.yaml`, so contributors can
-  extend Mac support without an app release). It's cloned at first launch.
+- **Bundled source** (v1, default): the recipes and `shared/` folder from `dev-recipes/` in this repo,
+  built into Lift.app and copied to `<workdir>/recipes/bundled/` at first launch, so they work offline.
+  An app update refreshes this copy, and recipes you've edited locally are kept as `bundled-local`.
+- **Using a model** is the moment everything happens, and only for that model: clone its upstream repo
+  at the pin, build its venv, install substitutes, install its brew prerequisites, then download and
+  verify its weights. All of it is triggered by your Install/Use action.
+- **Public recipes repo (later):** `oshricohenme/lift-recipes`, open to community contributions, is
+  added as an extra git source when it exists, using the same format.
 - **More sources:** any git URL (`recipes_add_source`). If two sources define the same recipe id, the one
   added first wins, and the clash is shown as a warning.
 - **Updates:** a source is pulled only when you click Refresh or call `recipes_refresh`. Installed models
@@ -107,7 +113,7 @@ They live in **recipe sources**: git repos cloned into `<workdir>/recipes/<sourc
   and reinstalls only when you say so.
 - **Compatibility:** a recipe with `schema` newer than the app supports is listed as "needs a newer Lift" and can't be installed.
 - **Test Cube** lives in the dev recipe source (`dev-recipes/test-cube`, see below), loaded only by the
-  test suite and by a hidden developer setting. It is not in the public source.
+  test suite and by a hidden developer setting. It's hidden from users.
 
 ### `recipe.yaml` (schema v1)
 
@@ -383,7 +389,8 @@ Without it they return `confirmation_required` with a description of the impact 
 1. Toolchain check/installs (§6).
 2. Choose the **working directory** (holds recipes, models, jobs and the database) and the **export
    folder**, plus the default for `cleanup_after_export`.
-3. Clone the default recipe source into `<workdir>/recipes/`, with a live log; on failure, Retry.
+3. Copy the bundled recipes into `<workdir>/recipes/bundled/`. Models are not installed here; each is
+   installed when you first choose it.
 4. Optional Hugging Face token.
 5. Show the MCP setup snippet.
 
