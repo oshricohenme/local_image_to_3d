@@ -6,3 +6,4 @@ spike/work/
 **/__pycache__/
 .build/
 .superpowers/
+test-results/
