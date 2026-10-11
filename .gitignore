@@ -1,0 +1,8 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+spike/work/
+**/.venv/
+**/__pycache__/
+.build/
+.superpowers/
