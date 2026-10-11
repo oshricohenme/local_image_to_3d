@@ -254,6 +254,7 @@ extension Lift {
         let v = try view(id)
         guard v.job.state.isTerminal || v.job.state == .interrupted else { throw LiftError.invalidState("job \(id) is \(v.job.state.rawValue); only finished jobs can be retried") }
         guard !v.job.cleanedUp else { throw LiftError.invalidState("This job's files were deleted after it was exported, so it can't run again.") }
+        guard !v.job.exportPending else { throw LiftError.invalidState("This job is still exporting. Try again when the export has finished.") }
         let from = v.steps.firstIndex { $0.state != .succeeded } ?? 0
         var newSettings: [String: SettingValue]?
         if let settings {
@@ -346,6 +347,7 @@ extension Lift {
     /// Deletes the job record and its folder. A running job is stopped first.
     public func jobsDelete(_ id: String, confirm: Bool = false) throws -> Gated<Bool> {
         let v = try view(id)
+        guard !v.job.exportPending else { throw LiftError.invalidState("This job is still exporting. Try again when the export has finished.") }
         guard confirm else { return .confirmationRequired("Deletes job \"\(v.job.title)\", its inputs, outputs and log. This can't be undone.") }
         if !v.job.state.isTerminal { _ = try jobsCancel(id, confirm: true) }
         _ = try store.db.write { try JobRecord.deleteOne($0, key: id) }

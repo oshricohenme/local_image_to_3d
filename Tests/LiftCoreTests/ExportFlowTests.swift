@@ -84,4 +84,20 @@ extension CubeIntegrationTests {
         #expect(!v.job.exportPending && v.job.exports == [ExportResult(format: .glb, path: exportDir.appending(path: "Resumed.glb").path)])
         #expect(v.attribution?.credit == "Test Cube by Lift (MIT)")
     }
+
+    /// A running export reads (and may delete) jobs/<id>/, so Retry and Delete wait for it to finish.
+    @Test func retryAndDeleteAreRefusedWhileExporting() async throws {
+        let workdir = try Fixtures.tempDir()
+        let lift = try await Fixtures.lift(workdir: workdir)
+        let now = Date()
+        try await lift.store.db.write { db in
+            try JobRecord(id: "j1", title: "Exporting", priority: .normal, position: 1, source: .ui, state: .succeeded, forceStart: false,
+                          currentStep: 0, createdAt: now, updatedAt: now, finishedAt: now, exportPending: true, credits: []).insert(db)
+            try StepRecord(jobId: "j1", idx: 0, recipe: "test-cube", task: "image_to_3d", inputs: [:], settings: [:],
+                           state: .succeeded, outputs: []).insert(db)
+        }
+        await #expect(throws: LiftError.self) { _ = try await lift.jobsRetry("j1") }
+        await #expect(throws: LiftError.self) { _ = try await lift.jobsDelete("j1", confirm: true) }
+        #expect(try await lift.jobsGet("j1").job.exportPending)
+    }
 }

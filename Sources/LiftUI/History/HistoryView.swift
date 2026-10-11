@@ -173,8 +173,8 @@ struct HistoryView: View {
 
     func actions(_ v: JobView) -> some View {
         HStack {
-            Button("Retry") { app.run { try await app.retry(v.job.id) } }.disabled(v.job.cleanedUp)
-            Button("Retry with changes…") { retrying = v }.disabled(v.job.cleanedUp)
+            Button("Retry") { app.run { try await app.retry(v.job.id) } }.disabled(v.job.cleanedUp || v.job.exportPending)
+            Button("Retry with changes…") { retrying = v }.disabled(v.job.cleanedUp || v.job.exportPending)
             Menu("Export Again…") {
                 ForEach(ExportFormat.allCases, id: \.self) { f in
                     Button(Format.export(f)) { app.run { _ = try await app.engine.jobsExport(v.job.id, formats: [f]) } }
@@ -188,6 +188,7 @@ struct HistoryView: View {
             Button("Delete…", role: .destructive) {
                 app.gated { confirm in try await app.engine.jobsDelete(v.job.id, confirm: confirm) }
             }
+            .disabled(v.job.exportPending)
         }
     }
 
