@@ -65,6 +65,33 @@ public enum Format {
         return line
     }
 
+    /// A download on its card: "5.2 of 20.1 GB · 12 MB/s · about 21 min left" while it runs (the speed and time
+    /// once there's a rate), else where it stands in plain words.
+    public static func downloadLine(_ d: Download, rate: RateEstimate?) -> String {
+        let gb = { (n: Int) in (Double(n) / 1e9).formatted(.number.precision(.fractionLength(1))) }
+        let bytes = d.totalBytes.map { "\(gb(d.downloadedBytes)) of \(gb($0)) GB" } ?? "\(gb(d.downloadedBytes)) GB so far"
+        switch d.state {
+        case .queued: return d.resumed ? "Resuming" : "Waiting to download"
+        case .paused: return "Paused · " + bytes
+        case .cancelled: return "Download stopped · \(bytes) kept"
+        case .failed: return d.reason ?? "The download stopped."
+        case .done: return "Downloaded"
+        case .downloading:
+            var line = bytes
+            if let speed = rate?.bytesPerSecond, speed > 0 { line += " · \(Int((speed / 1e6).rounded())) MB/s" }
+            if let total = d.totalBytes, let s = rate?.secondsLeft(total: total) {
+                line += " · " + (s < 60 ? "less than a minute left" : "about \((s + 59) / 60) min left")
+            }
+            return line
+        }
+    }
+
+    /// "Not enough space — free up 5 GB" when the disk has less room than the download still needs.
+    public static func spaceWarning(free: Int64?, remaining: Int) -> String? {
+        guard let free, free < remaining else { return nil }
+        return "Not enough space — free up \(Int((Double(Int64(remaining) - free) / 1e9).rounded(.up))) GB"
+    }
+
     /// Names used in task chips: "Image → 3D", "Mesh → Rigged".
     public static func io(_ t: IOType, asOutput: Bool = false) -> String {
         switch t {
@@ -143,11 +170,16 @@ public struct RateEstimate: Sendable {
         samples.removeAll { date.timeIntervalSince($0.at) > 30 }
     }
 
-    public func secondsLeft(total: Int) -> Int? {
+    /// Over the samples kept, once they span 10 s.
+    public var bytesPerSecond: Double? {
         guard let first = samples.first, let last = samples.last else { return nil }
         let span = last.at.timeIntervalSince(first.at)
         guard span >= 10, last.bytes > first.bytes else { return nil }
-        let rate = Double(last.bytes - first.bytes) / span
+        return Double(last.bytes - first.bytes) / span
+    }
+
+    public func secondsLeft(total: Int) -> Int? {
+        guard let rate = bytesPerSecond, let last = samples.last else { return nil }
         return Int((Double(max(0, total - last.bytes)) / rate).rounded(.up))
     }
 }

@@ -37,6 +37,12 @@ public final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case .waitingForMemory(let v):
             c.title = "Waiting for memory: \(v.job.title)"
             c.body = Format.waitReason(v.job.waitReason)
+        case .downloadFinished(let model):
+            c.title = "\(model) is downloaded"
+            c.body = "It's ready to use in Generate."
+        case .downloadFailed(let model, let reason):
+            c.title = "\(model)'s download stopped"
+            c.body = reason
         }
         return c
     }

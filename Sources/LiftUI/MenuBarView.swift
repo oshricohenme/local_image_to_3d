@@ -3,7 +3,7 @@ import LiftCore
 import SwiftUI
 
 /// The menu bar extra (mockup MenuBar.dc.html): server, the running job, models installing, up next, the last
-/// finished job, and Open / Pause / Unload / Quit.
+/// finished job, and Open / Pause / Unload / Quit. Downloads have Pause and Cancel next to their bar.
 public struct MenuBarView: View {
     let app: AppModel
     let openWindow: () -> Void
@@ -31,10 +31,13 @@ public struct MenuBarView: View {
                     ProgressView(value: step.fraction ?? 0)
                 }
             }
-            ForEach(app.models.filter { if case .installing = $0.status { true } else { false } }, id: \.id) { m in
+            ForEach(app.models.filter { m in
+                if case .installing = m.status { return true }
+                return m.download?.state.isActive == true
+            }, id: \.id) { m in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(m.name).bold()
-                    InstallProgressRow(app: app, model: m)
+                    DownloadControls(app: app, model: m)  // the bar with Pause and Cancel, or the install's phase
                 }
             }
             if !waiting.isEmpty {

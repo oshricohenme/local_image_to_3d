@@ -83,6 +83,9 @@ public struct SetupNeeds: Equatable, Sendable {
 public enum JobEvent: Equatable, Sendable {
     case finished(JobView)
     case waitingForMemory(JobView)
+    /// A model's weights download finished (it's then checked and ready) or stopped with a reason.
+    case downloadFinished(model: String)
+    case downloadFailed(model: String, reason: String)
 }
 
 /// The app's state: owns the `Lift` engine (in-process) and the HTTP/MCP server, and mirrors the
@@ -115,6 +118,14 @@ public final class AppModel {
     public var accessBeforeInstall: HFAccess?
     /// Download rates by model id, while its weights download (for the time left).
     public private(set) var rates: [String: RateEstimate] = [:]
+    /// Free space on the disk that holds the Hugging Face cache (where weights download).
+    public private(set) var hubFreeBytes: Int64?
+    /// Weight sizes Hugging Face reported, by model id (the cards' and the page's "N GB").
+    public private(set) var weightBytes: [String: Int] = [:]
+    /// Each model's preview: the first real image of its README at the pin (missing: the card shows its task icon).
+    public private(set) var previews: [String: URL] = [:]
+    var previewsLoaded: Set<String> = []
+    var seenDownloads: [String: Download.State] = [:]
     /// What setup shows at this launch, and the tools check it was based on (nil when skipped).
     public private(set) var needs = SetupNeeds()
     public private(set) var prereqs: Prereqs?
@@ -324,6 +335,9 @@ public final class AppModel {
             let settings = await lift.settingsGet()
             let status = await server?.status()
             await report(queue.jobs, lift: lift)
+            reportDownloads(await lift.downloadsList())
+            let free = SetupModel.volumeFree(lift.config.hfHub)
+            if hubFreeBytes != free { hubFreeBytes = free }
             // Assign only changes: every assignment re-renders the views that read it.
             if self.queue != queue { self.queue = queue }
             if self.resources != resources { self.resources = resources }
@@ -337,11 +351,55 @@ public final class AppModel {
         }
     }
 
-    /// Adds each downloading model's bytes to its rate; drops the rates of the others.
+    /// Adds each downloading model's bytes to its rate; drops the rates of the others (a paused one starts afresh).
     func sample(_ models: [ModelView], at date: Date = Date()) {
         for m in models {
-            if let p = m.progress { rates[m.id, default: RateEstimate()].add(p.downloadedBytes, at: date) } else { rates[m.id] = nil }
+            if let p = m.progress, m.download?.state != .paused {
+                rates[m.id, default: RateEstimate()].add(p.downloadedBytes, at: date)
+            } else {
+                rates[m.id] = nil
+            }
         }
+    }
+
+    /// Notifies each download that just finished or failed.
+    func reportDownloads(_ downloads: [Download]) {
+        let names = Dictionary(models.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        for event in Self.downloadEvents(previous: seenDownloads, current: downloads, names: names) { onEvent?(event) }
+        seenDownloads = Dictionary(uniqueKeysWithValues: downloads.map { ($0.id, $0.state) })
+    }
+
+    static func downloadEvents(previous: [String: Download.State], current: [Download], names: [String: String]) -> [JobEvent] {
+        current.compactMap { d in
+            guard let before = previous[d.id], before != d.state else { return nil }
+            let name = names[d.model] ?? d.model
+            switch d.state {
+            case .done: return .downloadFinished(model: name)
+            case .failed: return .downloadFailed(model: name, reason: d.reason ?? "The download stopped.")
+            default: return nil
+            }
+        }
+    }
+
+    /// The weights' size from Hugging Face, once per model (nil offline: the recipe's estimate is shown instead).
+    public func loadWeightBytes(_ m: ModelView) async {
+        guard weightBytes[m.id] == nil, !m.recipe.weights.isEmpty else { return }
+        if let bytes = await hf.size(of: m.recipe.weights) { weightBytes[m.id] = bytes }
+    }
+
+    /// Reads the model's README once (Lift caches it in the workdir) for its preview image.
+    public func loadPreview(_ m: ModelView) async {
+        guard let lift, previewsLoaded.insert(m.id).inserted, let readme = try? await lift.modelsReadme(m.id) else { return }
+        if let url = Library.previewImage(readme.text, base: readme.baseURL) { previews[m.id] = url }
+    }
+
+    /// Use in Generate: the model's first task, selected, on the Generate screen.
+    public func useInGenerate(_ m: ModelView) {
+        guard let t = m.recipe.tasks.first(where: { $0.inputs.first?.type == .image && $0.output == .mesh }) ?? m.recipe.tasks.first else { return }
+        generate.modality = t.modality
+        generate.kind = TaskKind(inputs: t.inputs.map(\.type), output: t.output)
+        generate.recipe = m.id
+        section = .generate
     }
 
     /// While a model installs: its phase in plain words, with bytes and time left while its weights download.
