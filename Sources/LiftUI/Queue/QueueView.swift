@@ -77,7 +77,12 @@ struct QueueView: View {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(Format.elapsed(since: step.startedAt, now: context.date)).monospacedDigit()
                 }
-                Button("Cancel", role: .destructive) { app.gated { confirm in try await app.engine.jobsCancel(v.job.id, confirm: confirm) } }
+                // Stop is immediate (LiftCore kills that job's worker), after LiftCore's own confirmation text.
+                Button("Stop", systemImage: "stop.fill", role: .destructive) {
+                    app.gated { confirm in try await app.engine.jobsCancel(v.job.id, confirm: confirm) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
             }
             Text(stepLine(v)).font(.caption).foregroundStyle(.secondary)
             ProgressView(value: step.fraction ?? 0) { Text(step.stage ?? "Starting…").font(.caption) }

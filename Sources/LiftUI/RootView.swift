@@ -34,7 +34,7 @@ public struct RootView: View {
         }
         .confirmationDialog("Are you sure?", isPresented: Binding(get: { app.confirmation != nil }, set: { if !$0 { app.confirmation = nil } }),
                             presenting: app.confirmation) { c in
-            Button("Continue") { Task { await c.confirm() } }
+            Button(c.action) { Task { await c.confirm() } }  // "Run Anyway" for a memory warning
             Button("Cancel", role: .cancel) {}
         } message: { c in
             Text(c.message)
