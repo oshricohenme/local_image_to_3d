@@ -39,7 +39,7 @@ def _subm_neighbors(indices, spatial_shape, kernel_size, dilation):
     shape = torch.tensor(spatial_shape, device=idx.device)
     strides = torch.tensor([shape[0] * shape[1] * shape[2], shape[1] * shape[2], shape[2], 1], device=idx.device)
     keys = idx @ strides
-    sorted_keys, order = keys.sort()
+    sorted_keys, order = keys.sort(stable=True)  # duplicate sites: searchsorted hits the first occurrence
     r = [torch.arange(k, device=idx.device) - k // 2 for k in kernel_size]
     offsets = torch.stack(torch.meshgrid(*r, indexing="ij"), -1).reshape(-1, 3)  # row-major, like spconv
     offsets = offsets * torch.tensor(dilation, device=idx.device)

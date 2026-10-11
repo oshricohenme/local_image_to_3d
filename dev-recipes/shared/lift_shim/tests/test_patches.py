@@ -47,3 +47,12 @@ def test_cpu_roundtrip_patches(tmp_path, monkeypatch, patch, pkg, fn):
     from_import = __import__(pkg, fromlist=[fn]).__dict__[fn]  # `from torch_cluster import fps` sees the wrapper
     assert from_import is getattr(mod, fn)
     sys.modules.pop(pkg)
+
+
+def test_fa2_patch_on_unsupported_transformers_raises_clearly():
+    # transformers 4.57 has no PreTrainedModel._autoset_attn_implementation; fail with the reason, not KeyError
+    import types
+    from lift_shim.patches import _fa2_to_sdpa
+    fake = types.SimpleNamespace(PreTrainedModel=type("PreTrainedModel", (), {}))
+    with pytest.raises(RuntimeError, match=r"lift_shim: transformers_fa2_to_sdpa supports transformers .*; found "):
+        _fa2_to_sdpa(fake)

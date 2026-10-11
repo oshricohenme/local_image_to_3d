@@ -71,3 +71,16 @@ def test_standin_import_matches_upstream_usage():
     assert not sp.modules.is_spconv_module(torch.nn.Linear(2, 2))
     for k in [k for k in sys.modules if k == "spconv" or k.startswith("spconv.")]:
         sys.modules.pop(k)
+
+
+def test_duplicate_coordinates_resolve_to_first_occurrence():
+    # spconv inputs should be unique, but duplicates must at least be deterministic: an unstable sort
+    # picked an arbitrary copy (index 500 of 1000 on cpu).
+    n = 1000
+    indices = torch.tensor([[0, 1, 1, 1]], dtype=torch.int32).repeat(n, 1)
+    feats = torch.arange(n, dtype=torch.float32)[:, None]
+    conv = spconv.SubMConv3d(1, 1, kernel_size=1, bias=False)
+    torch.nn.init.ones_(conv.weight)
+    x = spconv.SparseConvTensor(features=feats, indices=indices, spatial_shape=list(SHAPE), batch_size=1)
+    with torch.no_grad():
+        assert conv(x).features.flatten().tolist() == [0.0] * n

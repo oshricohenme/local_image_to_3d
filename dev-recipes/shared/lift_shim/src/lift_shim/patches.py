@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import functools
+import sys
 
 from .modules import after_import
 
@@ -11,6 +12,10 @@ def _fa2_to_sdpa(modeling_utils) -> None:
     # attention through PreTrainedModel._autoset_attn_implementation; a requested FA2 raises without
     # flash_attn/CUDA, so rewrite it to sdpa (eager if the model has no sdpa path) before that check.
     cls = modeling_utils.PreTrainedModel
+    if "_autoset_attn_implementation" not in cls.__dict__:
+        found = getattr(sys.modules.get("transformers"), "__version__", "unknown")
+        raise RuntimeError("lift_shim: transformers_fa2_to_sdpa supports transformers 4.51.x "
+                           f"(PreTrainedModel._autoset_attn_implementation); found {found}")
     original = cls.__dict__["_autoset_attn_implementation"].__func__
 
     def autoset(klass, config, use_flash_attention_2=False, *a, **kw):
