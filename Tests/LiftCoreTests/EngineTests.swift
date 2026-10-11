@@ -160,3 +160,27 @@ extension Fixtures {
         #expect(s.memoryBudgetGB == 48 && s.maxSlots == 1 && s.idleUnloadMinutes == 10)
     }
 }
+
+@Suite struct ImageSetSubmitTests {
+    /// A bundle with `views-cube`: the Test Cube with an image_set input.
+    func bundle() throws -> URL {
+        let b = try Fixtures.tempDir()
+        try FileManager.default.createDirectory(at: b.appending(path: "shared"), withIntermediateDirectories: true)
+        let cube = try String(contentsOf: Fixtures.devRecipes.appending(path: "test-cube/recipe.yaml"), encoding: .utf8)
+        _ = try writeRecipe(cube.replacingOccurrences(of: "id: test-cube", with: "id: views-cube")
+            .replacingOccurrences(of: "inputs: [{ name: image, type: image }]", with: "inputs: [{ name: views, type: image_set }]"), id: "views-cube", in: b)
+        return b
+    }
+
+    @Test func onlyTheListedFilesAreCopiedAndTheWorkdirParentIsRefused() async throws {
+        let lift = try await Fixtures.lift(bundle: try bundle())
+        let views = try Fixtures.tempDir()
+        for name in ["front.png", "back.png", "transforms.json", ".DS_Store"] { try Data([1]).write(to: views.appending(path: name)) }
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": views.path])]))
+        let copied = try #require(v.steps[0].inputs["views"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: copied).sorted() == ["back.png", "front.png", "transforms.json"])
+        let parent = lift.config.workdir.deletingLastPathComponent().path
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": parent])])) }
+                == ["steps[0].inputs.views"])
+    }
+}

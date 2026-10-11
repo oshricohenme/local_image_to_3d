@@ -59,14 +59,35 @@ import Testing
         #expect(fields { _ = try t.validated(inputs: ["image": file.path, "extra": file.path], chained: false, prefix: "i") } == ["i.extra"])
     }
 
-    @Test func imageSetNeedsAFolder() throws {
+    /// I8: an image_set is a flat folder of images (plus an optional transforms.json), never "/" or a tree.
+    @Test func imageSetIsAFlatFolderOfImages() throws {
         var t = try task()
         t.inputs = [TaskInput(name: "views", type: .imageSet)]
+        func check(_ path: String, workdir: URL? = nil) -> [String] {
+            fields { _ = try t.validated(inputs: ["views": path], chained: false, prefix: "i", workdir: workdir) }
+        }
         let dir = try Fixtures.tempDir()
-        #expect(try t.validated(inputs: ["views": dir.path], chained: false, prefix: "i") == ["views": dir.path])
-        let file = dir.appending(path: "a.png")
-        try Data([1]).write(to: file)
-        #expect(fields { _ = try t.validated(inputs: ["views": file.path], chained: false, prefix: "i") } == ["i.views"])
+        for name in ["front.png", "right.JPG", "back.jpeg", "left.webp"] { try Data([1]).write(to: dir.appending(path: name)) }
+        try Data("{}".utf8).write(to: dir.appending(path: "transforms.json"))
+        try Data([0]).write(to: dir.appending(path: ".DS_Store"))  // hidden files are ignored
+        #expect(check(dir.path) == [])
+        #expect(check(dir.appending(path: "front.png").path) == ["i.views"])  // a file, not a folder
+        #expect(check("/") == ["i.views"])
+        #expect(check(FileManager.default.homeDirectoryForCurrentUser.path) == ["i.views"])
+        let nested = try Fixtures.tempDir()
+        try Data([1]).write(to: nested.appending(path: "a.png"))
+        try FileManager.default.createDirectory(at: nested.appending(path: "more"), withIntermediateDirectories: true)
+        #expect(check(nested.path) == ["i.views"])
+        let other = try Fixtures.tempDir()
+        try Data([1]).write(to: other.appending(path: "notes.txt"))
+        #expect(check(other.path) == ["i.views"])
+        #expect(check(try Fixtures.tempDir().path) == ["i.views"])  // empty
+        let many = try Fixtures.tempDir()
+        for i in 0..<65 { try Data([1]).write(to: many.appending(path: "\(i).png")) }
+        #expect(check(many.path) == ["i.views"])
+        let parent = try Fixtures.tempDir()
+        try Data([1]).write(to: parent.appending(path: "a.png"))
+        #expect(check(parent.path, workdir: parent.appending(path: "lift-workdir")) == ["i.views"])  // contains the workdir
     }
 
     @Test func chainTypes() {

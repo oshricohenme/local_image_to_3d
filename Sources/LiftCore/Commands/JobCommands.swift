@@ -77,8 +77,8 @@ extension Lift {
     // MARK: jobs_submit
 
     /// Validates every step (recipe, task, settings, inputs, chain types), copies inputs into
-    /// `jobs/<id>/inputs/`, and queues the job. Bad input throws `invalidInput` with per-field errors.
-    public func jobsSubmit(_ request: SubmitRequest) throws -> JobView {
+    /// `jobs/<id>/inputs/` (off the actor), and queues the job. Bad input throws `invalidInput` with per-field errors.
+    public func jobsSubmit(_ request: SubmitRequest) async throws -> JobView {
         guard !request.steps.isEmpty else { throw LiftError.invalidInput([FieldError("steps", "at least one step is required")]) }
         var errors: [FieldError] = []
         var checked: [(StepRequest, RecipeTask)] = []
@@ -91,30 +91,21 @@ extension Lift {
             }
             var step = s
             do { step.settings = try task.validated(settings: s.settings, prefix: "\(prefix).settings") } catch { if case .invalidInput(let e) = error { errors += e } }
-            do { step.inputs = try task.validated(inputs: s.inputs, chained: i > 0, prefix: "\(prefix).inputs") } catch { if case .invalidInput(let e) = error { errors += e } }
+            do { step.inputs = try task.validated(inputs: s.inputs, chained: i > 0, prefix: "\(prefix).inputs", workdir: config.workdir) } catch { if case .invalidInput(let e) = error { errors += e } }
             checked.append((step, task))
         }
         if !errors.isEmpty { throw LiftError.invalidInput(errors) }
 
         let id = UUID().uuidString.lowercased()
         let now = Date()
-        var steps: [StepRecord] = []
-        for (i, (s, task)) in checked.enumerated() {
-            var inputs: [String: String] = [:]
-            for input in task.inputs {
-                guard let value = s.inputs[input.name] else { continue }
-                if input.type == .text { inputs[input.name] = value; continue }
-                let source = URL(filePath: value)
-                let dest = jobsDir.appending(path: "\(id)/inputs/\(i)-\(input.name)/\(source.lastPathComponent)")
-                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: source, to: dest)
-                inputs[input.name] = dest.path
-            }
-            steps.append(StepRecord(jobId: id, idx: i, recipe: s.recipe, task: s.task, inputs: inputs, settings: s.settings,
-                                    state: .queued, outputs: []))
+        let jobDir = jobsDir.appending(path: id)
+        let plan = checked.map { s, task in (s, task.inputs) }
+        let steps = try await Task.detached { try Self.copyInputs(plan, into: jobDir) }.value.enumerated().map { i, inputs in
+            StepRecord(jobId: id, idx: i, recipe: plan[i].0.recipe, task: plan[i].0.task, inputs: inputs, settings: plan[i].0.settings,
+                       state: .queued, outputs: [])
         }
         let firstInput = request.steps[0].inputs.values.first.map { URL(filePath: $0).deletingPathExtension().lastPathComponent }
-        try store.db.write { db in
+        try await store.db.write { db in
             let position = (try Double.fetchOne(db, sql: "SELECT MAX(position) FROM job") ?? 0) + 1
             let job = JobRecord(id: id, title: request.title ?? firstInput ?? request.steps[0].recipe, priority: request.priority,
                                 position: position, source: request.source, state: .queued, forceStart: false, currentStep: 0,
@@ -126,6 +117,30 @@ extension Lift {
         }
         tick()
         return try view(id)
+    }
+
+    /// Copies each step's file inputs into `<jobDir>/inputs/<step>-<name>/`; an image set copies only its
+    /// listed files. Returns each step's input map. Runs off the actor: inputs can be large.
+    nonisolated static func copyInputs(_ plan: [(StepRequest, [TaskInput])], into jobDir: URL) throws -> [[String: String]] {
+        let fm = FileManager.default
+        return try plan.enumerated().map { i, entry in
+            var inputs: [String: String] = [:]
+            for input in entry.1 {
+                guard let value = entry.0.inputs[input.name] else { continue }
+                if input.type == .text { inputs[input.name] = value; continue }
+                let source = URL(filePath: value)
+                let dest = jobDir.appending(path: "inputs/\(i)-\(input.name)/\(source.lastPathComponent)")
+                if input.type == .imageSet {
+                    try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+                    for f in ImageSet.files(source) ?? [] { try fm.copyItem(at: f, to: dest.appending(path: f.lastPathComponent)) }
+                } else {
+                    try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fm.copyItem(at: source, to: dest)
+                }
+                inputs[input.name] = dest.path
+            }
+            return inputs
+        }
     }
 
     // MARK: reading

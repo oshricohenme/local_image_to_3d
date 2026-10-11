@@ -115,7 +115,7 @@ extension RecipeTask {
     }
 
     /// Checks input names and that files exist. A chained step may leave its first input out.
-    public func validated(inputs: [String: String], chained: Bool, prefix: String) throws(LiftError) -> [String: String] {
+    public func validated(inputs: [String: String], chained: Bool, prefix: String, workdir: URL? = nil) throws(LiftError) -> [String: String] {
         var errors: [FieldError] = []
         let known = Set(self.inputs.map(\.name))
         for name in inputs.keys.sorted() where !known.contains(name) {
@@ -131,8 +131,8 @@ extension RecipeTask {
             case .text:
                 break
             case .imageSet:
-                if !FileManager.default.fileExists(atPath: value, isDirectory: &isDir) || !isDir.boolValue {
-                    errors.append(FieldError("\(prefix).\(input.name)", "must be an existing folder: \(value)"))
+                if let problem = ImageSet.problem(URL(filePath: value), workdir: workdir) {
+                    errors.append(FieldError("\(prefix).\(input.name)", problem))
                 }
             default:
                 if !FileManager.default.fileExists(atPath: value, isDirectory: &isDir) || isDir.boolValue {
@@ -142,5 +142,49 @@ extension RecipeTask {
         }
         if !errors.isEmpty { throw .invalidInput(errors) }
         return inputs
+    }
+}
+
+/// An `image_set` input: a flat folder of images plus an optional `transforms.json` (hidden files ignored).
+public enum ImageSet {
+    public static let extensions: Set<String> = ["png", "jpg", "jpeg", "webp"]
+    public static let maxImages = 64
+    public static let maxBytes = 2_000_000_000
+
+    /// The files that make up the set (what gets copied), or nil if the folder can't be read.
+    public static func files(_ folder: URL) -> [URL]? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return nil }
+        return names.filter { !$0.hasPrefix(".") }.sorted().map { folder.appending(path: $0) }
+    }
+
+    /// Why `folder` isn't a valid image set, or nil.
+    public static func problem(_ folder: URL, workdir: URL?) -> String? {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
+            return "must be an existing folder: \(folder.path)"
+        }
+        let resolved = folder.resolvingSymlinksInPath().standardizedFileURL.path
+        if let workdir {
+            let w = workdir.resolvingSymlinksInPath().standardizedFileURL.path
+            if (w + "/").hasPrefix(resolved == "/" ? "/" : resolved + "/") { return "must not contain Lift's working directory" }
+        }
+        guard let files = files(folder) else { return "can't read \(folder.path)" }
+        var images = 0, bytes = 0
+        for f in files {
+            var sub: ObjCBool = false
+            _ = FileManager.default.fileExists(atPath: f.path, isDirectory: &sub)
+            if sub.boolValue { return "must be a flat folder of images; \(f.lastPathComponent) is a folder" }
+            let name = f.lastPathComponent
+            if name == "transforms.json" { continue }
+            guard extensions.contains(f.pathExtension.lowercased()) else {
+                return "may only hold \(extensions.sorted().joined(separator: "/")) images and transforms.json; found \(name)"
+            }
+            images += 1
+            bytes += (try? FileManager.default.attributesOfItem(atPath: f.resolvingSymlinksInPath().path)[.size] as? Int) ?? 0
+        }
+        if images == 0 { return "has no images" }
+        if images > maxImages { return "has \(images) images; at most \(maxImages)" }
+        if bytes > maxBytes { return "is \(bytes / 1_000_000) MB; at most \(maxBytes / 1_000_000) MB" }
+        return nil
     }
 }
