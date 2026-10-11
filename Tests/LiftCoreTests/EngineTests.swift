@@ -143,3 +143,20 @@ extension Fixtures {
     }
 
 }
+
+@Suite struct CorruptSettingsTests {
+    @Test func outOfRangeStoredSettingsDoNotBrickLaunch() async throws {
+        let workdir = try Fixtures.tempDir()
+        let seed = try Store(path: workdir.appending(path: "lift.sqlite").path)
+        try await seed.db.write { db in
+            for (k, v) in [("memory_budget_gb", "4.8e10"), ("max_slots", "1000000"), ("idle_unload_minutes", "1e300")] {
+                try SettingRecord(key: k, value: v).save(db)
+            }
+        }
+        let lift = try await Fixtures.lift(workdir: workdir)
+        _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image()])]))
+        await lift.housekeep()  // Duration.seconds(minutes * 60)
+        let s = await lift.settingsGet()
+        #expect(s.memoryBudgetGB == 48 && s.maxSlots == 1 && s.idleUnloadMinutes == 10)
+    }
+}

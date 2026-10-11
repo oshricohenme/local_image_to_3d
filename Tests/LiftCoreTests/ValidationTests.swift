@@ -33,6 +33,13 @@ import Testing
         #expect(fields { _ = try t.validated(settings: ["bogus": .int(1), "seed": .string("x")], prefix: "s") } == ["s.bogus", "s.seed"])
     }
 
+    @Test func hugeOrNonFiniteNumbersAreRejectedNotTrapped() throws {
+        let t = try task()
+        #expect(fields { _ = try t.validated(settings: ["seed": .float(1e300)], prefix: "s") } == ["s.seed"])  // Int(1e300) would trap
+        #expect(fields { _ = try t.validated(settings: ["manual_fov": .float(.infinity)], prefix: "s") } == ["s.manual_fov"])
+        #expect(fields { _ = try t.validated(settings: ["manual_fov": .float(.nan)], prefix: "s") } == ["s.manual_fov"])
+    }
+
     @Test func requiredWithoutDefault() throws {
         var t = try task()
         t.settings.append(SettingDef(key: "prompt", label: "Prompt", type: .string))

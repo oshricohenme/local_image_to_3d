@@ -65,6 +65,24 @@ import Testing
         #expect(throws: LiftError.self) { try s.setting("max_slots", to: .string("two")) }
         #expect(throws: LiftError.self) { try s.setting("queue_paused", to: .bool(true)) }  // has its own command
         #expect(throws: LiftError.self) { try s.setting("nope", to: .int(1)) }
+        // C1: values that would trap when turned into bytes or a Duration are refused.
+        #expect(throws: LiftError.self) { try s.setting("memory_budget_gb", to: .float(4.8e10)) }
+        #expect(throws: LiftError.self) { try s.setting("max_slots", to: .int(1000)) }
+        #expect(throws: LiftError.self) { try s.setting("idle_unload_minutes", to: .float(1e300)) }
+        #expect(try s.setting("memory_budget_gb", to: .int(4096)).memoryBudgetGB == 4096)
+    }
+
+    @Test func outOfRangeStoredSettingsFallBackToDefaults() async throws {
+        let store = try Store()
+        try await store.db.write { db in
+            for (k, v) in [("memory_budget_gb", "4.8e10"), ("max_slots", "1000000"), ("idle_unload_minutes", "1e300"), ("dev_recipes", "true")] {
+                try SettingRecord(key: k, value: v).save(db)
+            }
+        }
+        let s = try await store.db.read { try Settings.load($0) }
+        #expect(s.memoryBudgetGB == 48 && s.maxSlots == 1 && s.idleUnloadMinutes == 10)  // bad rows ignored
+        #expect(s.devRecipes)  // good rows kept
+        #expect(s.memoryBudgetBytes == 48_000_000_000)
     }
 
     @Test func waitReasonCoding() throws {

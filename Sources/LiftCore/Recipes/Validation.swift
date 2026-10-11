@@ -18,8 +18,16 @@ extension Recipe {
         for w in weights where w.repo.split(separator: "/").count != 2 {
             out.append("weights: \(w.repo) must be owner/name")
         }
-        if resources.maxConcurrentPerProcess < 1 { out.append("resources.max_concurrent_per_process must be ≥ 1") }
-        if resources.memoryGB <= 0 { out.append("resources.memory_gb must be > 0") }
+        // Bounds keep every number convertible to bytes without trapping.
+        if !(1...64).contains(resources.maxConcurrentPerProcess) { out.append("resources.max_concurrent_per_process must be 1…64") }
+        func gbOK(_ v: Double) -> Bool { v.isFinite && v > 0 && v <= 4096 }
+        if !gbOK(resources.memoryGB) { out.append("resources.memory_gb must be > 0 and ≤ 4096") }
+        for (i, o) in resources.memoryOverrides.enumerated() where !gbOK(o.memoryGB) {
+            out.append("resources.memory_overrides[\(i)].memory_gb must be > 0 and ≤ 4096")
+        }
+        if !(resources.diskGB.isFinite && resources.diskGB >= 0 && resources.diskGB <= 100_000) {
+            out.append("resources.disk_gb must be between 0 and 100000")
+        }
         if tasks.isEmpty { out.append("at least one task is required") }
         if Set(tasks.map(\.id)).count != tasks.count { out.append("task ids must be unique") }
         let allKeys = Set(tasks.flatMap { $0.settings.map(\.key) })
@@ -55,8 +63,12 @@ extension SettingDef {
         let coerced: SettingValue
         switch (type, value) {
         case (.int, .int): coerced = value
-        case (.int, .float(let d)) where d.rounded() == d: coerced = .int(Int(d))
-        case (.float, .float): coerced = value
+        case (.int, .float(let d)):
+            guard let i = Int(exactly: d) else { return .failure("must be int") }  // also rejects 1e300, inf, nan
+            coerced = .int(i)
+        case (.float, .float(let d)):
+            guard d.isFinite else { return .failure("must be a finite number") }
+            coerced = value
         case (.float, .int(let i)): coerced = .float(Double(i))
         case (.bool, .bool): coerced = value
         case (.string, .string), (.path, .string): coerced = value

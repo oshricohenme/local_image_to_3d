@@ -41,24 +41,56 @@ public struct Settings: Codable, Sendable, Equatable {
         pinOverrides = try c.decodeIfPresent([String: String].self, forKey: .pinOverrides) ?? d.pinOverrides
     }
 
-    public var memoryBudgetBytes: Int { Int(memoryBudgetGB * 1_000_000_000) }
+    /// Upper bounds keep every value convertible to bytes / a Duration without trapping:
+    /// at most 64 slots, a 4096 GB budget and a week (10080 minutes) of idle time.
+    public static let maxSlotsLimit = 64
+    public static let memoryBudgetGBLimit = 4096.0
+    public static let idleUnloadMinutesLimit = 10080.0
+
+    /// Safe even for a value that slipped past validation.
+    public var memoryBudgetBytes: Int {
+        guard memoryBudgetGB.isFinite else { return Int(Settings().memoryBudgetGB * 1_000_000_000) }
+        return Int(min(max(memoryBudgetGB, 0), Self.memoryBudgetGBLimit) * 1_000_000_000)
+    }
+
+    var problems: [FieldError] {
+        var errors: [FieldError] = []
+        if !(1...Self.maxSlotsLimit).contains(maxSlots) { errors.append(FieldError("max_slots", "must be 1…\(Self.maxSlotsLimit)")) }
+        if !(memoryBudgetGB > 0 && memoryBudgetGB <= Self.memoryBudgetGBLimit) {
+            errors.append(FieldError("memory_budget_gb", "must be > 0 and ≤ \(Self.memoryBudgetGBLimit.formatted())"))
+        }
+        if !(idleUnloadMinutes >= 0 && idleUnloadMinutes <= Self.idleUnloadMinutesLimit) {
+            errors.append(FieldError("idle_unload_minutes", "must be 0…\(Self.idleUnloadMinutesLimit.formatted())"))
+        }
+        return errors
+    }
 
     func validate() throws(LiftError) {
-        var errors: [FieldError] = []
-        if maxSlots < 1 { errors.append(FieldError("max_slots", "must be ≥ 1")) }
-        if memoryBudgetGB <= 0 { errors.append(FieldError("memory_budget_gb", "must be > 0")) }
-        if idleUnloadMinutes < 0 { errors.append(FieldError("idle_unload_minutes", "must be ≥ 0")) }
+        let errors = problems
         if !errors.isEmpty { throw .invalidInput(errors) }
     }
 
-    /// Reads all rows over the defaults.
+    /// Reads all rows over the defaults. A row that doesn't decode or is out of range is skipped with a
+    /// log line (its default stays), so a corrupt database can't stop Lift from opening.
     static func load(_ db: Database) throws -> Settings {
-        var object: [String: Any] = [:]
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Settings())) as! [String: Any]
+        var settings = Settings()
         for row in try SettingRecord.fetchAll(db) {
-            object[row.key] = try JSONSerialization.jsonObject(with: Data(row.value.utf8), options: .fragmentsAllowed)
+            var candidate = object
+            guard let value = try? JSONSerialization.jsonObject(with: Data(row.value.utf8), options: .fragmentsAllowed) else {
+                print("lift: ignoring unreadable setting \(row.key)=\(row.value)")
+                continue
+            }
+            candidate[row.key] = value
+            guard let data = try? JSONSerialization.data(withJSONObject: candidate),
+                  let decoded = try? JSONDecoder().decode(Settings.self, from: data), decoded.problems.isEmpty else {
+                print("lift: ignoring invalid setting \(row.key)=\(row.value); using the default")
+                continue
+            }
+            object = candidate
+            settings = decoded
         }
-        let data = try JSONSerialization.data(withJSONObject: object)
-        return try JSONDecoder().decode(Settings.self, from: data)
+        return settings
     }
 
     /// Writes every key (cheap: a handful of rows).

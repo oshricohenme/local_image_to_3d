@@ -82,6 +82,11 @@ tasks:
         ("memory_keys: [low_vram, resolution]", "memory_keys: [low_vram, nope]", "nope is not a setting"),
         ("platform: { status: supported, reason: \"\" }", "platform: { status: unsupported }", "reason is required"),
         ("repo: TencentARC/Pixal3D, gated", "repo: Pixal3D, gated", "must be owner/name"),
+        // C1: numbers that would trap when turned into bytes.
+        ("memory_gb: 18", "memory_gb: 1e300", "resources.memory_gb must be"),
+        ("memory_gb: 12 }]", "memory_gb: -1 }]", "resources.memory_overrides[0].memory_gb must be"),
+        ("max_concurrent_per_process: 1", "max_concurrent_per_process: 1\n  disk_gb: .inf", "resources.disk_gb must be"),
+        ("max_concurrent_per_process: 1", "max_concurrent_per_process: 1000", "max_concurrent_per_process must be"),
     ])
     func invalidRecipes(original: String, replacement: String, message: String) throws {
         let yaml = pixalYAML.replacingOccurrences(of: original, with: replacement)
