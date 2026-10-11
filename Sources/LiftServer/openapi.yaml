@@ -536,7 +536,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: settings_set
-      summary: 'Set one setting: max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes or port (port applies on the next server start).'
+      summary: 'Set one setting: max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats, cleanup_after_export, notifications, launch_at_login, menu_bar or port (port applies on the next server start).'
       requestBody:
         required: true
         content:
@@ -1096,7 +1096,8 @@ components:
       type: object
       required: [key, value]
       properties:
-        key: { type: string, enum: [max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes, port] }
+        key: { type: string, enum: [max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats,
+                                    cleanup_after_export, notifications, launch_at_login, menu_bar, port] }
         value: { $ref: '#/components/schemas/SettingValue' }
     SetLAN:
       type: object
