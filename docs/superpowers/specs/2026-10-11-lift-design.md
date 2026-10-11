@@ -231,6 +231,19 @@ substitutes → `lift_shim` + `launcher.py` → a smoke import. Each step is log
 streamed live. Any failure leaves the model `install_failed` with the log kept; a partial install never
 counts as installed.
 
+**Weights: you start the download; Lift verifies it.**
+- Lift never downloads weights on its own. Each recipe's `weights:` list (repo and optional revision) is
+  shown with its total size, and **Download** (UI) or `models_download_weights` (MCP/HTTP, confirm
+  needed) starts it explicitly, using `hf download` from the model's venv into the shared HF cache.
+- You can also download weights yourself outside Lift.
+- **`models_verify_weights`** runs before every worker start, and on demand. For each repo it gets the
+  file list with LFS SHA-256 hashes and sizes from the Hugging Face API, checks every file exists in the
+  local cache at that revision, checks sizes, and hashes the LFS files. Hashes are cached per file
+  (path, size, mtime), so later checks are fast.
+- Missing or corrupt files mark the model `weights_missing` or `weights_corrupt`, listing each bad file,
+  and block its jobs with waiting reason `weights_unverified`. If Lift is offline, it falls back to the
+  last successful check (and says so).
+
 **Re-clone** happens only on install, reinstall or a pin change. **Check upstream** runs `git ls-remote`
 and reports how far upstream has moved past the pin. **Change pin** reinstalls at the new commit.
 **Uninstall** removes `models/<id>/`; weights in the shared HF cache are kept unless you choose
@@ -243,7 +256,7 @@ and reports how far upstream has moved past the pin. **Change pin** reinstalls a
 - Job fields: id, title, priority (`low|normal|high`), position (manual order), source (`ui|http|mcp`),
   `export: {dir, formats[], cleanup_after_export}`, `force_start`, timestamps, state.
 - **States** (job and step): `queued → waiting(reason) → loading → running → succeeded | failed | cancelled | interrupted`.
-  `waiting` reasons are facts: `no_free_slot`, `memory {needed, free}`, `model_installing`, `model_not_installed`, `model_unsupported`, `queue_paused`.
+  `waiting` reasons are facts: `no_free_slot`, `memory {needed, free}`, `model_installing`, `model_not_installed`, `model_unsupported`, `weights_unverified`, `queue_paused`.
 - **Ordering:** highest priority first, then manual position, then submission time (FIFO). Moving a job
   sets its position. No reordering by model warmth.
 - **Persistence:** everything lives in SQLite (GRDB migrations). Inputs are copied into `jobs/<id>/inputs/` when the job is submitted.
@@ -331,7 +344,7 @@ Without it they return `confirmation_required` with a description of the impact 
 |---|---|---|
 | Jobs | `jobs_submit` (one or more steps, priority, export, title) · `jobs_list` (filter by state, modality, recipe, text) · `jobs_get` · `jobs_wait` (timeout, streams progress) · `jobs_cancel` · `jobs_retry` (optional new settings) · `jobs_move` (before/after/to position) · `jobs_set_priority` · `jobs_force_start` · `jobs_delete` · `jobs_export` (re-export, formats, dir) · `jobs_list_interrupted` · `jobs_resolve_interrupted` (requeue/discard) | force_start, delete, cancel-running |
 | Queue | `queue_status` · `queue_pause` · `queue_resume` | — |
-| Models | `models_list` · `models_get` (recipe, tasks, settings schema, status, pin, disk, memory) · `models_install` · `models_reinstall` · `models_set_pin` · `models_check_upstream` · `models_uninstall` (optional delete weights) · `models_install_log` | install, reinstall, set_pin, uninstall |
+| Models | `models_list` · `models_get` (recipe, tasks, settings schema, status, pin, disk, memory) · `models_install` · `models_reinstall` · `models_set_pin` · `models_check_upstream` · `models_uninstall` (optional delete weights) · `models_install_log` · `models_download_weights` · `models_verify_weights` | install, reinstall, set_pin, uninstall, download_weights |
 | Recipes | `recipes_list_sources` · `recipes_add_source` (git URL) · `recipes_remove_source` · `recipes_refresh` | add_source, remove_source |
 | Workers & resources | `workers_list` · `workers_load` · `workers_unload` · `resources_get` (budget, reserved, system free, per-worker footprint, learned estimates) · `resources_set` (max_slots, memory_budget_gb, idle_unload_minutes) | unload-busy |
 | Settings & server | `settings_get` · `settings_set` (any setting) · `server_status` (port, bind, URLs) · `server_set_lan` · `server_rotate_token` · `secrets_set_hf_token` | set_lan, rotate_token, settings that move folders |
