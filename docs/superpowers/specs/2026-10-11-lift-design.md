@@ -19,7 +19,19 @@ built for any modality (image, video, audio) so later projects need only a recip
    The UI user or the calling LLM (through MCP or HTTP) decides; Lift does exactly what it is told and
    reports facts (state, resources, warnings).
 3. **One command layer.** UI, HTTP and MCP are three front ends over the same commands, with full parity.
-4. **Use packages, don't reinvent.** An established package is preferred for every operation.
+4. **Non-developers come first.** Assume the person using Lift has never used a terminal. Setup and
+   every later step is guided:
+   - **Plain language.** No "venv", "pin", "commit", "repo", "SHA", "MPS" or "token" without a one-line
+     plain explanation; technical detail lives behind a "Details" disclosure.
+   - **Lift does the work.** Each step is one button. Tools, models and weights install automatically,
+     with honest progress, size and time estimates, and a live log only under Details.
+   - **Expected interruptions are explained before they happen.** For example: "macOS will ask for your
+     password to install a helper tool." The Hugging Face account, token and gated-model access are a
+     step-by-step walkthrough, with links that open in the browser and a "Check again" button.
+   - **Every error says what happened, why, and what to do,** with a "Fix it" or "Try again" button where possible.
+   - **Nothing is left in a half-done state.** Interrupted setup resumes where it stopped.
+   - The developer view (recipes' raw settings, commits, the shim) is opt-in under Settings → Developer.
+5. **Use packages, don't reinvent.** An established package is preferred for every operation.
 
 ## 2. Scope
 
