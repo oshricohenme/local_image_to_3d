@@ -70,7 +70,7 @@ struct AssistantRow: View {
     @ViewBuilder var status: some View {
         switch row.state {
         case nil: Text("Checking…").foregroundStyle(.secondary)
-        case .connected: Text(row.skill == .installed || row.skill == .edited ? "Connected ✓ (skill installed)" : "Connected ✓").foregroundStyle(.green)
+        case .connected: Text(row.skill == .installed || row.skill == .edited ? "Connected ✓ · skill installed" : "Connected ✓").foregroundStyle(.green)
         case .notConnected: Text("Not connected").foregroundStyle(.secondary)
         case .needsUpdate: Text("Needs updating").foregroundStyle(.orange)
         case .taken: Text("Another “lift” is set up").foregroundStyle(.secondary)
