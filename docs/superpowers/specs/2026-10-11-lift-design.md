@@ -110,8 +110,11 @@ downloaded until you choose to use a model.
 
 ## 4. Recipes
 
-A recipe is a folder: `recipe.yaml`, `launcher.py`, optional `files/`. Recipes live in **recipe sources**
-under `<workdir>/recipes/<source>/`.
+A recipe is a folder: `recipe.yaml`, `launcher.py`, and optional `files/`, which can hold any
+recipe-specific code: extra shims, stand-ins, helper scripts and config templates. **Recipes are the
+only way a model gets into Lift.** You never enter a URL or add a repo. A recipe tells Lift where to get
+the upstream code (repo and pin), what to install, which shims and stand-ins to use, and which weights to
+download. Recipes live under `<workdir>/recipes/`.
 
 - **Bundled source** (v1, default): the recipes and `shared/` folder from `dev-recipes/` in this repo,
   built into Lift.app and copied to `<workdir>/recipes/bundled/` at first launch, so they work offline.
@@ -120,13 +123,13 @@ under `<workdir>/recipes/<source>/`.
 - **Using a model** is the moment everything happens, and only for that model: clone its upstream repo
   at the pin, build its venv, install substitutes, install its brew prerequisites, then download and
   verify its weights. All of it is triggered by your Install/Use action.
-- **Public recipes repo (later):** `oshricohenme/lift-recipes`, open to community contributions, is
-  added as an extra git source when it exists, using the same format.
-- **More sources:** any git URL (`recipes_add_source`). If two sources define the same recipe id, the one
-  added first wins, and the clash is shown as a warning.
-- **Updates:** a source is pulled only when you click Refresh or call `recipes_refresh`. Installed models
-  keep their pinned upstream commit; a refreshed recipe that changes the pin shows "update available"
-  and reinstalls only when you say so.
+- **Public recipes repo (later):** `oshricohenme/lift-recipes`, open to community contributions, in the
+  same format. Recipes from it reach users **through Lift** (an app update, or a built-in curated update
+  check), never as a URL the user types.
+- **No user-added sources.** There's no "add source" command, URL field or git-URL input anywhere: UI,
+  HTTP or MCP.
+- **Updates:** when a recipe update arrives with the app, installed models keep their pinned upstream
+  commit. A recipe that changes the pin shows "update available" and reinstalls only when you say so.
 - **Compatibility:** a recipe with `schema` newer than the app supports is listed as "needs a newer Lift" and can't be installed.
 - **Test Cube** lives in the dev recipe source (`dev-recipes/test-cube`, see below), loaded only by the
   test suite and by a hidden developer setting. It's hidden from users.
@@ -460,7 +463,7 @@ Without it they return `confirmation_required` with a description of the impact 
 | Jobs | `jobs_submit` (one or more steps, priority, export, title) · `jobs_list` (filter by state, modality, recipe, text) · `jobs_get` · `jobs_wait` (timeout, streams progress) · `jobs_cancel` · `jobs_retry` (optional new settings) · `jobs_move` (before/after/to position) · `jobs_set_priority` · `jobs_force_start` · `jobs_delete` · `jobs_export` (re-export, formats, dir) · `jobs_list_interrupted` · `jobs_resolve_interrupted` (requeue/discard) | force_start, delete, cancel-running |
 | Queue | `queue_status` · `queue_pause` · `queue_resume` | — |
 | Models | `models_list` · `models_get` (recipe, tasks, settings schema, status, pin, disk, memory) · `models_install` · `models_reinstall` · `models_set_pin` · `models_check_upstream` · `models_uninstall` (optional delete weights) · `models_install_log` · `models_download_weights` · `models_verify_weights` | install, reinstall, set_pin, uninstall, download_weights |
-| Recipes | `recipes_list_sources` · `recipes_add_source` (git URL) · `recipes_remove_source` · `recipes_refresh` | add_source, remove_source |
+| Recipes | `recipes_list` (all available recipes, incl. problems such as "needs a newer Lift") | — |
 | Workers & resources | `workers_list` · `workers_load` · `workers_unload` · `resources_get` (budget, reserved, system free, per-worker footprint, learned estimates) · `resources_set` (max_slots, memory_budget_gb, idle_unload_minutes) | unload-busy |
 | Settings & server | `settings_get` · `settings_set` (any setting) · `server_status` (port, bind, URLs) · `server_set_lan` · `server_rotate_token` · `secrets_set_hf_token` | set_lan, rotate_token, settings that move folders |
 | System | `system_prereqs` · `system_install_prereqs` (brew/git/uv/Metal Toolchain) | install_prereqs |
