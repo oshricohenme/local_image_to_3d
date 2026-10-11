@@ -283,6 +283,17 @@ counts as installed.
   and block its jobs with waiting reason `weights_unverified`. If Lift is offline, it falls back to the
   last successful check (and says so).
 
+**Lift owns its working copy.** Each model runs from Lift's own clone in `<workdir>/models/<id>/repo`,
+never from a copy somewhere else on the machine. Install, update and reinstall bring that copy to the
+pinned commit **whatever state it's in**:
+- If the copy is missing, it's cloned.
+- If it's present with the right remote, Lift fetches, runs `checkout -f <pin>` and updates submodules
+  (nested pinned clones, such as TRELLIS.2 inside trellis-mac, are reset the same way).
+- If it's present but broken or has the wrong remote, it's re-cloned fresh into a staging folder and
+  swapped in. The old copy is Lift-created, so replacing it is allowed.
+- Changes that setup scripts make inside Lift's copy (e.g. trellis-mac patching its TRELLIS.2) are
+  expected. They're re-applied on every install, because the copy is reset to the pin first.
+
 **Re-clone** happens only on install, reinstall or a pin change. **Check upstream** runs `git ls-remote`
 and reports how far upstream has moved past the pin. **Change pin** reinstalls at the new commit.
 **Uninstall** removes only `models/<id>/`, which Lift created. Weights in the shared Hugging Face cache are
