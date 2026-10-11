@@ -15,6 +15,8 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams", from: "6.2.2"),
         .package(url: "https://github.com/swiftlang/swift-subprocess", from: "1.0.1"),
         .package(url: "https://github.com/warrenm/GLTFKit2", from: "0.5.15"),
+        // Plan 3: the models' READMEs, rendered in full (spec §4a).
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
         // Plan 2: LiftServer (HTTP + MCP) and lift-mcp.
         .package(url: "https://github.com/kishikawakatsumi/KeychainAccess", from: "4.2.2"),
         .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.27.1"),
@@ -65,6 +67,7 @@ let package = Package(
             "LiftCore",
             "LiftServer",
             .product(name: "GLTFKit2", package: "GLTFKit2"),
+            .product(name: "MarkdownUI", package: "swift-markdown-ui"),
         ]),
         .testTarget(name: "LiftUITests", dependencies: ["LiftUI"]),
         .testTarget(name: "LiftServerTests", dependencies: [
