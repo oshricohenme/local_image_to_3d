@@ -36,6 +36,11 @@ struct AssistantRow: View {
                 status
                 if row.busy { ProgressView().controlSize(.small) } else { button }
             }
+            if assistant == .claudeDesktop {
+                Text("Skills aren't available in Claude Desktop, so it gets Lift's tools without the Lift skill.").font(.caption).foregroundStyle(.secondary)
+            } else if row.skill == .foreign && row.note == nil {
+                Text("A different “lift” skill is already installed, so Lift leaves it alone.").font(.caption).foregroundStyle(.secondary)
+            }
             if let note = row.note { Label(note, systemImage: "info.circle").font(.callout) }
             if let failure = row.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
@@ -65,7 +70,7 @@ struct AssistantRow: View {
     @ViewBuilder var status: some View {
         switch row.state {
         case nil: Text("Checking…").foregroundStyle(.secondary)
-        case .connected: Text("Connected ✓").foregroundStyle(.green)
+        case .connected: Text(row.skill == .installed || row.skill == .edited ? "Connected ✓ (skill installed)" : "Connected ✓").foregroundStyle(.green)
         case .notConnected: Text("Not connected").foregroundStyle(.secondary)
         case .needsUpdate: Text("Needs updating").foregroundStyle(.orange)
         case .taken: Text("Another “lift” is set up").foregroundStyle(.secondary)

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LiftCore
 import Observation
@@ -40,6 +41,17 @@ public enum AssistantState: Equatable, Sendable {
     case needsUpdate
     /// Something else is already set up under the name "lift": replaced only after asking.
     case taken
+}
+
+/// Lift's skill for an assistant (`<skills>/lift/SKILL.md`, with `.installed-by-lift` holding its SHA-256).
+public enum SkillState: Equatable, Sendable {
+    case missing, installed
+    /// Ours and unedited, but this Lift ships a newer one.
+    case outdated
+    /// Ours, but the user changed it: kept as it is.
+    case edited
+    /// A "lift" skill Lift didn't install: never touched.
+    case foreign
 }
 
 public enum AssistantError: Error, Equatable, CustomStringConvertible {
@@ -89,6 +101,8 @@ public struct AssistantConnector: Sendable {
     public var mcpURL: String
     /// The `lift-mcp` inside the running app bundle.
     public var bridge: String?
+    /// The SKILL.md this Lift ships (nil: no skill to install).
+    public var skill: String?
     let runner: any CommandRunner
     let home: URL
     /// Where to look for `claude` and `codex` after the login shell's PATH.
@@ -96,10 +110,11 @@ public struct AssistantConnector: Sendable {
     /// Where Claude.app may be.
     let applications: [URL]
 
-    public init(mcpURL: String, bridge: String?, runner: any CommandRunner = SubprocessRunner(),
+    public init(mcpURL: String, bridge: String?, skill: String? = nil, runner: any CommandRunner = SubprocessRunner(),
                 home: URL = FileManager.default.homeDirectoryForCurrentUser, searchDirs: [String]? = nil, applications: [URL]? = nil) {
         self.mcpURL = mcpURL
         self.bridge = bridge
+        self.skill = skill
         self.runner = runner
         self.home = home
         self.searchDirs = searchDirs ?? [".local/bin", ".claude/local", ".npm-global/bin", ".volta/bin", ".bun/bin"].map { home.appending(path: $0).path }
@@ -115,6 +130,62 @@ public struct AssistantConnector: Sendable {
         case .claudeCode: "claude mcp add --scope user --transport http lift \(mcpURL)"
         case .codex: "codex mcp add lift --url \(mcpURL)"
         case .claudeDesktop: "\"lift\": " + JSONText.render(desktopValue, indent: "", step: "  ", multiline: true)
+        }
+    }
+
+    // MARK: the skill
+
+    /// `~/.claude/skills/lift` or `~/.codex/skills/lift`; Claude Desktop has no skills folder.
+    func skillDir(_ a: Assistant) -> URL? {
+        switch a {
+        case .claudeCode: home.appending(path: ".claude/skills/lift")
+        case .codex: home.appending(path: ".codex/skills/lift")
+        case .claudeDesktop: nil
+        }
+    }
+
+    public func skillState(_ a: Assistant) -> SkillState? {
+        guard let dir = skillDir(a) else { return nil }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir.path) else { return .missing }
+        guard let marker = fm.contents(atPath: dir.appending(path: ".installed-by-lift").path) else { return .foreign }
+        let wrote = String(decoding: marker, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let current = fm.contents(atPath: dir.appending(path: "SKILL.md").path), Self.sha256(current) == wrote else { return .edited }
+        return skill.map { Self.sha256(Data($0.utf8)) == wrote } == false ? .outdated : .installed
+    }
+
+    static func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+    /// Installs or updates Lift's skill, unless it's someone else's or the user edited it. Returns a note for those.
+    @discardableResult
+    func installSkill(_ a: Assistant) throws -> String? {
+        guard let dir = skillDir(a), let skill else { return nil }
+        switch skillState(a) {
+        case .foreign: return "A different “lift” skill is already installed, so Lift left it alone."
+        case .edited: return "You changed Lift's skill, so Lift kept your version."
+        case .installed, nil: return nil
+        case .missing, .outdated:
+            let data = Data(skill.utf8)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try data.write(to: dir.appending(path: "SKILL.md"), options: .atomic)
+            try Data(Self.sha256(data).utf8).write(to: dir.appending(path: ".installed-by-lift"), options: .atomic)
+            return nil
+        }
+    }
+
+    /// Removes the two files Lift wrote, and the folder only if nothing else is in it. Returns a note when it kept it.
+    @discardableResult
+    func removeSkill(_ a: Assistant) throws -> String? {
+        guard let dir = skillDir(a) else { return nil }
+        switch skillState(a) {
+        case .edited: return "You changed Lift's skill, so Lift left it in place."
+        case .foreign, .missing, nil: return nil
+        case .installed, .outdated:
+            let fm = FileManager.default
+            try fm.removeItem(at: dir.appending(path: "SKILL.md"))
+            try fm.removeItem(at: dir.appending(path: ".installed-by-lift"))
+            if (try? fm.contentsOfDirectory(atPath: dir.path))?.isEmpty == true { try fm.removeItem(at: dir) }
+            return nil
         }
     }
 
@@ -170,13 +241,16 @@ public struct AssistantConnector: Sendable {
         }
         if existing != nil { try await disconnect(a, cli: cli, existing: existing) }
         try await run(cli, add)
-        return nil
+        return try installSkill(a)
     }
 
-    public func disconnect(_ a: Assistant) async throws {
-        if a == .claudeDesktop { return try editDesktop { _ in nil } }
+    /// Removes the MCP entry, then Lift's skill if it's still as Lift wrote it. Returns a note when the skill stays.
+    @discardableResult
+    public func disconnect(_ a: Assistant) async throws -> String? {
+        if a == .claudeDesktop { try editDesktop { _ in nil }; return nil }
         guard let cli = await find(a) else { throw AssistantError.notInstalled(a) }
         try await disconnect(a, cli: cli, existing: a == .claudeCode ? await entry(a, cli: cli) : nil)
+        return try removeSkill(a)
     }
 
     func disconnect(_ a: Assistant, cli: String, existing: AssistantEntry?) async throws {
@@ -461,13 +535,15 @@ public final class AssistantsModel {
         /// A plain one-line error, and the command's output for Show details.
         public var failure: String?
         public var details: String?
+        /// nil for Claude Desktop, which has no skills.
+        public var skill: SkillState?
     }
 
     public private(set) var rows: [Assistant: Row] = [:]
     public private(set) var connector: AssistantConnector?
     /// Builds the connector for Lift's MCP address and bridge. The app sets it; without it nothing is checked or
     /// run, so unit tests and the launch smoke test never start a real `claude` or `codex`.
-    public var makeConnector: (@MainActor (_ mcpURL: String, _ bridge: String?) -> AssistantConnector)?
+    public var makeConnector: (@MainActor (_ mcpURL: String, _ bridge: String?, _ skill: String?) -> AssistantConnector)?
 
     public init() {}
 
@@ -475,13 +551,16 @@ public final class AssistantsModel {
     public var needingUpdate: [Assistant] { Assistant.allCases.filter { rows[$0]?.state == .needsUpdate } }
 
     /// Detects all three at once (`claude mcp get` health-checks, so it can take a few seconds).
-    public func check(mcpURL: String?, bridge: String?) async {
+    /// Also brings an unedited skill up to this Lift's version for each connected assistant (Lift was updated).
+    public func check(mcpURL: String?, bridge: String?, skill: String? = nil) async {
         guard let mcpURL, let makeConnector else { return }
-        let c = makeConnector(mcpURL, bridge)
+        let c = makeConnector(mcpURL, bridge, skill)
         connector = c
         async let code = c.detect(.claudeCode), desktop = c.detect(.claudeDesktop), codex = c.detect(.codex)
         for (a, state) in [(Assistant.claudeCode, await code), (.claudeDesktop, await desktop), (.codex, await codex)] {
+            if state != .notInstalled, state != .notConnected, state != .taken, c.skillState(a) == .outdated { _ = try? c.installSkill(a) }
             rows[a, default: Row()].state = state
+            rows[a]?.skill = c.skillState(a)
         }
     }
 
@@ -491,7 +570,7 @@ public final class AssistantsModel {
     }
 
     public func disconnect(_ a: Assistant) async {
-        await act(a, "disconnect") { try await $0.disconnect(a); return nil }
+        await act(a, "disconnect") { try await $0.disconnect(a) }
     }
 
     func act(_ a: Assistant, _ verb: String, _ body: @escaping @Sendable (AssistantConnector) async throws -> String?) async {
@@ -507,6 +586,7 @@ public final class AssistantsModel {
             row.details = Format.error(error)
         }
         row.state = await c.detect(a)
+        row.skill = c.skillState(a)
         rows[a] = row
     }
 }

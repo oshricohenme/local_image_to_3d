@@ -27,9 +27,10 @@ targets:
     platform: macOS
     sources: [Lift]
     postCompileScripts:
-      # Contents/Resources gets the bundled recipe source (spec §4) and the worker runtime (spec §8).
+      # Contents/Resources gets the bundled recipe source (spec §4), the worker runtime (spec §8) and the
+      # Lift skill that connecting Claude Code or Codex installs (skills/lift/SKILL.md).
       # rsync, not folder references: a developer's .venv (hundreds of MB) and caches must stay out.
-      - name: Bundle recipes and lift_worker
+      - name: Bundle recipes, lift_worker and the Lift skill
         basedOnDependencyAnalysis: false
         script: |
           set -e
@@ -37,6 +38,7 @@ targets:
           X="--exclude .venv --exclude __pycache__ --exclude .pytest_cache --exclude .DS_Store"
           rsync -a --delete $X "$SRCROOT/../dev-recipes/" "$R/dev-recipes/"
           rsync -a --delete $X "$SRCROOT/../python/lift_worker/src/lift_worker/" "$R/lift_worker/"
+          rsync -a --delete $X "$SRCROOT/../skills/" "$R/skills/"
     dependencies:
       - package: Lift
         product: LiftUI

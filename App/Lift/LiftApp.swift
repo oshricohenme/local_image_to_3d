@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             app.applyLaunchAtLogin = { try LoginItem.set($0) }
             app.launchAtLoginEnabled = { LoginItem.isEnabled }
             // The real claude/codex and Claude's settings file: never in the smoke test.
-            app.assistants.makeConnector = { AssistantConnector(mcpURL: $0, bridge: $1) }
+            app.assistants.makeConnector = { AssistantConnector(mcpURL: $0, bridge: $1, skill: $2) }
         }
         await app.start()
     }

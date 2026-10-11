@@ -1,5 +1,6 @@
 import Foundation
 import LiftCore
+import LiftServer
 import Synchronization
 import Testing
 @testable import LiftUI
@@ -35,6 +36,9 @@ struct Home {
     var desktopConfig: URL { root.appending(path: "Library/Application Support/Claude/claude_desktop_config.json") }
     var backup: URL { root.appending(path: "Library/Application Support/Claude/claude_desktop_config.json.lift-backup") }
 
+    static let skillV1 = "---\nname: lift\ndescription: test v1\n---\nUse Lift.\n"
+    static let skillV2 = "---\nname: lift\ndescription: test v2\n---\nUse Lift better.\n"
+
     init() throws { root = try UIFixtures.tempDir() }
 
     /// An executable named `tool` in `~/.local/bin`, where the connector looks after the login shell's PATH.
@@ -58,8 +62,12 @@ struct Home {
 
     var desktopText: String { (try? String(contentsOf: desktopConfig, encoding: .utf8)) ?? "" }
 
-    func connector(port: Int = 7777, bridge: String? = "/Applications/Lift.app/Contents/MacOS/lift-mcp") -> AssistantConnector {
-        AssistantConnector(mcpURL: "http://127.0.0.1:\(port)/mcp", bridge: bridge, runner: script, home: root,
+    func skillFile(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/SKILL.md") }
+    func marker(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/.installed-by-lift") }
+    func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding: .utf8) }
+
+    func connector(port: Int = 7777, bridge: String? = "/Applications/Lift.app/Contents/MacOS/lift-mcp", skill: String? = Home.skillV1) -> AssistantConnector {
+        AssistantConnector(mcpURL: "http://127.0.0.1:\(port)/mcp", bridge: bridge, skill: skill, runner: script, home: root,
                            searchDirs: [root.appending(path: ".local/bin").path], applications: [apps.appending(path: "Claude.app")])
     }
 }
@@ -369,7 +377,7 @@ func codexGet(_ transport: String) -> [String] {
         try home.install("claude")
         home.script.on("mcp get lift", lines: claudeGet(url: "http://127.0.0.1:7777/mcp"))
         let model = AssistantsModel()
-        model.makeConnector = { url, bridge in
+        model.makeConnector = { url, bridge, _ in
             AssistantConnector(mcpURL: url, bridge: bridge, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path],
                                applications: [])
         }
@@ -387,7 +395,7 @@ func codexGet(_ transport: String) -> [String] {
         home.script.on("mcp add --help", lines: CodexConnectorTests.addHelp)
         home.script.on("mcp add lift", code: 2, lines: ["error: config.toml is read-only"])
         let model = AssistantsModel()
-        model.makeConnector = { url, bridge in
+        model.makeConnector = { url, bridge, _ in
             AssistantConnector(mcpURL: url, bridge: bridge, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path],
                                applications: [])
         }
@@ -402,7 +410,7 @@ func codexGet(_ transport: String) -> [String] {
         let home = try Home()
         try home.installDesktopApp()
         let model = AssistantsModel()
-        model.makeConnector = { url, _ in home.connector(port: Int(URL(string: url)!.port!)) }
+        model.makeConnector = { url, _, _ in home.connector(port: Int(URL(string: url)!.port!)) }
         await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil)
         await model.connect(.claudeDesktop)
         #expect(model.rows[.claudeDesktop]?.state == .connected)
@@ -415,17 +423,143 @@ func codexGet(_ transport: String) -> [String] {
     @Test func theServerStartingChecksTheAssistants() async throws {
         let home = try Home()
         try home.installDesktopApp()
-        let app = try UIFixtures.newApp()
+        let skill = try UIFixtures.tempDir().appending(path: "SKILL.md")
+        try Data("shipped skill".utf8).write(to: skill)
+        let app = AppModel(defaults: MemoryPrefs(), paths: AppPaths(bundledRecipes: try UIFixtures.cubeBundle(), workerSource: UIFixtures.workerSource,
+                                                                    bridge: nil, skill: skill),
+                           secrets: MemorySecretStore(), serverPort: 0, checkPrereqs: { _ in readyTools }, hf: FakeHF(), weightsMetadata: OfflineHub())
         let seen = SeenMCP()
-        app.assistants.makeConnector = { url, _ in
+        app.assistants.makeConnector = { url, _, skill in
             seen.url = url
+            seen.skill = skill
             return home.connector(port: Int(URL(string: url)!.port!))
         }
         #expect(await app.open(try UIFixtures.tempDir().appending(path: "workdir")))
         #expect(try await eventually { app.assistants.rows[.claudeDesktop]?.state == .notConnected })
         #expect(seen.url == app.serverStatus?.urls.mcp)
+        #expect(seen.skill == "shipped skill")
         await app.close()
     }
 }
 
-@MainActor final class SeenMCP { var url: String? }
+@MainActor final class SeenMCP { var url: String?; var skill: String? }
+
+/// The Lift skill: installed with the MCP connection for Claude Code and Codex, removed with it, and never
+/// a file Lift didn't write (`.installed-by-lift` holds the SHA-256 of what it wrote).
+@Suite struct SkillTests {
+    static func ready(_ tool: String) throws -> Home {
+        let home = try Home()
+        try home.install(tool)
+        home.script.on("mcp add")
+        home.script.on("mcp remove")
+        home.script.on("mcp get lift", lines: tool == "claude" ? claudeGet(url: "http://127.0.0.1:7777/mcp")
+                       : codexGet(#"{"type": "streamable_http", "url": "http://127.0.0.1:7777/mcp"}"#))
+        return home
+    }
+
+    static func sha(_ text: String) -> String { AssistantConnector.sha256(Data(text.utf8)) }
+
+    @Test(arguments: [("claude", Assistant.claudeCode), ("codex", Assistant.codex)])
+    func connectInstallsTheSkillWithItsMarker(_ tool: String, _ a: Assistant) async throws {
+        let home = try Home()
+        try home.install(tool)
+        home.script.on("mcp add")
+        #expect(home.connector().skillState(a) == .missing)
+        try await home.connector().connect(a)
+        #expect(home.text(home.skillFile(tool)) == Home.skillV1)
+        #expect(home.text(home.marker(tool)) == Self.sha(Home.skillV1))
+        #expect(home.connector().skillState(a) == .installed)
+    }
+
+    @Test func aNewerLiftUpdatesAnUneditedSkill() async throws {
+        let home = try Self.ready("claude")
+        try await home.connector().connect(.claudeCode)
+        #expect(home.connector(skill: Home.skillV2).skillState(.claudeCode) == .outdated)
+        try await home.connector(skill: Home.skillV2).connect(.claudeCode)
+        #expect(home.text(home.skillFile("claude")) == Home.skillV2)
+        #expect(home.text(home.marker("claude")) == Self.sha(Home.skillV2))
+    }
+
+    @Test func anEditedSkillIsKept() async throws {
+        let home = try Self.ready("codex")
+        try await home.connector().connect(.codex)
+        try Data("my own notes\n".utf8).write(to: home.skillFile("codex"))
+        #expect(home.connector(skill: Home.skillV2).skillState(.codex) == .edited)
+        let note = try await home.connector(skill: Home.skillV2).connect(.codex)
+        #expect(home.text(home.skillFile("codex")) == "my own notes\n")
+        #expect(note == "You changed Lift's skill, so Lift kept your version.")
+        try await home.connector().disconnect(.codex)
+        #expect(home.text(home.skillFile("codex")) == "my own notes\n")
+    }
+
+    @Test func aForeignSkillIsNeverTouched() async throws {
+        let home = try Self.ready("claude")
+        let dir = home.skillFile("claude").deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("someone else's".utf8).write(to: home.skillFile("claude"))
+        #expect(home.connector().skillState(.claudeCode) == .foreign)
+        let note = try await home.connector().connect(.claudeCode)
+        #expect(note == "A different “lift” skill is already installed, so Lift left it alone.")
+        #expect(home.text(home.skillFile("claude")) == "someone else's")
+        #expect(!FileManager.default.fileExists(atPath: home.marker("claude").path))
+        try await home.connector().disconnect(.claudeCode)
+        #expect(home.text(home.skillFile("claude")) == "someone else's")
+    }
+
+    @Test func disconnectRemovesOnlyWhatLiftWrote() async throws {
+        let home = try Self.ready("claude")
+        try await home.connector().connect(.claudeCode)
+        let dir = home.skillFile("claude").deletingLastPathComponent()
+        try await home.connector().disconnect(.claudeCode)
+        #expect(!FileManager.default.fileExists(atPath: dir.path))
+
+        try await home.connector().connect(.claudeCode)
+        try Data("mine".utf8).write(to: dir.appending(path: "notes.md"))
+        try await home.connector().disconnect(.claudeCode)
+        #expect(home.text(dir.appending(path: "notes.md")) == "mine")
+        #expect(!FileManager.default.fileExists(atPath: home.skillFile("claude").path))
+        #expect(!FileManager.default.fileExists(atPath: home.marker("claude").path))
+    }
+
+    @Test func claudeDesktopHasNoSkill() async throws {
+        let home = try Home()
+        try home.installDesktopApp()
+        #expect(home.connector().skillState(.claudeDesktop) == nil)
+        try await home.connector().connect(.claudeDesktop)
+        #expect(!FileManager.default.fileExists(atPath: home.root.appending(path: ".claude").path))
+    }
+
+    @Test func noShippedSkillMeansMCPOnly() async throws {
+        let home = try Self.ready("claude")
+        try await home.connector(skill: nil).connect(.claudeCode)
+        #expect(!FileManager.default.fileExists(atPath: home.skillFile("claude").path))
+    }
+
+    @MainActor @Test func launchingANewerLiftUpdatesAnUneditedSkill() async throws {
+        let home = try Self.ready("claude")
+        try await home.connector().connect(.claudeCode)
+        let model = AssistantsModel()
+        model.makeConnector = { _, _, skill in home.connector(skill: skill) }
+        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil, skill: Home.skillV2)
+        #expect(home.text(home.skillFile("claude")) == Home.skillV2)
+        #expect(model.rows[.claudeCode]?.skill == .installed)
+        #expect(model.rows[.claudeDesktop]?.skill == nil)
+    }
+
+    /// The SKILL.md Lift.app ships: the right frontmatter, short, and only tools that exist.
+    @Test func theShippedSkillNamesRealTools() throws {
+        let url = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../skills/lift/SKILL.md").standardizedFileURL
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.hasPrefix("---\nname: lift\ndescription: "))
+        #expect(text.split(separator: "\n", omittingEmptySubsequences: false).count <= 120)
+        let yaml = try String(contentsOf: URL(filePath: #filePath).deletingLastPathComponent()
+            .appending(path: "../../Sources/LiftServer/openapi.yaml").standardizedFileURL, encoding: .utf8)
+        let tools = Set(yaml.matches(of: /operationId: (\w+)/).map { String($0.1) })
+        let named = Set(text.matches(of: /`((?:jobs|models|queue|recipes|workers|resources|settings|server|secrets|system)_\w+)`/).map { String($0.1) })
+        #expect(!named.isEmpty)
+        #expect(named.subtracting(tools).isEmpty, "not Lift tools: \(named.subtracting(tools))")
+        for tool in ["models_list", "models_get", "models_install", "models_download_weights", "jobs_submit", "jobs_wait", "jobs_export"] {
+            #expect(named.contains(tool))
+        }
+    }
+}

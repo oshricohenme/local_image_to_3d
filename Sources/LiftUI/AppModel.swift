@@ -10,18 +10,22 @@ public struct AppPaths: Sendable {
     /// The folder holding the `lift_worker` package.
     public var workerSource: URL
     public var bridge: URL?
+    /// The Lift skill installed for Claude Code and Codex (`Contents/Resources/skills/lift/SKILL.md`).
+    public var skill: URL?
 
-    public init(bundledRecipes: URL, workerSource: URL, bridge: URL?) {
+    public init(bundledRecipes: URL, workerSource: URL, bridge: URL?, skill: URL? = nil) {
         self.bundledRecipes = bundledRecipes
         self.workerSource = workerSource
         self.bridge = bridge
+        self.skill = skill
     }
 
     public static var main: AppPaths {
         let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
         let bridge = Bundle.main.bundleURL.appending(path: "Contents/MacOS/lift-mcp")
         return AppPaths(bundledRecipes: resources.appending(path: "dev-recipes"), workerSource: resources,
-                        bridge: FileManager.default.isExecutableFile(atPath: bridge.path) ? bridge : nil)
+                        bridge: FileManager.default.isExecutableFile(atPath: bridge.path) ? bridge : nil,
+                        skill: resources.appending(path: "skills/lift/SKILL.md"))
     }
 }
 
@@ -211,10 +215,11 @@ public final class AppModel {
     }
 
     /// Re-detects the assistants against the running server's address: one connected to an old port then
-    /// shows Update connection. In the background; it can take a few seconds.
+    /// shows Update connection, and an unedited Lift skill is updated. In the background; it can take a few seconds.
     public func checkAssistants() {
         let (url, bridge) = (serverStatus?.urls.mcp, paths.bridge?.path)
-        Task { await assistants.check(mcpURL: url, bridge: bridge) }
+        let skill = paths.skill.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        Task { await assistants.check(mcpURL: url, bridge: bridge, skill: skill) }
     }
 
     /// Runs the tools check, with the Metal Toolchain when a recipe needs it (the bundled ones before Lift opens).
