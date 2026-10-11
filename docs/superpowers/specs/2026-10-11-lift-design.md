@@ -100,7 +100,8 @@ under `<workdir>/recipes/<source>/`.
 
 - **Bundled source** (v1, default): the recipes and `shared/` folder from `dev-recipes/` in this repo,
   built into Lift.app and copied to `<workdir>/recipes/bundled/` at first launch, so they work offline.
-  An app update refreshes this copy, and recipes you've edited locally are kept as `bundled-local`.
+  An app update refreshes this copy. Edited or user-added folders move to `bundled-local/`, which is scanned
+  first so your edits stay in effect (shown with a duplicate warning). Nothing is deleted.
 - **Using a model** is the moment everything happens, and only for that model: clone its upstream repo
   at the pin, build its venv, install substitutes, install its brew prerequisites, then download and
   verify its weights. All of it is triggered by your Install/Use action.
@@ -160,8 +161,9 @@ tasks:
       # … every keyword argument of run_inference, with upstream defaults
 ```
 
-- **Plan 1 schema additions:** `shim: bool` (whether to install lift_shim; false for existing Mac ports
-  like trellis-mac), `stages: [{pattern}]` (regexes for stage/progress parsing), `resources.disk_gb`,
+- **Plan 1 schema additions:** `shim: {aliases, standins, patches, env}` (an object whose presence turns the shim on;
+  omitted for existing Mac ports like trellis-mac), `developer: bool` (hidden unless the developer setting is on),
+  `weights[].revision` (default `main`), recipes with weights must install `huggingface_hub` (for `hf`), `stages: [{pattern}]` (regexes for stage/progress parsing), `resources.disk_gb`,
   and `brew: [pkg]`. `repo`/`commit` are optional but must appear together (bundled test recipes have
   neither), and `entry` is informational only.
 - **Launcher contract:** `launcher.py` defines an optional `load(ctx)`, run once per worker to load the
@@ -261,7 +263,8 @@ everything else is still built.
 - If `git` or `uv` is missing, the app runs `brew install git uv` with a live log.
 - The Metal Toolchain is checked only when a recipe needs it, and then offered as a one-click install.
 
-**Install a model:** prerequisite checks (toolchain, free disk, gated weights → HF token present) →
+**Install a model:** prerequisite checks (toolchain, free disk, gated weights → HF token present) → the
+recipe's `brew:` packages (first, so native builds can link against them) →
 `git clone --filter=blob:none` + `checkout <commit>` → `uv venv --python <python>` → `install` steps →
 substitutes → `lift_shim` + `launcher.py` → a smoke import. Each step is logged to `install.log` and
 streamed live. Any failure leaves the model `install_failed` with the log kept; a partial install never
@@ -282,8 +285,9 @@ counts as installed.
 
 **Re-clone** happens only on install, reinstall or a pin change. **Check upstream** runs `git ls-remote`
 and reports how far upstream has moved past the pin. **Change pin** reinstalls at the new commit.
-**Uninstall** removes `models/<id>/`; weights in the shared HF cache are kept unless you choose
-"also delete weights", which lists the cached repos it will remove.
+**Uninstall** removes only `models/<id>/`, which Lift created. Weights in the shared Hugging Face cache are
+never deleted by Lift (user rule: nothing Lift didn't create is removed). The UI shows where they are and
+how big they are, so you can remove them yourself.
 
 ## 7. Jobs, steps and the queue
 

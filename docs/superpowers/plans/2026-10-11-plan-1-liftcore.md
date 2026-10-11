@@ -2,20 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `LiftCore`, the Swift package with no UI and no HTTP/MCP that stores jobs, reads recipes, installs models, runs Python workers, measures memory, schedules steps and exposes every operation as a typed command. It is tested end to end with the Test Cube recipe and runs in CI.
+**Goal:** Build `LiftCore`, the Swift package with no UI and no HTTP/MCP that:
+- stores jobs
+- keeps the bundled recipes in the workdir
+- installs a model, downloads its weights and verifies them when the user chooses to use it
+- runs Python workers
+- measures memory
+- schedules steps
+- exposes every operation as a typed command
 
-**Architecture:** One SwiftPM package at the repo root with a `LiftCore` library target. A `Lift` actor owns the GRDB store, the recipe catalog, installs and the live workers. On every state change it builds a `SchedulerInput` and applies the pure `Scheduler.decide` result. Workers are `python -m lift_worker` processes inside each model's venv. They talk JSON lines (protocol v1, spec §8) over pipes through swift-subprocess. `lift_worker` (stdlib-only Python, `python/lift_worker/`) loads the recipe's `launcher.py` once and runs jobs on a thread pool. Commands are `public` methods on `Lift` (in `Commands/`), and risky ones return `Gated.confirmationRequired` until called with `confirm: true`. Plan 2's HTTP/MCP and Plan 3's UI call only those methods.
+It's tested end to end with the Test Cube recipe and runs in CI.
 
-**Tech Stack:** Swift 6 (swift-tools-version 6.2, Xcode 26.6 / Swift 6.3.3 locally), macOS 26, GRDB.swift 7.11.1+, Yams 6.2.2+, swift-subprocess 1.0.1+, Swift Testing. Python 3.11 through uv, pytest, and trimesh for the Test Cube.
+**Architecture:** One SwiftPM package at the repo root with a `LiftCore` library target. A `Lift` actor owns the GRDB store, the recipe catalog, installs, weight checks and the live workers. On open it copies or refreshes the bundled recipes into `<workdir>/recipes/bundled/`. On every state change it builds a `SchedulerInput` and applies the pure `Scheduler.decide` result. A step that would start a new worker for a recipe with weights first waits for a `WeightsVerifier` pass. Workers are `python -m lift_worker` processes inside each model's venv. They talk JSON lines (protocol v1, spec §8) over pipes through swift-subprocess. `lift_worker` (stdlib-only Python, `python/lift_worker/`) loads the recipe's `launcher.py` once and runs jobs on a thread pool. Commands are `public` methods on `Lift` (in `Commands/`), and risky ones return `Gated.confirmationRequired` until called with `confirm: true`. Plan 2's HTTP/MCP and Plan 3's UI call only those methods.
 
-**Spec:** `docs/superpowers/specs/2026-10-11-lift-design.md` (milestone 1; §3 layout, §4 recipes, §6 toolchain/install, §7 jobs, §8 scheduler/workers/resources/protocol, §10 commands, §13 errors, §14 testing/CI). Plan 0 (`docs/superpowers/plans/2026-10-11-plan-0-shim-and-go-no-go.md`) defines the `LIFT_SHIM` contract this plan consumes.
+**Tech Stack:**
+- Swift 6 (swift-tools-version 6.2; Xcode 26.6 / Swift 6.3.3 locally), macOS 26
+- GRDB.swift 7.11.1+, Yams 6.2.2+, swift-subprocess 1.0.1+
+- Swift Testing; CryptoKit and URLSession from the SDK
+- Python 3.11 through uv, pytest, and trimesh for the Test Cube
+
+**Spec:** `docs/superpowers/specs/2026-10-11-lift-design.md`, milestone 1. Relevant sections: §3 layout and bundled recipes; §4 recipes; §6 toolchain (native Homebrew), install and weights; §7 jobs; §8 scheduler, workers, resources and protocol; §10 commands; §11 first launch; §13 errors; §14 testing and CI. Plan 0 (`docs/superpowers/plans/2026-10-11-plan-0-shim-and-go-no-go.md`) and the findings (`docs/superpowers/findings/2026-10-go-no-go.md`) define the `LIFT_SHIM` contract and `lift_shim`, which this plan consumes but doesn't change. The shim overhead benchmark came out at about 0%, so `TorchFunctionMode` stays.
 
 **Out of scope here (and where it goes):**
-- Real-model recipes (Pixal3D, Pixal3D-MV, UniRig, TRELLIS.2) → **Plan 4**, written from the Plan 0 go/no-go findings. Model specifics live only in each recipe's `launcher.py`; Plan 1's only concrete recipe is `dev-recipes/test-cube`. The Metal substitutes in `shared/substitutes.yaml` and a recipe flag for "needs the Metal Toolchain" also come in Plan 4.
-- **Exporter** (GLB/USDZ/OBJ/FBX conversion, export dir copy, `cleanup_after_export`, the job `export` field, `jobs_export`) → **Plan 4**. In Plan 1 a job's outputs stay in `jobs/<id>/steps/<n>/`.
-- `server_status`, `server_set_lan`, `server_rotate_token`, `secrets_set_hf_token`, Keychain → **Plan 2**. Plan 1 reads the Hugging Face token through `LiftConfig.hfToken` (default `$HF_TOKEN`).
-- Moving the working directory, the first-launch wizard, cloning the default `lift-recipes` source at first launch, shipping `lift_worker` in the app bundle, and resetting learned estimates → **Plan 3**. In Plan 1 the workdir is fixed when `Lift.open` is called.
-- `image_set` presets (4-view and orbit) → **Plan 4**. Plan 1 accepts an `image_set` as a folder.
+- **Plan 4:** real-model recipes (Pixal3D, Pixal3D-MV, UniRig, TRELLIS.2), written from the go/no-go findings. Model specifics live only in each recipe's `launcher.py`. The only concrete recipe here is `dev-recipes/test-cube`. Also Plan 4: the Metal and `torch_scatter`/`torch_cluster` entries of `shared/substitutes.yaml`, and a recipe flag for "needs the Metal Toolchain".
+- **Plan 4:** the Exporter (GLB/USDZ/OBJ/FBX conversion, export dir copy, `cleanup_after_export`, the job `export` field, `jobs_export`). In Plan 1 a job's outputs stay in `jobs/<id>/steps/<n>/`.
+- **Plan 4:** `image_set` presets (4-view and orbit). Plan 1 accepts an `image_set` as a folder.
+- **Plan 2:** `server_status`, `server_set_lan`, `server_rotate_token`, `secrets_set_hf_token`, Keychain. Plan 1 reads the Hugging Face token through `LiftConfig.hfToken` (default `$HF_TOKEN`).
+- **Plan 3:** the first-launch wizard UI; copying `dev-recipes/` and `python/lift_worker/src` into Lift.app (an Xcode build phase; `LiftConfig.bundledRecipes` and `.workerRuntime` then point there); moving the working directory; resetting learned estimates. LiftCore already does the first-launch copy itself (Task 9 and Task 11).
 
 ## Global Constraints
 
@@ -23,13 +36,17 @@
 - Swift packages, exactly these in Plan 1: `https://github.com/groue/GRDB.swift` from `7.11.1`, `https://github.com/jpsim/Yams` from `6.2.2`, `https://github.com/swiftlang/swift-subprocess` from `1.0.1` (module `Subprocess`). Commit `Package.resolved`. Don't add Hummingbird, MCP, KeychainAccess, GLTFKit2, ArgumentParser, swift-log or OpenAPI packages yet.
 - Swift tests use Swift Testing (`import Testing`, `@Test`, `#expect`, `#require`), never XCTest.
 - Python 3.11 for every venv, managed by uv. `lift_worker` uses only the standard library, because it runs inside every model venv.
+- **User rule: no weight downloads and no prerequisite installs during development.** Tests use the Test Cube plus fakes: `FakeRunner` for brew/git/hf commands, `FakeMetadata` for the Hugging Face API, temp Homebrew prefixes and a temp Hugging Face cache. The install code is real but never runs against the machine in tests. The only real installs in tests are the Test Cube's own (a uv venv in a temp workdir with `trimesh`, `numpy` and `lift_shim`, which is the product path for that recipe).
+- **User rule: nothing outside Lift's own files is ever deleted, in dev steps or product code.** Deletions are limited to paths Lift created in the workdir: `models/<id>/`, `jobs/<id>/`, Lift's unedited copy in `recipes/bundled/`, and git sources Lift cloned. Weights in the shared Hugging Face cache are never deleted. Edited bundled recipes are moved to `recipes/bundled-local/`, never removed. The spec's "uninstall: also delete weights" is dropped because of this rule.
 - Never edit upstream code. The installer only clones, checks out the pin, creates the venv and runs install commands (spec principle 1).
+- **Native Homebrew only** (spec §6): `/opt/homebrew/bin/brew` counts only if `brew --version` succeeds and `brew config` reports `HOMEBREW_PREFIX: /opt/homebrew` on arm64. An Intel/Rosetta Homebrew in `/usr/local` is reported and never used. `/usr/local` isn't on Lift's tool search path, because an x86_64 uv would build x86_64 venvs.
+- **Nothing is cloned or downloaded until the user chooses a model** (spec §4). `models_install` (Install/Use) does it all for that one model: brew prerequisites, clone at the pin, venv, install steps, substitutes, shim, weight download, verify.
 - Lift executes and the caller decides. The scheduler orders by priority, then manual position, then submission time. It never reorders by model warmth and never evicts a worker to make room. It reports facts as wait reasons (spec principle 2, §8).
-- Confirm gates (spec §10): `jobs_force_start`, `jobs_delete`, `jobs_cancel` of a loading/running job, `models_install`, `models_reinstall`, `models_set_pin`, `models_uninstall`, `recipes_add_source`, `recipes_remove_source`, `workers_unload` of a busy worker, and `system_install_prereqs`. Without `confirm: true` they return `Gated.confirmationRequired(impact)` and change nothing.
-- `LIFT_SHIM` contract (Plan 0): JSON `{"aliases":{…},"standins":[…],"env":{…}}`. The `.pth` is written with `python -c "import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])"`.
-- Workdir layout (spec §3): `<workdir>/lift.sqlite`, `recipes/<source>/`, `models/<id>/{repo,venv,recipe,install.log,state.json,shim.json}`, `jobs/<id>/{inputs/,steps/<n>/,log.txt}`.
+- Confirm gates (spec §10): `jobs_force_start`, `jobs_delete`, `jobs_cancel` of a loading/running job, `models_install`, `models_reinstall`, `models_set_pin`, `models_uninstall`, `models_download_weights`, `recipes_add_source`, `recipes_remove_source`, `workers_unload` of a busy worker, and `system_install_prereqs`. Without `confirm: true` they return `Gated.confirmationRequired(impact)` and change nothing.
+- `LIFT_SHIM` contract: JSON `{"aliases":{…},"standins":[…],"patches":[…],"env":{…}}`. The `.pth` is written with `python -c "import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])"`.
+- Workdir layout (spec §3): `<workdir>/lift.sqlite`; `recipes/{bundled,bundled-local,<git source>}/`; `models/<id>/{repo,venv,recipe,install.log,state.json,shim.json}`; `jobs/<id>/{inputs/,steps/<n>/,log.txt}`.
 - Defaults (spec §8): `max_slots` 1, `memory_budget_gb` 48, `idle_unload_minutes` 10. Every recipe's `max_concurrent_per_process` defaults to 1.
-- No model weights and no long GPU runs in Plan 1. The first test run needs network so uv can fetch Python 3.11, `trimesh`, `numpy` and `hatchling`. After that, the uv cache serves them.
+- The first test run needs network so uv can fetch Python 3.11, `trimesh`, `numpy` and `hatchling`. After that, the uv cache serves them.
 - Work on branch `oshricohenme/7jtm2` and don't push. Every commit message ends with a blank line and then `Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw`.
 
 ## Schema and protocol decisions (fold into the spec)
@@ -37,31 +54,61 @@
 These fill gaps the spec leaves open. Plan 4's real recipes rely on them.
 
 1. **`recipe.yaml` additions to schema v1:**
-   - `shim: bool` (default `false`): install `lift_shim` plus its `.pth`, and set `LIFT_SHIM` for workers. trellis2-mac leaves it off.
+   - `shim: {aliases, standins, patches, env}`: every field is optional, and the whole block's presence turns the shim on. When it's on, Lift installs `lift_shim` plus its `.pth` and sets `LIFT_SHIM` for workers. trellis2-mac leaves it out.
+   - `brew: [pkg]`: native Homebrew packages.
+   - `weights: [{repo, revision = "main", gated = false}]`.
+   - `developer: bool`: the Test Cube sets it, and it's hidden unless the `dev_recipes` setting or `LIFT_DEV_RECIPES=1` is on.
    - `stages: [{pattern}]`: Python `re` patterns with the named groups `name`, `pct` (0–100), or `n` and `total`. They're applied to every tagged log line. A match without `name` keeps the previous stage name.
    - `resources.disk_gb` (default 5): checked before install.
    - `repo` and `commit` are optional, but must appear together. Without them the model's `repo/` is an empty folder (Test Cube).
    - `tasks[].entry` is informational only. The launcher decides how to call upstream.
 2. **Launcher contract** (`<recipe>/launcher.py`): optional `load(ctx) -> state`, where `ctx.repo_dir` and `ctx.recipe_dir` are set and the call happens once per worker. Required `run(state, job) -> list[str]` returns output paths. `job` has `id`, `step`, `task`, `inputs`, `settings`, `out_dir`, `cancelled` (poll it) and `stage(name, fraction=None)`. The worker's working directory is `models/<id>/repo` and `repo_dir` is on `sys.path`.
-3. **Substitute registry** (`<source>/shared/substitutes.yaml`): `name: {install: [cmd…], alias: module, standin: name}`. The recipe's `substitutes:` list adds its install commands after the recipe's own, and its aliases and stand-ins make up the `LIFT_SHIM` JSON (saved as `models/<id>/shim.json`).
-4. **Worker start:** `<venv>/bin/python -u -m lift_worker '<config json>'` with the environment `PYTHONPATH=<lift_worker dir>`, `VIRTUAL_ENV`, `PATH=<venv>/bin:…`, `LIFT_SHIM` (if shimmed) and `HF_TOKEN` (if set). Config keys: `launcher`, `repo_dir`, `recipe_dir`, `max_concurrent`, `stages`, `heartbeat_seconds`, `setting_types`. `python -m lift_worker --check '<config>'` imports the launcher and compiles the stage patterns. That's the installer's smoke test.
-5. **Protocol v1 details** beyond spec §8:
+3. **Substitute registry** (`<source>/shared/substitutes.yaml`): `name: {install: [cmd…], alias: module, standin: name, patches: [name]}`. A recipe's `substitutes:` add their install commands after the recipe's own steps. Their alias, stand-in and patches merge with the recipe's `shim:` into the `LIFT_SHIM` JSON, saved as `models/<id>/shim.json`. A substitute that needs the shim in a recipe without `shim:` is an error.
+4. **Bundled recipes** (spec §3, §4, §11): `Lift.open` runs `BundledRecipes.sync()`.
+   - Changes are tracked through `<workdir>/recipes/bundled/.lift-bundle.json`, a manifest of SHA-256 digests per top-level folder.
+   - The first open copies `LiftConfig.bundledRecipes` there, skipping `.venv`, `__pycache__`, `.pytest_cache` and `.DS_Store`.
+   - When the bundle's digests change (an app update), every folder in the copy that differs from the manifest is moved to `recipes/bundled-local/<name>` before the fresh copy goes in. That covers folders you edited and folders you added. An older kept copy is moved aside to a hidden `.<name>-<ms>`.
+   - Source order: `bundled-local` (your edits win; the duplicate shows as a warning), then `bundled`, then git sources.
+   - A `bundled-local` recipe uses `bundled-local/shared/` if it exists, else `bundled/shared/`.
+5. **Install order:** preflight → `brew install <recipe.brew>` (first, so native builds can link against them) → clone → `uv venv` → install steps → substitute installs → `lift_shim` + `.pth` → recipe copy and `shim.json` → `lift_worker --check` → `state.json`. Then `models_install` downloads the weights (unless `downloadWeights: false`) and verifies them. If `recipe.brew` isn't empty, the worker environment gets `DYLD_FALLBACK_LIBRARY_PATH=<native prefix>/lib:/usr/lib`. That replaces dyld's default fallback, which includes `/usr/local/lib`.
+6. **Weights** (spec §6):
+   - `models_download_weights` (confirm) runs `<venv>/bin/hf download <repo> --revision <rev>` with `HF_HUB_CACHE` and `HF_TOKEN` set, appending to `install.log`. The venv must provide `hf` (huggingface_hub), so recipes with weights include it in their install steps.
+   - `WeightsVerifier` gets each repo's file list (sizes and LFS SHA-256) from `GET https://huggingface.co/api/models/<repo>/revision/<rev>?blobs=true`. It checks `<hub>/models--org--name/snapshots/<commit>/<path>` (symlinks resolved) for presence, then size, then the SHA-256 of LFS files.
+   - Hashes are cached in the `weightHash` table per (resolved path, size, mtime).
+   - The `weightCheck` table keeps the last good check's file lists. When Lift is offline it re-checks against them and says so (`metadataFrom`, `note`). Offline without a good check, or an HTTP error, gives `unknown`.
+   - Results: `missing` takes precedence over `corrupt`. Model status becomes `weightsMissing([WeightProblem])` or `weightsCorrupt(...)`.
+   - When a step would start a new worker for a recipe with weights, the job waits `weights_unverified` and a background check starts. Checks repeat at most every `weightsRecheckInterval`, default 30 s. A pass allows one worker start, and spawning consumes it ("before every worker start").
+   - `workers_load` verifies inline, and `models_verify_weights` runs a check on demand.
+7. **Worker start:** `<venv>/bin/python -u -m lift_worker '<config json>'` with the environment `PYTHONPATH=<lift_worker dir>`, `VIRTUAL_ENV`, `PATH=<venv>/bin:…`, `LIFT_SHIM` (if shimmed), `DYLD_FALLBACK_LIBRARY_PATH` (if `brew:`), `HF_HUB_CACHE` and `HF_TOKEN` (if set). Config keys: `launcher`, `repo_dir`, `recipe_dir`, `max_concurrent`, `stages`, `heartbeat_seconds`, `setting_types`. `python -m lift_worker --check '<config>'` imports the launcher and compiles the stage patterns. That's the installer's smoke test.
+8. **Protocol v1 details** beyond spec §8:
    - A worker exits when its stdin closes, so a crashed app never leaves a loaded model behind.
    - A load failure is `{"ev":"error","job":null,…}`, after which the worker exits with code 1.
    - JSON can't tell `1` from `1.0`, so `lift_worker` turns `float`-typed settings back into floats using `setting_types`.
    - A line printed by a thread upstream started is tagged with the job when exactly one job is running. Swift does the same for stderr lines.
    - Swift sees the process events `started(pid)`, `stderr(line)`, `malformed(line)` and `exited(code)` as well as the protocol events.
-6. **Scheduler:** each candidate is judged on its own, in order, and resources are deducted as starts are decided, so one job waiting for memory doesn't hold back a smaller one behind it. That's mechanical, not a choice. `force_start` skips the budget and system-memory checks but not the slot check, and it doesn't override a paused queue.
-7. **Memory accounting:** `need.load` = learned load (max of last 5), else the recipe value. `need.job` = learned job, else recipe value − learned load, else 0. A new worker needs `load + job`, and a step on a worker with free capacity needs `job`. A worker reserves `max(last footprint, baseline + Σ claims of its running steps)`, where the baseline is `need.load` until `ready` and the footprint measured at `ready` after that. A footprint is `max(phys_footprint, heartbeat mps_allocated)`.
-8. **Model status** comes from files: `models/<id>/state.json` is written last and holds `installed`, `commit` and the recipe digest. An in-flight install is tracked in memory. A changed source recipe (SHA-256 of `recipe.yaml` + `launcher.py`) or a changed pin shows `updateAvailable`. Workers run the installed copy at `models/<id>/recipe/`.
+9. **Scheduler:**
+   - Each candidate is judged on its own, in order, and resources are deducted as starts are decided, so one job waiting for memory doesn't hold back a smaller one behind it. That's mechanical, not a choice.
+   - `force_start` skips the budget and system-memory checks but not the slot check. It doesn't override a paused queue or unverified weights.
+10. **Memory accounting:**
+    - `need.load` = learned load (max of last 5), else the recipe value. `need.job` = learned job, else recipe value − learned load, else 0.
+    - A new worker needs `load + job`, and a step on a worker with free capacity needs `job`.
+    - A worker reserves `max(last footprint, baseline + Σ claims of its running steps)`. The baseline is `need.load` until `ready`, then the footprint measured at `ready`.
+    - A footprint is `max(phys_footprint, heartbeat mps_allocated)`.
+11. **Model status** comes from files: `models/<id>/state.json` is written last and holds `installed`, `commit` and the recipe digest. An in-flight install or download is tracked in memory as `installing(phase:)`, where the phase is installing, downloading weights or verifying weights. A changed source recipe (SHA-256 of `recipe.yaml` + `launcher.py`) or a changed pin shows `updateAvailable`. Workers run the installed copy at `models/<id>/recipe/`.
+12. **Toolchain:**
+    - Each tool counts only if it runs (`--version`). `/usr/bin/git` is tried only after `xcode-select -p` succeeds, because without the Command Line Tools it pops up an installer dialog.
+    - Native Homebrew is installed with one administrator dialog: `osascript … do shell script "mkdir -p /opt/homebrew && chown -R <user>:admin /opt/homebrew" with administrator privileges`. Then, as the user, the official installer's own approach runs: `git init`, set `origin`, `fetch`, `checkout --force -B main origin/main`, then `brew update`.
+    - That checkout replaces any files a stopped Homebrew attempt left in `/opt/homebrew` with Homebrew's own, and deletes nothing. It's the only write outside the workdir and the caches, and it only happens on the user's confirmed `system_install_prereqs`.
 
 ## Review Focus
 
-1. **The app crashes or quits while a worker holds a model.** The worker must exit by itself (stdin EOF), and the job must come back as `interrupted` on the next launch, not stay `running`. Pinned by `test_stdin_eof_exits_even_while_busy` (Task 2) and `interruptedJobsAfterRelaunch` (Task 10).
-2. **Upstream or native code prints to fd 1.** That output must never reach the protocol stream. It shows up as stderr and job log lines instead. Pinned by `test_ready_and_native_output_kept_off_protocol` (Task 2) and `runsAJobAndReportsEverything` (Task 7).
-3. **Cancel or unload a worker stuck in native code** that never reads stdin again. It must still die within seconds (SIGKILL by pid). Pinned by `killStopsABusyWorker` (Task 7) and `cancelRunningStopsTheWorker` (Task 12).
-4. **A float setting with a whole value** (`size: 2`) must reach the launcher as a float, not an int, after the JSON round trip. Pinned by `test_float_settings_arrive_as_float` (Task 2).
-5. **Refreshing recipe sources while offline** must mark the source stale and keep its last good recipes, not empty the catalog. Pinned by `failedRefreshMarksTheSourceStaleAndKeepsItsRecipes` (Task 11).
+1. **The app crashes or quits while a worker holds a model.** The worker must exit by itself (stdin EOF), and the job must come back as `interrupted` on the next launch, not stay `running`. Pinned by `test_stdin_eof_exits_even_while_busy` (Task 2) and `interruptedJobsAfterRelaunch` (Task 11).
+2. **Cancel or unload a worker stuck in native code** that never reads stdin again. It must still die within seconds (SIGKILL by pid). Pinned by `killStopsABusyWorker` (Task 7) and `cancelRunningStopsTheWorker` (Task 13).
+3. **An app update arrives after the user edited a bundled recipe or added their own.** Their files must survive in `bundled-local/` and keep working, and a second update must not overwrite the first kept copy. Pinned by `appUpdateRefreshesAndKeepsEdits` and `anOlderKeptCopyIsMovedAsideNotReplaced` (Task 9).
+4. **Weights are verified while Lift is offline.** A model that passed before must still pass, against the remembered file lists and saying so, rather than blocking every job. A model never verified must show `unknown`, not `ok`. Pinned by `offlineFallsBackToTheLastGoodCheck` and `offlineWithoutAGoodCheckIsUnknown` (Task 8).
+5. **The machine has only an Intel/Rosetta Homebrew, or a half-installed `/opt/homebrew`.** Lift must not use it: `brew:` packages get no Rosetta libraries, and a partial prefix counts as missing. Pinned by `rosettaBrewIsReportedNeverUsed` and `nativeBrewMustReportItsArm64Prefix` (Task 4), and by the `DYLD_FALLBACK_LIBRARY_PATH` check in `runsEveryStepInOrderAndMarksInstalled` (Task 10).
+
+Also pinned, though not in the top five: native output kept off the protocol (Task 2, Task 7), float settings arriving as floats (Task 2), and an offline recipe refresh marking the source stale while keeping its recipes (Task 12).
 
 ---
 
@@ -73,72 +120,77 @@ Package.resolved                                committed (Task 1)
 Sources/LiftCore/
 ├─ LiftError.swift                              FieldError, LiftError (Task 1)
 ├─ Support/Lines.swift                          Tail (ring of lines), LogFile, TerminationStatus.code (Task 1)
-├─ Store/Records.swift                          JobState, Priority, JobSource, WaitReason, the six GRDB records (Task 1)
-├─ Store/Store.swift                            DatabaseQueue + migration v1 (Task 1)
+├─ Store/Records.swift                          JobState, Priority, JobSource, WaitReason, job/step/event/worker/sample/setting records (Task 1)
+├─ Store/Store.swift                            DatabaseQueue + migration v1, incl. weightHash/weightCheck tables (Task 1)
 ├─ Store/Settings.swift                         Settings (setting rows), RecipeSourceRef (Task 1)
 ├─ Recipes/SettingValue.swift                   SettingValue (Task 1: records need it)
 ├─ Recipes/Recipe.swift                         recipe.yaml schema v1, RecipeLoad (Task 3)
 ├─ Recipes/Validation.swift                     recipe problems, settings/input validation (Task 3)
-├─ Recipes/Catalog.swift                        Catalog, Substitute registry, ShimConfig, RecipeSources (git) (Task 8)
+├─ Recipes/Catalog.swift                        RecipeSourceDir, Catalog, Substitute registry, ShimConfig, RecipeSources (git) (Task 9)
+├─ Recipes/Bundled.swift                        BundledRecipes: first-launch copy, update refresh, kept edits (Task 9)
 ├─ Toolchain/CommandRunner.swift                ShellCommand, CommandRunner, SubprocessRunner (Task 4)
-├─ Toolchain/Toolchain.swift                    brew/git/uv/Metal detection and installs (Task 4)
+├─ Toolchain/Toolchain.swift                    native brew/git/uv/Metal detection, GUI-safe Homebrew install (Task 4)
 ├─ Scheduler/Scheduler.swift                    MemoryNeed, Candidate, WorkerSnapshot, Scheduler.decide (Task 5)
 ├─ Resources/Memory.swift                       phys_footprint, host free memory (Task 6)
 ├─ Resources/Estimates.swift                    recipe values, overrides, learned max-of-5 (Task 6)
 ├─ Workers/WorkerProtocol.swift                 WorkerOp encode, WorkerEvent decode (Task 7)
 ├─ Workers/WorkerProcess.swift                  one lift_worker process over swift-subprocess (Task 7)
-├─ Installer/Installer.swift                    preflight → clone → venv → steps → shim → smoke; status (Task 9)
-├─ Engine/Lift.swift                            the actor: open/recover, tick, workers, events, idle unload (Task 10)
+├─ Weights/Weights.swift                        RepoSnapshot, WeightsMetadata + HFHubAPI, WeightsVerifier, hash cache (Task 8)
+├─ Installer/Installer.swift                    preflight → brew → clone → venv → steps → shim → smoke; status; hf download (Task 10)
+├─ Engine/Lift.swift                            the actor: open/sync/recover, tick, weights gating, workers, events, idle unload (Task 11)
 └─ Commands/
-   ├─ Gated.swift                               confirm-gate result (Task 10)
-   ├─ JobCommands.swift                         jobs_* and queue_* (Task 10)
-   ├─ ModelCommands.swift                       models_* and recipes_* (Task 11)
-   └─ SystemCommands.swift                      workers_*, resources_*, settings_*, system_* (Task 11)
+   ├─ Gated.swift                               confirm-gate result (Task 11)
+   ├─ JobCommands.swift                         jobs_* and queue_* (Task 11)
+   ├─ ModelCommands.swift                       models_* (incl. download/verify weights) and recipes_* (Task 12)
+   └─ SystemCommands.swift                      workers_*, resources_*, settings_*, system_* (Task 12)
 Tests/LiftCoreTests/
-├─ Support.swift                                Fixtures paths/temp dirs/files, eventually(), fieldErrors() (Task 1)
+├─ Support.swift                                Fixtures paths/temp dirs/files/fakeBin, eventually(), fieldErrors() (Task 1)
 ├─ LinesTests.swift · StoreTests.swift          (Task 1)
 ├─ RecipeTests.swift · ValidationTests.swift    writeRecipe(), pixalYAML fixture (Task 3)
 ├─ FakeRunner.swift · ToolchainTests.swift      scripted CommandRunner, Fixtures.python() (Task 4)
 ├─ SchedulerTests.swift                         (Task 5)
 ├─ ResourceTests.swift                          MemoryTests, EstimatesTests (Task 6)
 ├─ WorkerProtocolTests.swift · WorkerProcessTests.swift   (Task 7)
-├─ CatalogTests.swift                           (Task 8)
-├─ InstallerTests.swift                         (Task 9)
-├─ EngineTests.swift                            Fixtures.lift() (Task 10)
-├─ CommandTests.swift                           (Task 11)
-└─ CubeIntegrationTests.swift                   real install + real workers (Task 12)
+├─ WeightsTests.swift                           FakeMetadata, writeHFCache(), sha256Hex() (Task 8)
+├─ CatalogTests.swift · BundledTests.swift      (Task 9)
+├─ InstallerTests.swift                         (Task 10)
+├─ EngineTests.swift                            Fixtures.lift() (Task 11)
+├─ CommandTests.swift                           weightedBundle() (Task 12)
+└─ CubeIntegrationTests.swift                   real install + real workers (Task 13)
 python/lift_worker/
 ├─ pyproject.toml
 ├─ src/lift_worker/__init__.py · __main__.py · stages.py · streams.py · worker.py
 └─ tests/conftest.py · test_stages.py · test_streams.py · test_worker.py · fixtures/launcher.py   (Task 2)
-dev-recipes/test-cube/recipe.yaml · launcher.py (Task 8)
-dev-recipes/shared/substitutes.yaml             (Task 8; lift_shim/ exists from Plan 0)
-.github/workflows/test.yml                      (Task 13)
+dev-recipes/test-cube/recipe.yaml · launcher.py (Task 9)
+dev-recipes/shared/substitutes.yaml             (Task 9; lift_shim/ exists from Plan 0)
+.github/workflows/test.yml                      (Task 14)
 ```
 
 ## Dependency graph and parallel execution
 
 ```
-Task 1 Store ─┬─> Task 3 Recipes ─┬─> Task 6 Resources ─────────────────────┐
-              │                   └─> Task 8 Catalog + Test Cube ─> Task 9 ─┤
-              ├─> Task 4 Toolchain ─┬─> Task 8                    Installer │
-              │                     └─> Task 7 Workers (Swift) ─────────────┤
-              └─> Task 5 Scheduler ───> Task 6                              │
-Task 2 lift_worker (Python) ──────────> Task 7, Task 8 (launcher contract)  │
-                                                                            v
-                       Task 10 Engine + job commands ─> Task 11 other commands ─> Task 12 integration ─> Task 13 CI
+Task 1 Store ─┬─> Task 3 Recipes ─┬─> Task 6 Resources ──────────────────────────────┐
+              │                   ├─> Task 8 Weights ─────────────────────┐          │
+              │                   └─> Task 9 Catalog + bundled + Cube ─┐  │          │
+              ├─> Task 4 Toolchain ─┬─> Task 9                         v  v          │
+              │                     ├─────────────────────────────> Task 10 Installer┤
+              │                     └─> Task 7 Workers (Swift) ──────────────────────┤
+              └─> Task 5 Scheduler ───> Task 6                                       │
+Task 2 lift_worker (Python) ──────────> Task 7, Task 9 (launcher contract)           │
+                                                                                     v
+                   Task 11 Engine + job commands ─> Task 12 other commands ─> Task 13 integration ─> Task 14 CI
 ```
 
 | Wave | Tasks that can run at the same time | Needs |
 |---|---|---|
 | A | **1**, **2** | none |
 | B | **3**, **4**, **5** (and 2 if still running) | 1 |
-| C | **6** (3, 5), **7** (1, 2, 4), **8** (2, 3, 4) | as listed |
-| D | **9** | 3, 4, 8 |
-| E | **10** | 5, 6, 7, 9 |
-| F | **11** | 10 |
-| G | **12** | 11 |
-| H | **13** | 12 (it runs every test) |
+| C | **6** (3, 5), **7** (1, 2, 4), **8** (1, 3), **9** (2, 3, 4) | as listed |
+| D | **10** | 3, 4, 8, 9 |
+| E | **11** | 5, 6, 7, 8, 9, 10 |
+| F | **12** | 11 |
+| G | **13** | 12 |
+| H | **14** | 13 (it runs every test) |
 
 All Swift tests share one test target. A half-written file from one task breaks `swift build` for every other task in the same tree, so tasks in the same wave must each run in their own git worktree (`isolation: "worktree"`) and be merged in task-number order. Tasks only add files, so merges are conflict-free. Task 1 is the only one that touches `Package.swift` and `.gitignore`. The one exception: Task 2 is Python-only and can share the main tree with any Swift task.
 
@@ -159,11 +211,12 @@ All Swift tests share one test target. A half-written file from one task breaks 
   - `FieldError(_ field: String, _ message: String)` (`field`, `message`); `enum LiftError: Error, Equatable { notFound(String), invalidInput([FieldError]), invalidState(String), prerequisite(String), commandFailed(command: String, exitCode: Int32, tail: [String]) }`.
   - `enum SettingValue: Codable, Hashable { bool(Bool), int(Int), float(Double), string(String) }`. Decoding tries Bool, then Int, then Double, then String. `description`; internal `number: Double?` for numeric comparisons.
   - `final class Tail(limit:)` with `append(_:)` and `lines: [String]`; `final class LogFile(_ url: URL) throws` with `write(_ line:)` (appends, creating the file if missing); internal `TerminationStatus.code: Int32` (exit code, or 128 + signal).
-  - `enum JobState: String` with the cases `queued waiting loading running succeeded failed cancelled interrupted`, plus `isTerminal` and `isActive` (loading/running). `enum Priority: String { low, normal, high }` with `rank`. `enum JobSource: String { ui, http, mcp }`. `enum WaitReason { noFreeSlot, memory(needed: Int, free: Int), modelInstalling, modelNotInstalled, modelUnsupported, queuePaused }`, encoded as `{"reason":"no_free_slot"}` and `{"reason":"memory","needed":…,"free":…}`.
+  - `enum JobState: String` with the cases `queued waiting loading running succeeded failed cancelled interrupted`, plus `isTerminal` and `isActive` (loading/running). `enum Priority: String { low, normal, high }` with `rank`. `enum JobSource: String { ui, http, mcp }`. `enum WaitReason { noFreeSlot, memory(needed: Int, free: Int), modelInstalling, modelNotInstalled, modelUnsupported, weightsUnverified, queuePaused }`, encoded as `{"reason":"no_free_slot"}`, `{"reason":"weights_unverified"}` and `{"reason":"memory","needed":…,"free":…}`.
   - GRDB records (all `Codable, Sendable, Equatable, FetchableRecord`): `JobRecord` (table `job`; `id, title, priority, position: Double, source, state, waitReason?, forceStart, currentStep, error?, createdAt, updatedAt, finishedAt?`), `StepRecord` (table `step`, key `["jobId","idx"]`; `jobId, idx, recipe, task, inputs: [String:String], settings: [String:SettingValue], state, waitReason?, stage?, fraction?, outputs: [String], error?, workerId?, startedAt?, finishedAt?`), `EventRecord` (`id: Int64?, jobId, stepIdx?, at, kind, detail`), `WorkerRecord` (`id, recipe, pid: Int32, startedAt, loadSeconds?, endedAt?, endReason?`), `MemorySampleRecord` (`id?, recipe, task, keyValues, kind: .load|.job, bytes: Int, at`), `SettingRecord` (`key, value` JSON text).
-  - `final class Store: Sendable` with `let db: DatabaseQueue`, `init(path:)` and `init()` (in memory). Migration `"v1"` creates all six tables, and steps and events cascade on job delete.
+  - `final class Store: Sendable` with `let db: DatabaseQueue`, `init(path:)` and `init()` (in memory). Migration `"v1"` creates `job`, `step`, `event`, `worker`, `memorySample`, `setting`, `weightHash (path PK, size, mtime, sha256)` and `weightCheck (recipe PK, at, snapshots JSON)`. Steps and events cascade on job delete. Task 8 adds the record types for the two weights tables.
   - `struct Settings: Codable, Equatable` with the fields `maxSlots = 1`, `memoryBudgetGB = 48`, `idleUnloadMinutes = 10`, `devRecipes = false`, `queuePaused = false`, `recipeSources: [RecipeSourceRef]`, `pinOverrides: [String: String]`. JSON keys are snake_case (`max_slots`, …). Also `memoryBudgetBytes`; `static userKeys`; `static func load(_ db: Database) throws -> Settings`; `func save(_ db: Database) throws`; `func setting(_ key: String, to: SettingValue) throws(LiftError) -> Settings`. `RecipeSourceRef(name:url:)`.
-  - Test helpers: `Fixtures.root`, `.workerRuntime` (`python/lift_worker/src`), `.devRecipes`, `.fixtureLauncher`, `.tempDir()`, `.image(named:)`, `.fakeBin([String]) -> URL`; `eventually(_ seconds:_ condition:) async throws -> Bool`; `fieldErrors(_ body:) async -> [String]`.
+  - `Settings.devRecipes` (`dev_recipes`) means "show developer recipes" (the Test Cube).
+  - Test helpers: `Fixtures.root`, `.workerRuntime` (`python/lift_worker/src`), `.devRecipes` (the repo's `dev-recipes/`, which is also the app's bundle), `.fixtureLauncher`, `.tempDir()`, `.image(named:)`, `.fakeBin([String]) -> URL`; `eventually(_ seconds:_ condition:) async throws -> Bool`; `fieldErrors(_ body:) async -> [String]`.
 
 - [ ] **Step 1: Create the package manifest**
 
@@ -355,7 +408,7 @@ import Testing
     }
 
     @Test func waitReasonCoding() throws {
-        for r: WaitReason in [.noFreeSlot, .memory(needed: 5, free: 1), .modelInstalling, .modelNotInstalled, .modelUnsupported, .queuePaused] {
+        for r: WaitReason in [.noFreeSlot, .memory(needed: 5, free: 1), .modelInstalling, .modelNotInstalled, .modelUnsupported, .weightsUnverified, .queuePaused] {
             #expect(try JSONDecoder().decode(WaitReason.self, from: JSONEncoder().encode(r)) == r)
         }
         #expect(String(decoding: try JSONEncoder().encode(WaitReason.noFreeSlot), as: UTF8.self) == #"{"reason":"no_free_slot"}"#)
@@ -543,6 +596,7 @@ public enum WaitReason: Codable, Sendable, Equatable {
     case modelInstalling
     case modelNotInstalled
     case modelUnsupported
+    case weightsUnverified
     case queuePaused
 
     private enum CodingKeys: String, CodingKey { case reason, needed, free }
@@ -555,6 +609,7 @@ public enum WaitReason: Codable, Sendable, Equatable {
         case "model_installing": self = .modelInstalling
         case "model_not_installed": self = .modelNotInstalled
         case "model_unsupported": self = .modelUnsupported
+        case "weights_unverified": self = .weightsUnverified
         case "queue_paused": self = .queuePaused
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .reason, in: c, debugDescription: "unknown wait reason \(other)")
@@ -572,6 +627,7 @@ public enum WaitReason: Codable, Sendable, Equatable {
         case .modelInstalling: try c.encode("model_installing", forKey: .reason)
         case .modelNotInstalled: try c.encode("model_not_installed", forKey: .reason)
         case .modelUnsupported: try c.encode("model_unsupported", forKey: .reason)
+        case .weightsUnverified: try c.encode("weights_unverified", forKey: .reason)
         case .queuePaused: try c.encode("queue_paused", forKey: .reason)
         }
     }
@@ -746,6 +802,17 @@ public final class Store: Sendable {
                 t.column("bytes", .integer).notNull()
                 t.column("at", .datetime).notNull()
             }
+            try db.create(table: "weightHash") { t in
+                t.primaryKey("path", .text)
+                t.column("size", .integer).notNull()
+                t.column("mtime", .double).notNull()
+                t.column("sha256", .text).notNull()
+            }
+            try db.create(table: "weightCheck") { t in
+                t.primaryKey("recipe", .text)
+                t.column("at", .datetime).notNull()
+                t.column("snapshots", .text).notNull()
+            }
             try db.create(table: "setting") { t in
                 t.primaryKey("key", .text)
                 t.column("value", .text).notNull()
@@ -875,7 +942,7 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 
 **Interfaces:**
 - Consumes: nothing (stdlib only).
-- Produces (the contract Tasks 7, 8, 9 and 10 rely on):
+- Produces (the contract Tasks 7, 9, 10 and 11 rely on):
   - CLI: `python -m lift_worker '<config json>'` runs the worker, and `python -m lift_worker --check '<config json>'` imports the launcher, compiles `stages`, prints `lift_worker: launcher OK` and exits 0 (non-zero on any error).
   - Config keys: `launcher` (path), `repo_dir`, `recipe_dir`, `max_concurrent` (default 1), `stages` (`[{"pattern": …}]`), `heartbeat_seconds` (default 2.0), `setting_types` (`{task: {key: "int"|"float"|…}}`).
   - stdin ops: `{"op":"run","job","step","task","inputs","settings","out_dir"}`, `{"op":"cancel","job"}`, `{"op":"shutdown"}`. stdin EOF means shutdown. Both exit with `os._exit(0)` right away, even while busy.
@@ -1636,10 +1703,10 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 - Produces:
   - `enum IOType: String { text, image, imageSet = "image_set", mesh, riggedMesh = "rigged_mesh", video, audio }` with `accepts(_ output: IOType) -> Bool` (same type, or `mesh` accepting `rigged_mesh`).
   - `enum SettingType: String { int, float, bool, enum, string, path }`; `struct SettingDef { key, label, type, options: [SettingValue]?, default: SettingValue?, min: Double?, max: Double?, help?, group? }` (memberwise init used in tests); `struct TaskInput { name, type: IOType }`; `struct RecipeTask { id, modality, label, inputs, output: IOType, entry: String?, settings: [SettingDef] }`.
-  - `struct Recipe { schema, id, name, publisher?, license?, homepage?, repo?, commit?, python = "3.11", platform: Platform{status: .supported|.unsupported, reason?}, install: [String], substitutes: [String], shim: Bool, weights: [Weight{repo, gated}], resources: Resources{memoryGB, memoryKeys, memoryOverrides: [MemoryOverride{when: [String:SettingValue], memoryGB}], maxConcurrentPerProcess = 1, diskGB = 5}, stages: [StagePattern{pattern}], tasks: [RecipeTask] }`, plus `static supportedSchema = 1` and `task(_ id:) -> RecipeTask?`.
+  - `struct Recipe { schema, id, name, publisher?, license?, homepage?, repo?, commit?, python = "3.11", platform: Platform{status: .supported|.unsupported, reason?}, install: [String], substitutes: [String], shim: Shim?{aliases: [String:String], standins: [String], patches: [String], env: [String:String]}, brew: [String], weights: [Weight{repo, revision = "main", gated = false}], developer: Bool, resources: Resources{memoryGB, memoryKeys, memoryOverrides: [MemoryOverride{when: [String:SettingValue], memoryGB}], maxConcurrentPerProcess = 1, diskGB = 5}, stages: [StagePattern{pattern}], tasks: [RecipeTask] }`, plus `static supportedSchema = 1` and `task(_ id:) -> RecipeTask?`. `Recipe.Weight(repo:revision:gated:)` has a memberwise init with defaults. All fields are `var`.
   - `enum RecipeLoad: Equatable { ok(Recipe), needsNewerLift(id:schema:), invalid(String) }` and `static func read(directory: URL, matchFolder: Bool = true) -> RecipeLoad`. Use `matchFolder: false` for an installed copy.
   - `RecipeTask.validated(settings: [String: SettingValue], prefix: String) throws(LiftError) -> [String: SettingValue]` fills defaults and coerces int↔float and enum options, throwing `invalidInput` with fields `"\(prefix).\(key)"`. `RecipeTask.validated(inputs: [String: String], chained: Bool, prefix: String) throws(LiftError) -> [String: String]` checks names and that files/folders exist; a chained step may leave its first input out.
-  - Test helpers: `writeRecipe(_ yaml: String, id: String, in dir: URL, launcher: Bool = true) throws -> URL` and `let pixalYAML: String` (the spec §4 example).
+  - Test helpers: `writeRecipe(_ yaml: String, id: String, in dir: URL, launcher: Bool = true) throws -> URL` and `let pixalYAML: String` (the spec §4 example, with `shim: {patches, env}`, `brew: [libusb]` and a gated weight at a revision).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1672,10 +1739,11 @@ platform: { status: supported, reason: "" }
 install:
   - uv pip install torch torchvision
 substitutes: [flash_attn]
-shim: true
+shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }
+brew: [libusb]
 weights:
   - { repo: TencentARC/Pixal3D, gated: false }
-  - { repo: briaai/RMBG-2.0, gated: true }
+  - { repo: briaai/RMBG-2.0, revision: 1f3e2a7c, gated: true }
 resources:
   memory_gb: 18
   memory_keys: [low_vram, resolution]
@@ -1703,8 +1771,9 @@ tasks:
         let folder = try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())
         guard case .ok(let r) = RecipeLoad.read(directory: folder) else { Issue.record("\(RecipeLoad.read(directory: folder))"); return }
         #expect(r.commit == "f7cf38429b0bd264f1995f0f8743a88b1c728b94")
-        #expect(r.shim && r.substitutes == ["flash_attn"])
-        #expect(r.weights.map(\.gated) == [false, true])
+        #expect(r.substitutes == ["flash_attn"] && r.brew == ["libusb"] && !r.developer)
+        #expect(r.shim?.patches == ["transformers_fa2_to_sdpa"] && r.shim?.env == ["ATTN_BACKEND": "sdpa"] && r.shim?.aliases == [:])
+        #expect(r.weights == [Recipe.Weight(repo: "TencentARC/Pixal3D"), Recipe.Weight(repo: "briaai/RMBG-2.0", revision: "1f3e2a7c", gated: true)])
         #expect(r.resources.memoryOverrides == [Recipe.MemoryOverride(when: ["low_vram": .bool(true)], memoryGB: 12)])
         #expect(r.resources.diskGB == 5)  // default
         let t = try #require(r.task("image_to_3d"))
@@ -1726,12 +1795,19 @@ tasks:
         ("min: 1, max: 50, default: 12", "min: 1, max: 50, default: 99", "default must be ≤ 50"),
         ("memory_keys: [low_vram, resolution]", "memory_keys: [low_vram, nope]", "nope is not a setting"),
         ("platform: { status: supported, reason: \"\" }", "platform: { status: unsupported }", "reason is required"),
+        ("repo: TencentARC/Pixal3D, gated", "repo: Pixal3D, gated", "must be owner/name"),
     ])
     func invalidRecipes(original: String, replacement: String, message: String) throws {
         let yaml = pixalYAML.replacingOccurrences(of: original, with: replacement)
         let folder = try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())
         guard case .invalid(let problems) = RecipeLoad.read(directory: folder) else { Issue.record("expected invalid"); return }
         #expect(problems.contains(message))
+    }
+
+    @Test func noShimMeansNone() throws {
+        let yaml = pixalYAML.replacingOccurrences(of: "shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }\n", with: "")
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.shim == nil)
     }
 
     @Test func missingLauncherIsInvalid() throws {
@@ -1885,7 +1961,8 @@ public struct RecipeTask: Codable, Sendable, Equatable {
     }
 }
 
-/// `recipe.yaml`, schema v1 (spec §4), plus `shim` and `stages` (see the plan's schema notes).
+/// `recipe.yaml`, schema v1 (spec §4), plus `shim`, `brew`, `stages`, `developer` and `weights[].revision`
+/// (see the plan's schema notes).
 public struct Recipe: Codable, Sendable, Equatable {
     public static let supportedSchema = 1
 
@@ -1895,14 +1972,40 @@ public struct Recipe: Codable, Sendable, Equatable {
         public var reason: String?
     }
 
+    /// A Hugging Face model repo the recipe needs, at a branch, tag or commit.
     public struct Weight: Codable, Sendable, Equatable {
         public var repo: String
+        public var revision: String
         public var gated: Bool
+
+        public init(repo: String, revision: String = "main", gated: Bool = false) {
+            self.repo = repo
+            self.revision = revision
+            self.gated = gated
+        }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             repo = try c.decode(String.self, forKey: .repo)
+            revision = try c.decodeIfPresent(String.self, forKey: .revision) ?? "main"
             gated = try c.decodeIfPresent(Bool.self, forKey: .gated) ?? false
+        }
+    }
+
+    /// `shim:`, merged with what the substitutes add into the `LIFT_SHIM` JSON.
+    public struct Shim: Codable, Sendable, Equatable {
+        public var aliases: [String: String]
+        public var standins: [String]
+        /// Named `lift_shim` runtime patches, e.g. `transformers_fa2_to_sdpa`.
+        public var patches: [String]
+        public var env: [String: String]
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            aliases = try c.decodeIfPresent([String: String].self, forKey: .aliases) ?? [:]
+            standins = try c.decodeIfPresent([String].self, forKey: .standins) ?? []
+            patches = try c.decodeIfPresent([String].self, forKey: .patches) ?? []
+            env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? [:]
         }
     }
 
@@ -1951,9 +2054,13 @@ public struct Recipe: Codable, Sendable, Equatable {
     public var platform: Platform
     public var install: [String]
     public var substitutes: [String]
-    /// Install `lift_shim` + its `.pth` and set `LIFT_SHIM` for the worker.
-    public var shim: Bool
+    /// Present: install `lift_shim` + its `.pth` and set `LIFT_SHIM` for the worker. Absent: no shim.
+    public var shim: Shim?
+    /// Native Homebrew packages (e.g. `libusb`); their `lib/` goes on the worker's `DYLD_FALLBACK_LIBRARY_PATH`.
+    public var brew: [String]
     public var weights: [Weight]
+    /// Developer-only (the Test Cube): hidden unless the `dev_recipes` setting or `LIFT_DEV_RECIPES=1` is on.
+    public var developer: Bool
     public var resources: Resources
     public var stages: [StagePattern]
     public var tasks: [RecipeTask]
@@ -1972,8 +2079,10 @@ public struct Recipe: Codable, Sendable, Equatable {
         platform = try c.decodeIfPresent(Platform.self, forKey: .platform) ?? Platform(status: .supported, reason: nil)
         install = try c.decodeIfPresent([String].self, forKey: .install) ?? []
         substitutes = try c.decodeIfPresent([String].self, forKey: .substitutes) ?? []
-        shim = try c.decodeIfPresent(Bool.self, forKey: .shim) ?? false
+        shim = try c.decodeIfPresent(Shim.self, forKey: .shim)
+        brew = try c.decodeIfPresent([String].self, forKey: .brew) ?? []
         weights = try c.decodeIfPresent([Weight].self, forKey: .weights) ?? []
+        developer = try c.decodeIfPresent(Bool.self, forKey: .developer) ?? false
         resources = try c.decode(Resources.self, forKey: .resources)
         stages = try c.decodeIfPresent([StagePattern].self, forKey: .stages) ?? []
         tasks = try c.decode([RecipeTask].self, forKey: .tasks)
@@ -2028,6 +2137,9 @@ extension Recipe {
         }
         if platform.status == .unsupported && (platform.reason ?? "").isEmpty {
             out.append("platform.reason is required when unsupported")
+        }
+        for w in weights where w.repo.split(separator: "/").count != 2 {
+            out.append("weights: \(w.repo) must be owner/name")
         }
         if resources.maxConcurrentPerProcess < 1 { out.append("resources.max_concurrent_per_process must be ≥ 1") }
         if resources.memoryGB <= 0 { out.append("resources.memory_gb must be > 0") }
@@ -2148,7 +2260,7 @@ extension RecipeTask {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --filter "RecipeTests|ValidationTests"`
-Expected: `✔ Test run with 12 tests in 2 suites passed`. A parameterized test counts once.
+Expected: `✔ Test run with 13 tests in 2 suites passed`. A parameterized test counts once.
 
 - [ ] **Step 5: Commit**
 
@@ -2173,8 +2285,17 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
   - `struct ShellCommand: Equatable { executable, arguments, environment: [String:String] (overrides on the inherited env), workingDirectory: String? }` with `init(_ executable:, _ arguments: = [], environment: = [:], workingDirectory: = nil)` and `display: String` (for `/bin/sh -c X` it's just `X`; otherwise the executable and arguments joined by spaces).
   - `protocol CommandRunner: Sendable { func run(_: ShellCommand, onLine: @escaping @Sendable (String) -> Void) async throws -> Int32 }`. Extensions: `check(_:onLine:)` throws `LiftError.commandFailed(command: display, exitCode:, tail: last 40 lines)`, and `output(_:) -> String`.
   - `struct SubprocessRunner: CommandRunner` (swift-subprocess, stdout and stderr merged, line by line).
-  - `struct ToolPaths: Codable, Equatable { brew?, git?, uv? }`; `struct Prereqs: Codable, Equatable { tools: ToolPaths, metalToolchain: Bool? }`.
-  - `struct Toolchain(runner:, searchDirs: [String]? = nil)`. The default search order is `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`, then `$PATH`, then `/usr/bin` and `/bin`. Methods: `find(_:) -> String?`, `detect() -> ToolPaths`, `environment: ["PATH": searchDirs joined]`, `metalToolchainInstalled() async -> Bool` (`/usr/bin/xcrun metal --version` exits 0), `installHomebrew(askpass:onLine:)` (the official script with `NONINTERACTIVE=1` and `SUDO_ASKPASS`), `brewInstall(_ names:onLine:)`, `installMetalToolchain(onLine:)` (`xcodebuild -downloadComponent MetalToolchain`), `static writeAskpass(in: URL) throws -> String`.
+  - `struct ToolPaths: Codable, Equatable { brew? (native only), git?, uv?, rosettaBrew? }` with `init(brew: = nil, git: = nil, uv: = nil, rosettaBrew: = nil)`; `struct Prereqs: Codable, Equatable { tools: ToolPaths, metalToolchain: Bool? }`.
+  - `struct Toolchain(runner:, searchDirs: [String]? = nil, homebrewPrefix: = "/opt/homebrew", rosettaPrefix: = "/usr/local")` with `let homebrewPrefix`. The default search order is `<homebrewPrefix>/bin`, `~/.local/bin`, `~/.cargo/bin`, then `$PATH` minus anything under the Rosetta prefix, then `/usr/bin` and `/bin`, deduplicated.
+  - Methods:
+    - `find(_:) -> String?`
+    - `nativeBrew() async -> String?`: `<prefix>/bin/brew` counts only if `--version` exits 0 and `brew config` shows `HOMEBREW_PREFIX: <prefix>` and `arm64`.
+    - `detect() async -> ToolPaths`: every tool must run its `--version`, and `/usr/bin/git` only after `xcode-select -p` succeeds.
+    - `environment: ["PATH": searchDirs joined]`
+    - `metalToolchainInstalled() async -> Bool`: `/usr/bin/xcrun metal --version` exits 0.
+    - `installHomebrew(git:onLine:)`: one `osascript … with administrator privileges` that does `mkdir -p` + `chown -R <user>:admin` on the prefix, then as the user `git -C <prefix>` `init -q`, `config remote.origin.url https://github.com/Homebrew/brew`, `config remote.origin.fetch +refs/heads/*:refs/remotes/origin/*`, `fetch --force --quiet origin`, `checkout --force -B main origin/main`, and finally `<prefix>/bin/brew update --force --quiet`.
+    - `brewInstall(_ names:onLine:)`: native brew only, else `.prerequisite`.
+    - `installMetalToolchain(onLine:)`: `xcodebuild -downloadComponent MetalToolchain`.
   - Test helpers: `final class FakeRunner: CommandRunner` with `on(_ match: String, code: Int32 = 0, lines: [String] = [])`, `commands`, `displays`; unmatched commands exit 0. `Fixtures.python() async throws -> String` (`uv python find 3.11`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -2229,11 +2350,28 @@ import Foundation
 import Testing
 @testable import LiftCore
 
+/// Nothing here runs a real install: every command goes to `FakeRunner`, and the Homebrew
+/// prefixes are temp folders.
 @Suite struct ToolchainTests {
-    @Test func detectsInSearchOrder() throws {
+    /// A temp prefix with `bin/brew`.
+    func prefix() throws -> String {
+        let bin = try Fixtures.fakeBin(["brew"])
+        let p = bin.deletingLastPathComponent().appending(path: "prefix-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: p, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: bin, to: p.appending(path: "bin"))
+        return p.path
+    }
+
+    func config(_ prefix: String, arch: String = "26.4-arm64") -> [String] {
+        ["HOMEBREW_VERSION: 4.6.0", "HOMEBREW_PREFIX: \(prefix)", "macOS: \(arch)"]
+    }
+
+    @Test func detectsInSearchOrderAndRequiresWorkingTools() async throws {
         let first = try Fixtures.fakeBin(["git"]), second = try Fixtures.fakeBin(["git", "uv"])
-        let t = Toolchain(runner: FakeRunner(), searchDirs: [first.path, second.path])
-        #expect(t.detect() == ToolPaths(brew: nil, git: first.path + "/git", uv: second.path + "/uv"))
+        let runner = FakeRunner()
+        runner.on("\(second.path)/uv --version", code: 1)  // present but broken
+        let t = Toolchain(runner: runner, searchDirs: [first.path, second.path], homebrewPrefix: "/nonexistent-brew", rosettaPrefix: "/nonexistent-rosetta")
+        #expect(await t.detect() == ToolPaths(git: first.path + "/git"))
         #expect(t.environment["PATH"] == "\(first.path):\(second.path)")
     }
 
@@ -2243,24 +2381,57 @@ import Testing
         #expect(Toolchain(runner: FakeRunner(), searchDirs: [dir.path]).find("uv") == nil)
     }
 
-    @Test func installsGoThroughTheRunner() async throws {
-        let bin = try Fixtures.fakeBin(["brew"])
+    @Test func nativeBrewMustReportItsArm64Prefix() async throws {
+        let p = try prefix()
+        let good = FakeRunner()
+        good.on("brew config", lines: config(p))
+        #expect(await Toolchain(runner: good, searchDirs: [], homebrewPrefix: p).nativeBrew() == "\(p)/bin/brew")
+        let partial = FakeRunner()
+        partial.on("brew --version", code: 127)  // the empty scaffold seen on the dev machine
+        #expect(await Toolchain(runner: partial, searchDirs: [], homebrewPrefix: p).nativeBrew() == nil)
+        let rosetta = FakeRunner()
+        rosetta.on("brew config", lines: config(p, arch: "26.4-x86_64"))
+        #expect(await Toolchain(runner: rosetta, searchDirs: [], homebrewPrefix: p).nativeBrew() == nil)
+    }
+
+    @Test func rosettaBrewIsReportedNeverUsed() async throws {
+        let rosetta = try prefix()
         let runner = FakeRunner()
+        let t = Toolchain(runner: runner, searchDirs: [], homebrewPrefix: "/nonexistent-brew", rosettaPrefix: rosetta)
+        let tools = await t.detect()
+        #expect(tools.rosettaBrew == "\(rosetta)/bin/brew" && tools.brew == nil)
+        await #expect(throws: LiftError.self) { try await t.brewInstall(["libusb"], onLine: { _ in }) }
+        #expect(!runner.displays.contains { $0.contains("install libusb") })
+    }
+
+    @Test func homebrewInstallIsOneAdminDialogThenUserSteps() async throws {
+        let runner = FakeRunner()
+        let t = Toolchain(runner: runner, searchDirs: ["/usr/bin"], homebrewPrefix: "/opt/homebrew")
+        try await t.installHomebrew(git: "/usr/bin/git", onLine: { _ in })
+        let d = runner.displays
+        #expect(d.count == 7)
+        #expect(d[0].hasPrefix("/usr/bin/osascript -e do shell script \"/bin/mkdir -p /opt/homebrew && /usr/sbin/chown -R "))
+        #expect(d[0].hasSuffix(":admin /opt/homebrew\" with administrator privileges"))
+        #expect(d[1...5] == ["/usr/bin/git -C /opt/homebrew init -q",
+                             "/usr/bin/git -C /opt/homebrew config remote.origin.url https://github.com/Homebrew/brew",
+                             "/usr/bin/git -C /opt/homebrew config remote.origin.fetch +refs/heads/*:refs/remotes/origin/*",
+                             "/usr/bin/git -C /opt/homebrew fetch --force --quiet origin",
+                             "/usr/bin/git -C /opt/homebrew checkout --force -B main origin/main"])
+        #expect(d[6] == "/opt/homebrew/bin/brew update --force --quiet")
+        #expect(!d.contains { $0.contains("rm ") })
+    }
+
+    @Test func brewAndMetalInstallsGoThroughTheRunner() async throws {
+        let p = try prefix()
+        let runner = FakeRunner()
+        runner.on("brew config", lines: config(p))
         runner.on("xcrun metal", code: 1)
-        let t = Toolchain(runner: runner, searchDirs: [bin.path])
+        let t = Toolchain(runner: runner, searchDirs: [], homebrewPrefix: p)
         #expect(await t.metalToolchainInstalled() == false)
         try await t.brewInstall(["git", "uv"], onLine: { _ in })
         try await t.installMetalToolchain(onLine: { _ in })
-        try await t.installHomebrew(askpass: "/tmp/askpass", onLine: { _ in })
-        #expect(runner.displays[1] == "\(bin.path)/brew install git uv")
-        #expect(runner.displays[2] == "/usr/bin/xcodebuild -downloadComponent MetalToolchain")
-        #expect(runner.commands[3].environment["SUDO_ASKPASS"] == "/tmp/askpass")
-        #expect(runner.commands[3].environment["NONINTERACTIVE"] == "1")
-    }
-
-    @Test func brewInstallWithoutBrewFails() async throws {
-        let t = Toolchain(runner: FakeRunner(), searchDirs: [try Fixtures.tempDir().path])
-        await #expect(throws: LiftError.self) { try await t.brewInstall(["uv"], onLine: { _ in }) }
+        #expect(runner.displays.contains("\(p)/bin/brew install git uv"))
+        #expect(runner.displays.last == "/usr/bin/xcodebuild -downloadComponent MetalToolchain")
     }
 
     @Test func failedCommandCarriesItsTail() async throws {
@@ -2370,11 +2541,21 @@ public struct SubprocessRunner: CommandRunner {
 ```swift
 import Foundation
 
-/// Absolute paths of the tools Lift drives. `nil` means not found.
+/// Absolute paths of the tools Lift drives. `nil` means not found or not working.
 public struct ToolPaths: Codable, Sendable, Equatable {
+    /// Native arm64 Homebrew, only when `brew --version` and `brew config` both check out.
     public var brew: String?
     public var git: String?
     public var uv: String?
+    /// An Intel/Rosetta Homebrew (`/usr/local/bin/brew`). Reported, never used: its libraries are x86_64.
+    public var rosettaBrew: String?
+
+    public init(brew: String? = nil, git: String? = nil, uv: String? = nil, rosettaBrew: String? = nil) {
+        self.brew = brew
+        self.git = git
+        self.uv = uv
+        self.rosettaBrew = rosettaBrew
+    }
 }
 
 public struct Prereqs: Codable, Sendable, Equatable {
@@ -2383,27 +2564,58 @@ public struct Prereqs: Codable, Sendable, Equatable {
     public var metalToolchain: Bool?
 }
 
-/// Finds and installs brew / git / uv / the Metal Toolchain (spec §6).
-/// A GUI app's PATH is minimal, so tools are looked up in fixed directories first.
+/// Finds and installs native Homebrew / git / uv / the Metal Toolchain (spec §6).
+/// A GUI app's PATH is minimal, so tools are looked up in fixed directories. The Rosetta prefix
+/// (`/usr/local`) is never searched: an x86_64 uv would build x86_64 venvs.
 public struct Toolchain: Sendable {
-    public static let homebrewInstallURL = "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+    public static let brewRepo = "https://github.com/Homebrew/brew"
 
     let runner: any CommandRunner
     let searchDirs: [String]
+    public let homebrewPrefix: String
+    let rosettaPrefix: String
 
-    public init(runner: any CommandRunner, searchDirs: [String]? = nil) {
+    public init(runner: any CommandRunner, searchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local") {
         self.runner = runner
+        self.homebrewPrefix = homebrewPrefix
+        self.rosettaPrefix = rosettaPrefix
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let fromPath = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        self.searchDirs = searchDirs ?? (["/opt/homebrew/bin", "/usr/local/bin", "\(home)/.local/bin", "\(home)/.cargo/bin"] + fromPath + ["/usr/bin", "/bin"])
+            .filter { !$0.hasPrefix(rosettaPrefix) }
+        var seen = Set<String>()
+        self.searchDirs = (searchDirs ?? (["\(homebrewPrefix)/bin", "\(home)/.local/bin", "\(home)/.cargo/bin"] + fromPath + ["/usr/bin", "/bin"]))
+            .filter { seen.insert($0).inserted }
     }
 
     public func find(_ name: String) -> String? {
         searchDirs.lazy.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    public func detect() -> ToolPaths {
-        ToolPaths(brew: find("brew"), git: find("git"), uv: find("uv"))
+    func works(_ executable: String, _ arguments: [String] = ["--version"]) async -> Bool {
+        (try? await runner.run(ShellCommand(executable, arguments), onLine: { _ in })) == 0
+    }
+
+    /// `<prefix>/bin/brew`, if it runs and `brew config` reports this prefix on arm64.
+    /// An empty or partial `/opt/homebrew` counts as missing.
+    public func nativeBrew() async -> String? {
+        let brew = "\(homebrewPrefix)/bin/brew"
+        guard FileManager.default.isExecutableFile(atPath: brew), await works(brew),
+              let config = try? await runner.output(ShellCommand(brew, ["config"])),
+              config.contains("HOMEBREW_PREFIX: \(homebrewPrefix)"), config.contains("arm64") else { return nil }
+        return brew
+    }
+
+    /// Each tool counts only if it runs. `/usr/bin/git` is a stub that pops up an installer dialog
+    /// without the Command Line Tools, so it's only tried when `xcode-select -p` succeeds.
+    public func detect() async -> ToolPaths {
+        var git = find("git")
+        if git == "/usr/bin/git", !(await works("/usr/bin/xcode-select", ["-p"])) { git = nil }
+        if let g = git, !(await works(g)) { git = nil }
+        var uv = find("uv")
+        if let u = uv, !(await works(u)) { uv = nil }
+        let rosetta = "\(rosettaPrefix)/bin/brew"
+        return ToolPaths(brew: await nativeBrew(), git: git, uv: uv,
+                         rosettaBrew: FileManager.default.isExecutableFile(atPath: rosetta) ? rosetta : nil)
     }
 
     /// PATH for child processes: the search directories, so `uv` and `git` resolve inside install steps.
@@ -2412,34 +2624,33 @@ public struct Toolchain: Sendable {
     }
 
     public func metalToolchainInstalled() async -> Bool {
-        (try? await runner.run(ShellCommand("/usr/bin/xcrun", ["metal", "--version"]), onLine: { _ in })) == 0
+        await works("/usr/bin/xcrun", ["metal", "--version"])
     }
 
-    /// The official script. `SUDO_ASKPASS` makes macOS show a password dialog instead of needing a terminal.
-    public func installHomebrew(askpass: String, onLine: @escaping @Sendable (String) -> Void) async throws {
-        try await runner.check(ShellCommand("/bin/bash", ["-c", "$(/usr/bin/curl -fsSL \(Self.homebrewInstallURL))"],
-                                            environment: ["NONINTERACTIVE": "1", "SUDO_ASKPASS": askpass]), onLine: onLine)
+    /// The GUI-safe native install (spec §6). Homebrew's own installer refuses root and needs a terminal
+    /// for sudo, so: one administrator dialog creates the prefix and gives it to the user, then, as the user,
+    /// Homebrew `main` is fetched into it (like the official installer: files already there are
+    /// overwritten by Homebrew's own, nothing is deleted) and `brew update` runs.
+    public func installHomebrew(git: String, onLine: @escaping @Sendable (String) -> Void) async throws {
+        let p = homebrewPrefix
+        let admin = "/bin/mkdir -p \(p) && /usr/sbin/chown -R \(NSUserName()):admin \(p)"
+        try await runner.check(ShellCommand("/usr/bin/osascript", ["-e", "do shell script \"\(admin)\" with administrator privileges"]), onLine: onLine)
+        for args in [["init", "-q"], ["config", "remote.origin.url", Self.brewRepo],
+                     ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+                     ["fetch", "--force", "--quiet", "origin"], ["checkout", "--force", "-B", "main", "origin/main"]] {
+            try await runner.check(ShellCommand(git, ["-C", p] + args, environment: environment), onLine: onLine)
+        }
+        try await runner.check(ShellCommand("\(p)/bin/brew", ["update", "--force", "--quiet"], environment: environment), onLine: onLine)
     }
 
-    /// `brew install <names>`.
+    /// `brew install <names>` with the native brew only.
     public func brewInstall(_ names: [String], onLine: @escaping @Sendable (String) -> Void) async throws {
-        guard let brew = find("brew") else { throw LiftError.prerequisite("Homebrew is not installed") }
+        guard let brew = await nativeBrew() else { throw LiftError.prerequisite("native Homebrew (\(homebrewPrefix)) is not installed") }
         try await runner.check(ShellCommand(brew, ["install"] + names, environment: environment), onLine: onLine)
     }
 
     public func installMetalToolchain(onLine: @escaping @Sendable (String) -> Void) async throws {
         try await runner.check(ShellCommand("/usr/bin/xcodebuild", ["-downloadComponent", "MetalToolchain"]), onLine: onLine)
-    }
-
-    /// Writes an askpass helper that asks for the admin password with a system dialog.
-    public static func writeAskpass(in dir: URL) throws -> String {
-        let url = dir.appending(path: "lift-askpass.sh")
-        try """
-        #!/bin/sh
-        exec /usr/bin/osascript -e 'text returned of (display dialog "Lift needs your password to install Homebrew." default answer "" with hidden answer with title "Lift")'
-        """.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
-        return url.path
     }
 }
 ```
@@ -2447,13 +2658,13 @@ public struct Toolchain: Sendable {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --filter ToolchainTests`
-Expected: `✔ Test run with 6 tests in 1 suite passed`. Nothing gets installed: every install goes through `FakeRunner`. The one real command is `/bin/sh -c "echo …; exit 3"`.
+Expected: `✔ Test run with 8 tests in 1 suite passed`. Nothing gets installed: every install and probe goes through `FakeRunner`, and the Homebrew prefixes are temp folders. The one real command is `/bin/sh -c "echo …; exit 3"`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add Sources/LiftCore/Toolchain Tests/LiftCoreTests/FakeRunner.swift Tests/LiftCoreTests/ToolchainTests.swift
-git commit -m "feat(core): injectable command runner and brew/git/uv/Metal toolchain
+git commit -m "feat(core): injectable command runner; native-Homebrew/git/uv/Metal toolchain
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
@@ -2470,7 +2681,7 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 - Consumes: `Priority`, `WaitReason` (Task 1).
 - Produces:
   - `struct MemoryNeed: Equatable { load: Int, job: Int, newWorker: Int (= load + job) }` (bytes).
-  - `enum ModelReadiness { ready, installing, notInstalled, unsupported }`.
+  - `enum ModelReadiness { ready, installing, notInstalled, unsupported, weightsUnverified }`. Each non-ready value maps to the wait reason with the same name.
   - `struct Candidate(jobId:recipe:priority: = .normal, position:createdAt: = epoch, forceStart: = false, model: = .ready, need:)`.
   - `struct WorkerSnapshot(recipe:freeCapacity:reserved:)`.
   - `struct SchedulerInput(candidates:workers: = [], runningSteps: = 0, maxSlots: = 1, budget:systemFree:paused: = false)`.
@@ -2548,8 +2759,8 @@ import Testing
     }
 
     @Test func modelStatesAndPause() {
-        #expect(run([c("i", model: .installing), c("n", model: .notInstalled), c("u", model: .unsupported)], slots: 3)
-                == [.wait("i", .modelInstalling), .wait("n", .modelNotInstalled), .wait("u", .modelUnsupported)])
+        #expect(run([c("i", model: .installing), c("n", model: .notInstalled), c("u", model: .unsupported), c("w", model: .weightsUnverified)], slots: 4)
+                == [.wait("i", .modelInstalling), .wait("n", .modelNotInstalled), .wait("u", .modelUnsupported), .wait("w", .weightsUnverified)])
         #expect(run([c("a", force: true)], paused: true) == [.wait("a", .queuePaused)])
     }
 }
@@ -2575,9 +2786,10 @@ public struct MemoryNeed: Sendable, Equatable {
     public var newWorker: Int { load + job }
 }
 
-/// How a candidate's model stands, as far as starting it goes.
+/// How a candidate's model stands, as far as starting it goes. `weightsUnverified`: installed, but a new
+/// worker would be needed and its weights haven't passed verification for that start.
 public enum ModelReadiness: Sendable, Equatable {
-    case ready, installing, notInstalled, unsupported
+    case ready, installing, notInstalled, unsupported, weightsUnverified
 }
 
 /// A job whose current step could start.
@@ -2666,6 +2878,7 @@ public enum Scheduler {
             case .installing: out.append(.wait(c.jobId, .modelInstalling)); continue
             case .notInstalled: out.append(.wait(c.jobId, .modelNotInstalled)); continue
             case .unsupported: out.append(.wait(c.jobId, .modelUnsupported)); continue
+            case .weightsUnverified: out.append(.wait(c.jobId, .weightsUnverified)); continue
             case .ready: break
             }
             guard slots > 0 else { out.append(.wait(c.jobId, .noFreeSlot)); continue }
@@ -3209,25 +3422,438 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 
 ---
 
-### Task 8: Recipe catalog, sources, substitutes and the Test Cube recipe
+### Task 8: Weights verifier
 
 **Files:**
-- Create: `Sources/LiftCore/Recipes/Catalog.swift`
+- Create: `Sources/LiftCore/Weights/Weights.swift`
+- Test: `Tests/LiftCoreTests/WeightsTests.swift`
+
+**Interfaces:**
+- Consumes: `Store` and its `weightHash` / `weightCheck` tables (Task 1); `Recipe`, `Recipe.Weight`, `writeRecipe`, `pixalYAML` (Task 3).
+- Produces:
+  - `struct RemoteFile(path:size:sha256: = nil)` and `struct RepoSnapshot(repo:revision:commit:files:)`, both `Codable, Equatable`.
+  - `enum WeightsMetadataError: Error, Equatable { offline, http(status: Int, repo: String) }`; `protocol WeightsMetadata: Sendable { func snapshot(repo: String, revision: String) async throws -> RepoSnapshot }`.
+  - `struct HFHubAPI(endpoint: = https://huggingface.co, token:) : WeightsMetadata` (`GET /api/models/<repo>/revision/<rev>?blobs=true`; `URLError` → `.offline`, non-200 → `.http`), plus `static var defaultCache: URL` (`$HF_HUB_CACHE`, `$HF_HOME/hub`, `$XDG_CACHE_HOME/huggingface/hub`, `~/.cache/huggingface/hub`). The tests never call it.
+  - `struct WeightProblem: Codable, Equatable { repo, path, issue: .missing | .wrongSize | .wrongHash, detail: String? }`.
+  - `struct WeightsReport: Codable, Equatable { state: .ok | .missing | .corrupt | .unknown, problems, checkedAt, hashedFiles: Int, metadataFrom: Date?, note: String? }`.
+  - `WeightHashRecord` and `WeightCheckRecord` (GRDB records for the Task 1 tables).
+  - `struct WeightsVerifier(metadata:hub:store:)` with `snapshotDir(repo:commit:) -> URL`, `totalBytes(_ recipe) async -> Int?` and `verify(_ recipe) async throws -> WeightsReport`. It only reads the cache.
+  - Test helpers: `final class FakeMetadata: WeightsMetadata` with `set(_ repo:, revision: = "main", _ answer: Result<RepoSnapshot, WeightsMetadataError>)` (unknown repos answer 404); `writeHFCache(hub:repo:commit:files: [String: Data], lfs: Set<String>) throws -> RepoSnapshot`, which lays out `blobs/<sha>` plus `snapshots/<commit>/<path>` symlinks the way `hf download` does; `sha256Hex(_ data:) -> String`.
+
+- [ ] **Step 1: Write the failing test**
+
+`Tests/LiftCoreTests/WeightsTests.swift`:
+```swift
+import CryptoKit
+import Foundation
+import Synchronization
+import Testing
+@testable import LiftCore
+
+/// File lists by `repo@revision`; `nil` value = offline. Never touches the network.
+final class FakeMetadata: WeightsMetadata {
+    private let answers = Mutex<[String: Result<RepoSnapshot, WeightsMetadataError>]>([:])
+
+    func set(_ repo: String, revision: String = "main", _ answer: Result<RepoSnapshot, WeightsMetadataError>) {
+        answers.withLock { $0["\(repo)@\(revision)"] = answer }
+    }
+
+    func snapshot(repo: String, revision: String) async throws -> RepoSnapshot {
+        guard let a = answers.withLock({ $0["\(repo)@\(revision)"] }) else { throw WeightsMetadataError.http(status: 404, repo: repo) }
+        return try a.get()
+    }
+}
+
+func sha256Hex(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+/// Writes files the way `hf download` lays them out: `blobs/<sha>` plus `snapshots/<commit>/<path>` symlinks.
+/// Returns the snapshot the API would report.
+@discardableResult
+func writeHFCache(hub: URL, repo: String, commit: String, files: [String: Data], lfs: Set<String>) throws -> RepoSnapshot {
+    let root = hub.appending(path: "models--" + repo.replacingOccurrences(of: "/", with: "--"))
+    var remote: [RemoteFile] = []
+    for (path, data) in files.sorted(by: { $0.key < $1.key }) {
+        let sha = sha256Hex(data)
+        let blob = root.appending(path: "blobs/\(sha)")
+        try FileManager.default.createDirectory(at: blob.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: blob)
+        let link = root.appending(path: "snapshots/\(commit)/\(path)")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: blob)
+        remote.append(RemoteFile(path: path, size: data.count, sha256: lfs.contains(path) ? sha : nil))
+    }
+    return RepoSnapshot(repo: repo, revision: "main", commit: commit, files: remote)
+}
+
+@Suite struct WeightsTests {
+    let commit = String(repeating: "c", count: 40)
+
+    func recipe(_ weights: [Recipe.Weight] = [Recipe.Weight(repo: "org/model")]) throws -> Recipe {
+        guard case .ok(var r) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else {
+            throw LiftError.invalidState("fixture")
+        }
+        r.weights = weights
+        return r
+    }
+
+    func setup() throws -> (FakeMetadata, URL, WeightsVerifier) {
+        let meta = FakeMetadata(), hub = try Fixtures.tempDir()
+        return (meta, hub, WeightsVerifier(metadata: meta, hub: hub, store: try Store()))
+    }
+
+    @Test func completeCacheVerifiesAndHashesAreCached() async throws {
+        let (meta, hub, v) = try setup()
+        let snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit,
+                                    files: ["model.safetensors": Data(repeating: 7, count: 4096), "config.json": Data("{}".utf8)], lfs: ["model.safetensors"])
+        meta.set("org/model", .success(snap))
+        let first = try await v.verify(try recipe())
+        #expect(first.state == .ok && first.problems.isEmpty && first.hashedFiles == 1)
+        #expect(try await v.verify(try recipe()).hashedFiles == 0)  // size + mtime unchanged: cached hash
+        #expect(await v.totalBytes(try recipe()) == 4098)
+    }
+
+    @Test func missingFileIsListed() async throws {
+        let (meta, hub, v) = try setup()
+        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1])], lfs: [])
+        snap.files.append(RemoteFile(path: "sub/b.bin", size: 9, sha256: String(repeating: "0", count: 64)))
+        meta.set("org/model", .success(snap))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .missing)
+        #expect(r.problems == [WeightProblem(repo: "org/model", path: "sub/b.bin", issue: .missing)])
+    }
+
+    @Test func revisionNotDownloadedMeansAllMissing() async throws {
+        let (meta, _, v) = try setup()
+        meta.set("org/model", .success(RepoSnapshot(repo: "org/model", revision: "main", commit: commit, files: [RemoteFile(path: "a", size: 1), RemoteFile(path: "b", size: 2)])))
+        #expect(try await v.verify(try recipe()).problems.map(\.path) == ["a", "b"])
+    }
+
+    @Test func wrongSizeAndWrongHashAreCorrupt() async throws {
+        let (meta, hub, v) = try setup()
+        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit,
+                                    files: ["big.bin": Data(repeating: 1, count: 100), "w.safetensors": Data(repeating: 2, count: 50)], lfs: ["w.safetensors"])
+        snap.files[0].size = 101
+        snap.files[1].sha256 = String(repeating: "f", count: 64)
+        meta.set("org/model", .success(snap))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .corrupt)
+        #expect(r.problems.map(\.issue) == [.wrongSize, .wrongHash])
+    }
+
+    @Test func revisionsAreRespected() async throws {
+        let (meta, hub, v) = try setup()
+        var snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a": Data([1])], lfs: [])
+        snap.revision = "v2"
+        meta.set("org/model", revision: "v2", .success(snap))
+        #expect(try await v.verify(try recipe([Recipe.Weight(repo: "org/model", revision: "v2")])).state == .ok)
+        #expect(try await v.verify(try recipe()).state == .unknown)  // main isn't known to the fake: 404
+    }
+
+    @Test func offlineFallsBackToTheLastGoodCheck() async throws {
+        let (meta, hub, v) = try setup()
+        let snap = try writeHFCache(hub: hub, repo: "org/model", commit: commit, files: ["a.bin": Data([1, 2])], lfs: ["a.bin"])
+        meta.set("org/model", .success(snap))
+        #expect(try await v.verify(try recipe()).state == .ok)
+        meta.set("org/model", .failure(.offline))
+        let offline = try await v.verify(try recipe())
+        #expect(offline.state == .ok && offline.metadataFrom != nil && offline.note?.contains("offline") == true)
+    }
+
+    @Test func offlineWithoutAGoodCheckIsUnknown() async throws {
+        let (meta, _, v) = try setup()
+        meta.set("org/model", .failure(.offline))
+        let r = try await v.verify(try recipe())
+        #expect(r.state == .unknown && r.metadataFrom == nil)
+    }
+
+    @Test func gatedRefusalSaysSo() async throws {
+        let (meta, _, v) = try setup()
+        meta.set("org/model", .failure(.http(status: 401, repo: "org/model")))
+        #expect(try await v.verify(try recipe()).note?.contains("gated") == true)
+    }
+
+    @Test func noWeightsIsOK() async throws {
+        let (_, _, v) = try setup()
+        #expect(try await v.verify(try recipe([])).state == .ok)
+    }
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `swift build --build-tests 2>&1 | grep error: | head`
+Expected: FAIL with `cannot find type 'WeightsMetadata' in scope` and `cannot find 'WeightsVerifier' in scope`.
+
+- [ ] **Step 3: Implement**
+
+`Sources/LiftCore/Weights/Weights.swift`:
+```swift
+import CryptoKit
+import Foundation
+import GRDB
+
+/// One file of a Hugging Face repo at a commit. `sha256` is set for LFS files.
+public struct RemoteFile: Codable, Sendable, Equatable {
+    public var path: String
+    public var size: Int
+    public var sha256: String?
+
+    public init(path: String, size: Int, sha256: String? = nil) {
+        self.path = path
+        self.size = size
+        self.sha256 = sha256
+    }
+}
+
+/// A repo's file list at a revision, as the Hugging Face API reports it.
+public struct RepoSnapshot: Codable, Sendable, Equatable {
+    public var repo: String
+    public var revision: String
+    /// The commit the revision resolves to; the local cache keeps files under `snapshots/<commit>/`.
+    public var commit: String
+    public var files: [RemoteFile]
+
+    public init(repo: String, revision: String, commit: String, files: [RemoteFile]) {
+        self.repo = repo
+        self.revision = revision
+        self.commit = commit
+        self.files = files
+    }
+}
+
+public enum WeightsMetadataError: Error, Sendable, Equatable {
+    /// No network (or Hugging Face unreachable): verification may fall back to the last good check.
+    case offline
+    case http(status: Int, repo: String)
+}
+
+/// Where file lists come from. Tests inject a fake; nothing in the test suite talks to Hugging Face.
+public protocol WeightsMetadata: Sendable {
+    func snapshot(repo: String, revision: String) async throws -> RepoSnapshot
+}
+
+/// `GET /api/models/<repo>/revision/<revision>?blobs=true`: commit sha, file sizes and LFS SHA-256.
+public struct HFHubAPI: WeightsMetadata {
+    let endpoint: URL
+    let token: @Sendable () -> String?
+
+    public init(endpoint: URL = URL(string: "https://huggingface.co")!, token: @escaping @Sendable () -> String?) {
+        self.endpoint = endpoint
+        self.token = token
+    }
+
+    public func snapshot(repo: String, revision: String) async throws -> RepoSnapshot {
+        let rev = revision.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? revision
+        var request = URLRequest(url: URL(string: "\(endpoint.absoluteString)/api/models/\(repo)/revision/\(rev)?blobs=true")!)
+        if let token = token() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await URLSession.shared.data(for: request) } catch is URLError { throw WeightsMetadataError.offline }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw WeightsMetadataError.http(status: status, repo: repo) }
+        struct Info: Decodable {
+            struct Sibling: Decodable {
+                struct LFS: Decodable { var sha256: String; var size: Int }
+                var rfilename: String
+                var size: Int?
+                var lfs: LFS?
+            }
+            var sha: String
+            var siblings: [Sibling]
+        }
+        let info = try JSONDecoder().decode(Info.self, from: data)
+        return RepoSnapshot(repo: repo, revision: revision, commit: info.sha, files: info.siblings.map {
+            RemoteFile(path: $0.rfilename, size: $0.lfs?.size ?? $0.size ?? 0, sha256: $0.lfs?.sha256)
+        })
+    }
+
+    /// The shared cache `hf download` writes to: `$HF_HUB_CACHE`, `$HF_HOME/hub`, `$XDG_CACHE_HOME/huggingface/hub`
+    /// or `~/.cache/huggingface/hub`.
+    public static var defaultCache: URL {
+        let env = ProcessInfo.processInfo.environment
+        if let v = env["HF_HUB_CACHE"] { return URL(filePath: v) }
+        if let v = env["HF_HOME"] { return URL(filePath: v).appending(path: "hub") }
+        if let v = env["XDG_CACHE_HOME"] { return URL(filePath: v).appending(path: "huggingface/hub") }
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".cache/huggingface/hub")
+    }
+}
+
+public struct WeightProblem: Codable, Sendable, Equatable {
+    public enum Issue: String, Codable, Sendable { case missing, wrongSize = "wrong_size", wrongHash = "wrong_hash" }
+    public var repo: String
+    public var path: String
+    public var issue: Issue
+    public var detail: String?
+}
+
+public struct WeightsReport: Codable, Sendable, Equatable {
+    /// `unknown`: couldn't be checked (offline and never verified, or Hugging Face refused).
+    public enum State: String, Codable, Sendable { case ok, missing, corrupt, unknown }
+    public var state: State
+    public var problems: [WeightProblem]
+    public var checkedAt: Date
+    /// Files hashed in this run; cached hashes are reused while size and mtime are unchanged.
+    public var hashedFiles: Int
+    /// Set when Lift was offline and checked against the file lists of the last good check, made at this time.
+    public var metadataFrom: Date?
+    public var note: String?
+}
+
+/// A cached SHA-256 of one weight file, valid while its size and mtime are unchanged.
+public struct WeightHashRecord: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "weightHash"
+    /// Resolved path of the blob in the Hugging Face cache.
+    public var path: String
+    public var size: Int
+    public var mtime: Double
+    public var sha256: String
+}
+
+/// The last successful verification of a recipe's weights, kept so an offline check can reuse its file lists.
+public struct WeightCheckRecord: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "weightCheck"
+    public var recipe: String
+    public var at: Date
+    public var snapshots: [RepoSnapshot]
+}
+
+/// Checks a recipe's weights in the local Hugging Face cache (spec §6): every file present at the
+/// revision's commit, sizes equal, LFS files hashed. Read-only on the cache.
+public struct WeightsVerifier: Sendable {
+    let metadata: any WeightsMetadata
+    let hub: URL
+    let store: Store
+
+    public init(metadata: any WeightsMetadata, hub: URL, store: Store) {
+        self.metadata = metadata
+        self.hub = hub
+        self.store = store
+    }
+
+    /// `models--org--name/snapshots/<commit>` for a repo.
+    public func snapshotDir(repo: String, commit: String) -> URL {
+        hub.appending(path: "models--" + repo.replacingOccurrences(of: "/", with: "--")).appending(path: "snapshots/\(commit)")
+    }
+
+    /// Total bytes of the recipe's weights, or nil when the file lists can't be fetched.
+    public func totalBytes(_ recipe: Recipe) async -> Int? {
+        var total = 0
+        for w in recipe.weights {
+            guard let s = try? await metadata.snapshot(repo: w.repo, revision: w.revision) else { return nil }
+            total += s.files.reduce(0) { $0 + $1.size }
+        }
+        return total
+    }
+
+    public func verify(_ recipe: Recipe) async throws -> WeightsReport {
+        let now = Date()
+        var report = WeightsReport(state: .ok, problems: [], checkedAt: now, hashedFiles: 0)
+        guard !recipe.weights.isEmpty else { return report }
+        var snapshots: [RepoSnapshot] = []
+        do {
+            for w in recipe.weights { snapshots.append(try await metadata.snapshot(repo: w.repo, revision: w.revision)) }
+        } catch WeightsMetadataError.offline {
+            let wanted = Set(recipe.weights.map { "\($0.repo)@\($0.revision)" })
+            guard let last = try await store.db.read({ try WeightCheckRecord.fetchOne($0, key: recipe.id) }),
+                  Set(last.snapshots.map { "\($0.repo)@\($0.revision)" }) == wanted else {
+                report.state = .unknown
+                report.note = "offline, and these weights have never been verified"
+                return report
+            }
+            snapshots = last.snapshots
+            report.metadataFrom = last.at
+            report.note = "offline: checked against the file lists from the last good check"
+        } catch WeightsMetadataError.http(let status, let repo) {
+            report.state = .unknown
+            report.note = "Hugging Face answered \(status) for \(repo)" + ([401, 403].contains(status) ? " (gated: needs a token with access)" : "")
+            return report
+        }
+
+        for s in snapshots {
+            let dir = snapshotDir(repo: s.repo, commit: s.commit)
+            for f in s.files {
+                let url = dir.appending(path: f.path).resolvingSymlinksInPath()
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                    report.problems.append(WeightProblem(repo: s.repo, path: f.path, issue: .missing))
+                    continue
+                }
+                let size = (attrs[.size] as? Int) ?? -1
+                guard size == f.size else {
+                    report.problems.append(WeightProblem(repo: s.repo, path: f.path, issue: .wrongSize, detail: "\(size) bytes, expected \(f.size)"))
+                    continue
+                }
+                guard let expected = f.sha256 else { continue }
+                let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                let cached = try await store.db.read { try WeightHashRecord.fetchOne($0, key: url.path) }
+                var sha = cached.flatMap { $0.size == size && $0.mtime == mtime ? $0.sha256 : nil }
+                if sha == nil {
+                    let computed = try Self.sha256(url)
+                    report.hashedFiles += 1
+                    try await store.db.write { try WeightHashRecord(path: url.path, size: size, mtime: mtime, sha256: computed).save($0) }
+                    sha = computed
+                }
+                if sha != expected {
+                    report.problems.append(WeightProblem(repo: s.repo, path: f.path, issue: .wrongHash, detail: "sha256 \(sha!), expected \(expected)"))
+                }
+            }
+        }
+        if report.problems.contains(where: { $0.issue == .missing }) { report.state = .missing }
+        else if !report.problems.isEmpty { report.state = .corrupt }
+        if report.state == .ok && report.metadataFrom == nil {
+            let record = WeightCheckRecord(recipe: recipe.id, at: now, snapshots: snapshots)
+            try await store.db.write { try record.save($0) }
+        }
+        return report
+    }
+
+    /// Streams the file through SHA-256 in 8 MB chunks.
+    static func sha256(_ url: URL) throws -> String {
+        let h = try FileHandle(forReadingFrom: url)
+        defer { try? h.close() }
+        var hash = SHA256()
+        while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty { hash.update(data: chunk) }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `swift test --filter WeightsTests`
+Expected: `✔ Test run with 9 tests in 1 suite passed`. Everything happens in temp folders, with no network.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Sources/LiftCore/Weights Tests/LiftCoreTests/WeightsTests.swift
+git commit -m "feat(core): weights verifier — HF file lists, cache presence/size/LFS sha256, hash cache, offline fallback
+
+Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
+```
+
+---
+
+### Task 9: Recipe catalog, bundled recipes, substitutes and the Test Cube recipe
+
+**Files:**
+- Create: `Sources/LiftCore/Recipes/Catalog.swift`, `Sources/LiftCore/Recipes/Bundled.swift`
 - Create: `dev-recipes/test-cube/recipe.yaml`, `dev-recipes/test-cube/launcher.py`, `dev-recipes/shared/substitutes.yaml`
-- Test: `Tests/LiftCoreTests/CatalogTests.swift`
+- Test: `Tests/LiftCoreTests/CatalogTests.swift`, `Tests/LiftCoreTests/BundledTests.swift`
 
 **Interfaces:**
 - Consumes: `Recipe`, `RecipeLoad` (Task 3); `CommandRunner`, `ShellCommand` (Task 4); the launcher contract (Task 2); `writeRecipe`, `FakeRunner` (Tasks 3 and 4).
 - Produces:
   - `struct CatalogEntry: Equatable { recipe, source: String, directory: URL, shared: URL }`.
   - `enum CatalogProblem: Codable, Equatable { invalid(source:folder:message:), needsNewerLift(source:id:schema:), duplicate(id:kept:ignored:) }`.
-  - `struct Catalog { entries: [String: CatalogEntry], problems: [CatalogProblem], static func scan(_ sources: [(name: String, dir: URL)]) -> Catalog }`. Sources are scanned in order and the first one wins. `shared/` is skipped.
-  - `struct Substitute: Codable { install: [String], alias: String?, standin: String? }` and `static func registry(shared: URL) throws -> [String: Substitute]` (empty if the file is missing).
-  - `struct ShimConfig: Codable, Equatable { aliases, standins, env }` with `static func build(substitutes:registry:) throws(LiftError) -> ShimConfig` (an unknown name → `.prerequisite`) and `json: String` (sorted keys).
+  - `struct RecipeSourceDir(name:dir:shared: URL? = nil)`, where `shared` defaults to `dir/shared`.
+  - `struct Catalog { entries: [String: CatalogEntry], problems: [CatalogProblem], static func scan(_ sources: [RecipeSourceDir], includeDeveloper: Bool = false) -> Catalog }`. Sources are scanned in order and the first one wins. `shared/` is skipped, and `developer: true` recipes are hidden unless `includeDeveloper`.
+  - `struct Substitute: Codable { install: [String], alias: String?, standin: String?, patches: [String] }` and `static func registry(shared: URL) throws -> [String: Substitute]` (empty if the file is missing).
+  - `struct ShimConfig: Codable, Equatable { aliases, standins, patches, env }` with `static func build(_ recipe: Recipe, registry:) throws(LiftError) -> ShimConfig?`. It returns nil without `shim:`. It throws `.prerequisite` for an unknown substitute, or for a substitute that needs the shim when there's no `shim:`. Also `json: String` (sorted keys).
+  - `struct BundledRecipes(bundle:recipes:)` with `copyDir` (`recipes/bundled`), `localDir` (`recipes/bundled-local`), `sync() throws -> Result` and `struct Result: Codable, Equatable { copied: Bool, keptLocal: [String] }`, plus `static ignored: Set<String>`. See decision 4 at the top of this plan. The bundle itself is only read.
   - `struct RecipeSources(runner:root:git:environment:)` with `directory(_:)`, `static name(for url:, taken:) -> String`, `clone(url:name:onLine:) async throws` (`git clone --filter=blob:none`), `pull(name:) async -> Bool` (`git pull --ff-only`) and `remove(name:) throws`.
-  - `dev-recipes/test-cube`: tasks `image_to_3d` (image→mesh; settings `size` float 1.0 [0.01, 100], `delay` float 0 [0, 600] seconds, `fail` bool, `crash` bool → `os._exit(3)`) and `fake_rig` (mesh→rigged_mesh, copies the GLB; `delay`). `shim: true`, `substitutes: [flash_attn]`, `memory_gb: 0.5`, `disk_gb: 0.5`, and stage patterns for `[Stage] X` and `X: NN%|`.
+  - `dev-recipes/test-cube` (`developer: true`): tasks `image_to_3d` (image→mesh; settings `size` float 1.0 [0.01, 100], `delay` float 0 [0, 600] seconds, `fail` bool, `crash` bool → `os._exit(3)`) and `fake_rig` (mesh→rigged_mesh, copies the GLB; `delay`). Also `shim: { env: { TEST_CUBE_SHIM: "on" } }` (the launcher logs `shim env: on`, proving `LIFT_SHIM` reached the worker), `substitutes: [flash_attn]`, `memory_gb: 0.5`, `disk_gb: 0.5`, no weights, and stage patterns for `[Stage] X` and `X: NN%|`.
+  - `dev-recipes/shared/substitutes.yaml`: `flash_attn` and `spconv` stand-ins.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 `Tests/LiftCoreTests/CatalogTests.swift`:
 ```swift
@@ -3253,7 +3879,7 @@ import Testing
         _ = try writeRecipe("schema: 9\nid: future\n", id: "future", in: b)
         _ = try writeRecipe("schema: 1\nid: broken\n", id: "broken", in: b)
         try FileManager.default.createDirectory(at: b.appending(path: "shared/lift_shim"), withIntermediateDirectories: true)
-        let c = Catalog.scan([("a", a), ("b", b)])
+        let c = Catalog.scan([RecipeSourceDir(name: "a", dir: a), RecipeSourceDir(name: "b", dir: b)], includeDeveloper: true)
         #expect(c.entries.keys.sorted() == ["test-cube"])
         #expect(c.entries["test-cube"]?.source == "a")
         #expect(c.entries["test-cube"]?.shared == a.appending(path: "shared"))
@@ -3263,15 +3889,47 @@ import Testing
     }
 
     @Test func missingSourceFolderIsEmpty() {
-        #expect(Catalog.scan([("gone", URL(filePath: "/nonexistent-lift-source"))]).entries.isEmpty)
+        #expect(Catalog.scan([RecipeSourceDir(name: "gone", dir: URL(filePath: "/nonexistent-lift-source"))]).entries.isEmpty)
     }
 
-    @Test func substitutesBuildTheShimConfig() throws {
+    @Test func developerRecipesAreHiddenByDefault() throws {
+        let source = [RecipeSourceDir(name: "bundled", dir: Fixtures.devRecipes)]
+        #expect(Catalog.scan(source).entries["test-cube"] == nil)
+        #expect(Catalog.scan(source, includeDeveloper: true).entries["test-cube"] != nil)
+    }
+
+    @Test func sharedFallsBackToAnotherSource() throws {
+        let local = try Fixtures.tempDir()
+        _ = try writeRecipe(cubeYAML, id: "test-cube", in: local)
+        let c = Catalog.scan([RecipeSourceDir(name: "bundled-local", dir: local, shared: Fixtures.devRecipes.appending(path: "shared"))], includeDeveloper: true)
+        #expect(c.entries["test-cube"]?.shared == Fixtures.devRecipes.appending(path: "shared"))
+    }
+
+    func recipe(_ yaml: String) throws -> Recipe {
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "test-cube", in: try Fixtures.tempDir())) else {
+            throw LiftError.invalidState("fixture")
+        }
+        return r
+    }
+
+    @Test func substitutesAndTheRecipeShimMakeLIFTSHIM() throws {
         let registry = try Substitute.registry(shared: Fixtures.devRecipes.appending(path: "shared"))
         #expect(registry["flash_attn"]?.standin == "flash_attn")
-        let config = try ShimConfig.build(substitutes: ["flash_attn"], registry: registry)
-        #expect(config.json == #"{"aliases":{},"env":{},"standins":["flash_attn"]}"#)
-        #expect(throws: LiftError.self) { try ShimConfig.build(substitutes: ["nope"], registry: registry) }
+        #expect(registry["spconv"]?.standin == "spconv")
+        let yaml = cubeYAML.replacingOccurrences(of: "substitutes: [flash_attn]", with: "substitutes: [flash_attn, spconv]")
+        let config = try #require(try ShimConfig.build(try recipe(yaml), registry: registry))
+        #expect(config.json == #"{"aliases":{},"env":{"TEST_CUBE_SHIM":"on"},"patches":[],"standins":["flash_attn","spconv"]}"#)
+        #expect(throws: LiftError.self) { try ShimConfig.build(try self.recipe(cubeYAML.replacingOccurrences(of: "[flash_attn]", with: "[nope]")), registry: registry) }
+    }
+
+    @Test func substituteThatNeedsTheShimRequiresShim() throws {
+        let registry = try Substitute.registry(shared: Fixtures.devRecipes.appending(path: "shared"))
+        let noShim = try recipe(cubeYAML.replacingOccurrences(of: "shim: { env: { TEST_CUBE_SHIM: \"on\" } }", with: ""))
+        #expect(noShim.shim == nil)
+        #expect(throws: LiftError.self) { try ShimConfig.build(noShim, registry: registry) }
+        var none = noShim
+        none.substitutes = []
+        #expect(try ShimConfig.build(none, registry: registry) == nil)
     }
 
     @Test func sourceNames() {
@@ -3292,26 +3950,91 @@ import Testing
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+`Tests/LiftCoreTests/BundledTests.swift`:
+```swift
+import Foundation
+import Testing
+@testable import LiftCore
+
+@Suite struct BundledTests {
+    /// A fake app bundle: two recipe folders and shared/, with dev leftovers that must not be copied.
+    func bundle() throws -> URL {
+        let b = try Fixtures.tempDir()
+        for (path, text) in ["a/recipe.yaml": "a1", "b/recipe.yaml": "b1", "shared/substitutes.yaml": "s1",
+                             "shared/lift_shim/.venv/huge": "x", "a/__pycache__/x.pyc": "x"] {
+            let url = b.appending(path: path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        return b
+    }
+
+    func read(_ url: URL) throws -> String { try String(contentsOf: url, encoding: .utf8) }
+
+    @Test func firstLaunchCopiesWithoutDevLeftovers() throws {
+        let b = try bundle(), recipes = try Fixtures.tempDir()
+        let sync = BundledRecipes(bundle: b, recipes: recipes)
+        #expect(try sync.sync() == .init(copied: true, keptLocal: []))
+        #expect(try read(sync.copyDir.appending(path: "a/recipe.yaml")) == "a1")
+        #expect(!FileManager.default.fileExists(atPath: sync.copyDir.appending(path: "shared/lift_shim/.venv").path))
+        #expect(!FileManager.default.fileExists(atPath: sync.copyDir.appending(path: "a/__pycache__").path))
+        #expect(try sync.sync() == .init(copied: false, keptLocal: []))  // same bundle: nothing to do
+    }
+
+    @Test func appUpdateRefreshesAndKeepsEdits() throws {
+        let b = try bundle(), recipes = try Fixtures.tempDir()
+        let sync = BundledRecipes(bundle: b, recipes: recipes)
+        _ = try sync.sync()
+        try "a-edited".write(to: sync.copyDir.appending(path: "a/recipe.yaml"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: sync.copyDir.appending(path: "mine"), withIntermediateDirectories: true)
+        try "m".write(to: sync.copyDir.appending(path: "mine/recipe.yaml"), atomically: true, encoding: .utf8)
+        #expect(try sync.sync() == .init(copied: false, keptLocal: []))  // edits alone don't trigger a refresh
+        try "b2".write(to: b.appending(path: "b/recipe.yaml"), atomically: true, encoding: .utf8)  // the app update
+        #expect(try sync.sync() == .init(copied: true, keptLocal: ["a", "mine"]))
+        #expect(try read(sync.copyDir.appending(path: "a/recipe.yaml")) == "a1")
+        #expect(try read(sync.copyDir.appending(path: "b/recipe.yaml")) == "b2")
+        #expect(try read(sync.localDir.appending(path: "a/recipe.yaml")) == "a-edited")
+        #expect(try read(sync.localDir.appending(path: "mine/recipe.yaml")) == "m")
+        #expect(try read(b.appending(path: "a/recipe.yaml")) == "a1")  // the bundle is only read
+    }
+
+    @Test func anOlderKeptCopyIsMovedAsideNotReplaced() throws {
+        let b = try bundle(), recipes = try Fixtures.tempDir()
+        let sync = BundledRecipes(bundle: b, recipes: recipes)
+        _ = try sync.sync()
+        for (edit, update) in [("first edit", "b2"), ("second edit", "b3")] {
+            try edit.write(to: sync.copyDir.appending(path: "a/recipe.yaml"), atomically: true, encoding: .utf8)
+            try update.write(to: b.appending(path: "b/recipe.yaml"), atomically: true, encoding: .utf8)
+            _ = try sync.sync()
+        }
+        #expect(try read(sync.localDir.appending(path: "a/recipe.yaml")) == "second edit")
+        let aside = try #require(try FileManager.default.contentsOfDirectory(atPath: sync.localDir.path).first { $0.hasPrefix(".a-") })
+        #expect(try read(sync.localDir.appending(path: "\(aside)/recipe.yaml")) == "first edit")
+    }
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `swift build --build-tests 2>&1 | grep error: | head`
-Expected: FAIL with `cannot find 'Catalog' in scope` and `cannot find 'Substitute' in scope`.
+Expected: FAIL with `cannot find 'Catalog' in scope`, `cannot find 'RecipeSourceDir' in scope` and `cannot find 'BundledRecipes' in scope`.
 
 - [ ] **Step 3: Write the Test Cube recipe and the substitute registry**
 
 `dev-recipes/test-cube/recipe.yaml`:
 ```yaml
-# Test Cube: a fake image→3D recipe for Lift's own tests (spec §4). Not in the public source.
+# Test Cube: a fake image→3D recipe for Lift's own tests (spec §4). Hidden unless the developer setting is on.
 schema: 1
 id: test-cube
 name: Test Cube
+developer: true
 publisher: Lift
 license: MIT
 python: "3.11"
 platform: { status: supported }
 install:
   - uv pip install "trimesh>=4,<5" numpy
-shim: true                   # exercises the lift_shim install path; inert for this launcher
+shim: { env: { TEST_CUBE_SHIM: "on" } }   # exercises lift_shim + .pth + LIFT_SHIM end to end
 substitutes: [flash_attn]
 resources:
   memory_gb: 0.5
@@ -3369,6 +4092,7 @@ def _wait(job, seconds):
 
 def run(state, job):
     s = job.settings
+    print(f"shim env: {os.environ.get('TEST_CUBE_SHIM')}")  # set only if lift_shim's autoload ran
     print("[Stage] Generating")
     for i in range(1, 5):
         _wait(job, float(s.get("delay", 0)) / 4)
@@ -3393,11 +4117,14 @@ def run(state, job):
 #   install: commands run in models/<id>/ with the venv active
 #   alias:   `import <key>` resolves to this installed module (lift_shim alias)
 #   standin: a lift_shim built-in stand-in
-# Metal substitutes (flex_gemm, nvdiffrast, o_voxel, cumesh) are added in Plan 4 from the go/no-go findings.
+#   patches: named lift_shim runtime patches the substitute needs
+# Recipes using alias/standin/patches must have `shim:`. Metal substitutes (flex_gemm, nvdiffrast,
+# o_voxel, cumesh) and torch_scatter/torch_cluster are added in Plan 4 from the go/no-go findings.
 flash_attn: { standin: flash_attn }
+spconv: { standin: spconv }
 ```
 
-- [ ] **Step 4: Implement the catalog**
+- [ ] **Step 4: Implement the catalog and the bundled-recipes sync**
 
 `Sources/LiftCore/Recipes/Catalog.swift`:
 ```swift
@@ -3420,25 +4147,42 @@ public enum CatalogProblem: Codable, Sendable, Equatable {
     case duplicate(id: String, kept: String, ignored: String)
 }
 
+/// A folder of recipe folders, and the `shared/` its recipes use.
+public struct RecipeSourceDir: Sendable, Equatable {
+    public var name: String
+    public var dir: URL
+    public var shared: URL
+
+    public init(name: String, dir: URL, shared: URL? = nil) {
+        self.name = name
+        self.dir = dir
+        self.shared = shared ?? dir.appending(path: "shared")
+    }
+}
+
 /// All recipes across sources. Sources are scanned in order; the first to define an id wins.
+/// Developer recipes (the Test Cube) are left out unless `includeDeveloper`.
 public struct Catalog: Sendable {
     public var entries: [String: CatalogEntry] = [:]
     public var problems: [CatalogProblem] = []
 
     public init() {}
 
-    public static func scan(_ sources: [(name: String, dir: URL)]) -> Catalog {
+    public static func scan(_ sources: [RecipeSourceDir], includeDeveloper: Bool = false) -> Catalog {
         var catalog = Catalog()
-        for (name, dir) in sources {
+        for source in sources {
+            let (name, dir) = (source.name, source.dir)
             let folders = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             for folder in folders.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
             where folder.lastPathComponent != "shared" && FileManager.default.fileExists(atPath: folder.appending(path: "recipe.yaml").path) {
                 switch RecipeLoad.read(directory: folder) {
+                case .ok(let recipe) where recipe.developer && !includeDeveloper:
+                    continue
                 case .ok(let recipe):
                     if let kept = catalog.entries[recipe.id] {
                         catalog.problems.append(.duplicate(id: recipe.id, kept: kept.source, ignored: name))
                     } else {
-                        catalog.entries[recipe.id] = CatalogEntry(recipe: recipe, source: name, directory: folder, shared: dir.appending(path: "shared"))
+                        catalog.entries[recipe.id] = CatalogEntry(recipe: recipe, source: name, directory: folder, shared: source.shared)
                     }
                 case .needsNewerLift(let id, let schema):
                     catalog.problems.append(.needsNewerLift(source: name, id: id, schema: schema))
@@ -3459,13 +4203,18 @@ public struct Substitute: Codable, Sendable, Equatable {
     public var alias: String?
     /// A `lift_shim` built-in stand-in of this name.
     public var standin: String?
+    /// Named `lift_shim` runtime patches this substitute needs.
+    public var patches: [String]
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         install = try c.decodeIfPresent([String].self, forKey: .install) ?? []
         alias = try c.decodeIfPresent(String.self, forKey: .alias)
         standin = try c.decodeIfPresent(String.self, forKey: .standin)
+        patches = try c.decodeIfPresent([String].self, forKey: .patches) ?? []
     }
+
+    var needsShim: Bool { alias != nil || standin != nil || !patches.isEmpty }
 
     public static func registry(shared: URL) throws -> [String: Substitute] {
         let file = shared.appending(path: "substitutes.yaml")
@@ -3474,22 +4223,33 @@ public struct Substitute: Codable, Sendable, Equatable {
     }
 }
 
-/// The `LIFT_SHIM` contract from Plan 0: `{"aliases":{…},"standins":[…],"env":{…}}`.
+/// The `LIFT_SHIM` contract: `{"aliases":{…},"standins":[…],"patches":[…],"env":{…}}`.
 public struct ShimConfig: Codable, Sendable, Equatable {
     public var aliases: [String: String] = [:]
     public var standins: [String] = []
+    public var patches: [String] = []
     public var env: [String: String] = [:]
 
-    public static func build(substitutes names: [String], registry: [String: Substitute]) throws(LiftError) -> ShimConfig {
+    /// The recipe's `shim:` plus what its substitutes add. `nil` when the recipe has no `shim:`;
+    /// a substitute that needs the shim then is an error.
+    public static func build(_ recipe: Recipe, registry: [String: Substitute]) throws(LiftError) -> ShimConfig? {
         var config = ShimConfig()
-        for name in names {
+        if let shim = recipe.shim {
+            config.aliases = shim.aliases
+            config.standins = shim.standins
+            config.patches = shim.patches
+            config.env = shim.env
+        }
+        for name in recipe.substitutes {
             guard let sub = registry[name] else {
                 throw .prerequisite("unknown substitute \(name); add it to shared/substitutes.yaml")
             }
+            if sub.needsShim && recipe.shim == nil { throw .prerequisite("substitute \(name) needs `shim:` in the recipe") }
             if let alias = sub.alias { config.aliases[name] = alias }
-            if let standin = sub.standin { config.standins.append(standin) }
+            if let standin = sub.standin, !config.standins.contains(standin) { config.standins.append(standin) }
+            for p in sub.patches where !config.patches.contains(p) { config.patches.append(p) }
         }
-        return config
+        return recipe.shim == nil ? nil : config
     }
 
     public var json: String {
@@ -3545,35 +4305,159 @@ public struct RecipeSources: Sendable {
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+`Sources/LiftCore/Recipes/Bundled.swift`:
+```swift
+import CryptoKit
+import Foundation
 
-Run: `swift test --filter CatalogTests`
-Expected: `✔ Test run with 6 tests in 1 suite passed`.
+/// Keeps `<workdir>/recipes/bundled/` in step with the recipes built into the app (spec §4, §11).
+/// The first launch copies them. An app update with different recipes refreshes the copy, and any
+/// top-level folder you edited (or added) is moved to `bundled-local/` first, never deleted.
+/// The app bundle itself is only read.
+public struct BundledRecipes: Sendable {
+    /// Development leftovers that never belong in the copy.
+    public static let ignored: Set<String> = [".venv", "__pycache__", ".pytest_cache", ".DS_Store", manifestName]
+    static let manifestName = ".lift-bundle.json"
+
+    public struct Result: Codable, Sendable, Equatable {
+        /// A fresh copy was written (first launch, or the bundle changed).
+        public var copied: Bool
+        /// Folders moved to `bundled-local/` because they differed from what Lift had copied.
+        public var keptLocal: [String]
+    }
+
+    struct Manifest: Codable {
+        var bundle: String
+        var folders: [String: String]
+    }
+
+    let bundle: URL
+    let recipes: URL
+
+    public init(bundle: URL, recipes: URL) {
+        self.bundle = bundle
+        self.recipes = recipes
+    }
+
+    public var copyDir: URL { recipes.appending(path: "bundled") }
+    public var localDir: URL { recipes.appending(path: "bundled-local") }
+    var manifestURL: URL { copyDir.appending(path: Self.manifestName) }
+
+    public func sync() throws -> Result {
+        let fm = FileManager.default
+        let fresh = try Self.digests(bundle)
+        let freshDigest = Self.combined(fresh)
+        let manifest = (try? Data(contentsOf: manifestURL)).flatMap { try? JSONDecoder().decode(Manifest.self, from: $0) }
+        if manifest?.bundle == freshDigest { return Result(copied: false, keptLocal: []) }
+
+        var kept: [String] = []
+        if fm.fileExists(atPath: copyDir.path) {
+            for (name, digest) in try Self.digests(copyDir) where digest != manifest?.folders[name] {
+                try keep(name)
+                kept.append(name)
+            }
+            try fm.removeItem(at: copyDir)  // only unedited copies Lift made are left in it
+        }
+        try Self.copy(bundle, to: copyDir)
+        try JSONEncoder().encode(Manifest(bundle: freshDigest, folders: fresh)).write(to: manifestURL)
+        return Result(copied: true, keptLocal: kept.sorted())
+    }
+
+    /// Moves `bundled/<name>` to `bundled-local/<name>`. An older kept copy is moved aside to a hidden
+    /// `.<name>-<timestamp>`, so nothing is lost.
+    func keep(_ name: String) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+        let dest = localDir.appending(path: name)
+        if fm.fileExists(atPath: dest.path) {
+            try fm.moveItem(at: dest, to: localDir.appending(path: ".\(name)-\(Int(Date().timeIntervalSince1970 * 1000))"))
+        }
+        try fm.moveItem(at: copyDir.appending(path: name), to: dest)
+    }
+
+    /// SHA-256 per top-level entry, over relative paths and contents, skipping `ignored`.
+    static func digests(_ root: URL) throws -> [String: String] {
+        var out: [String: String] = [:]
+        for name in try FileManager.default.contentsOfDirectory(atPath: root.path) where !ignored.contains(name) {
+            var hash = SHA256()
+            for file in files(root.appending(path: name)) {
+                hash.update(data: Data(file.relative.utf8))
+                hash.update(data: try Data(contentsOf: file.url))
+            }
+            out[name] = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        }
+        return out
+    }
+
+    static func combined(_ digests: [String: String]) -> String {
+        let text = digests.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+        return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Regular files under `url` (or `url` itself), sorted, skipping `ignored` names at any depth.
+    static func files(_ url: URL) -> [(relative: String, url: URL)] {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return [] }
+        guard isDir.boolValue else { return [("", url)] }
+        let children = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        return children.filter { !ignored.contains($0) }.sorted().flatMap { name in
+            files(url.appending(path: name)).map { (name + ($0.relative.isEmpty ? "" : "/" + $0.relative), $0.url) }
+        }
+    }
+
+    static func copy(_ from: URL, to: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: to, withIntermediateDirectories: true)
+        for name in try fm.contentsOfDirectory(atPath: from.path) where !ignored.contains(name) {
+            for file in files(from.appending(path: name)) {
+                let dest = to.appending(path: name + (file.relative.isEmpty ? "" : "/" + file.relative))
+                try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.copyItem(at: file.url, to: dest)
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `swift test --filter "CatalogTests|BundledTests"`
+Expected: `✔ Test run with 12 tests in 2 suites passed`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/LiftCore/Recipes/Catalog.swift dev-recipes/test-cube dev-recipes/shared/substitutes.yaml Tests/LiftCoreTests/CatalogTests.swift
-git commit -m "feat(core): recipe catalog, git sources, substitute registry; Test Cube recipe
+git add Sources/LiftCore/Recipes/Catalog.swift Sources/LiftCore/Recipes/Bundled.swift dev-recipes/test-cube dev-recipes/shared/substitutes.yaml \
+  Tests/LiftCoreTests/CatalogTests.swift Tests/LiftCoreTests/BundledTests.swift
+git commit -m "feat(core): recipe catalog, bundled-recipes sync, git sources, substitute registry; Test Cube recipe
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
 
 ---
 
-### Task 9: Installer
+### Task 10: Installer
 
 **Files:**
 - Create: `Sources/LiftCore/Installer/Installer.swift`
 - Test: `Tests/LiftCoreTests/InstallerTests.swift`
 
 **Interfaces:**
-- Consumes: `CommandRunner`, `ShellCommand`, `ToolPaths` (Task 4); `CatalogEntry`, `Substitute`, `ShimConfig` (Task 8); `Recipe`, `RecipeLoad` (Task 3); `LogFile` (Task 1); the `lift_worker --check` CLI (Task 2).
+- Consumes: `CommandRunner`, `ShellCommand`, `ToolPaths` (Task 4); `WeightProblem` (Task 8); `CatalogEntry`, `Substitute`, `ShimConfig` (Task 9); `Recipe`, `RecipeLoad` (Task 3); `LogFile` (Task 1); the `lift_worker --check` CLI (Task 2).
 - Produces:
-  - `enum ModelStatus: Codable, Equatable { notInstalled, installing, installed(commit: String?), updateAvailable(installedCommit:recipeCommit:), installFailed(command: String, exitCode: Int32), unsupported(reason: String) }`.
+  - `enum ModelStatus: Codable, Equatable { notInstalled, installing(phase: String), installed(commit: String?), updateAvailable(installedCommit:recipeCommit:), installFailed(command: String, exitCode: Int32), unsupported(reason: String), weightsMissing([WeightProblem]), weightsCorrupt([WeightProblem]) }`. The engine sets `installing` and the weights cases (Task 11).
   - `struct UpstreamStatus: Codable, Equatable { pin: String?, head: String, commitsAhead: Int? }`.
-  - `struct Installer(runner:models:workerRuntime:tools:toolEnvironment:hfToken:)`. Paths: `dir(_ id) -> URL`, `logURL(_:)`, `venvPython(_:) -> String`, `installedRecipeDir(_:)`, `shimURL(_:)`. Methods: `status(id:source:pin:) -> ModelStatus`, `installedRecipe(_:) -> Recipe?`, `preflight(_ entry:) throws -> (registry:, shim:)` (unsupported, git/uv, gated weights without a token, disk space, unknown substitutes → `LiftError.prerequisite`), `install(_ entry:, pin: String?, onLine:) async throws`, `workerConfig(_ recipe:, maxConcurrent:, heartbeat:) -> String` (the lift_worker JSON argument), `workerEnvironment(_ recipe:) -> [String: String]`, `static cachedWeights(_:) -> [URL]` (the `models--org--name` folders in the HF hub cache), `uninstall(_ id:, deleteWeights: [URL]) throws`, and `checkUpstream(_ recipe:, pin:) async throws -> UpstreamStatus`.
-  - Install order: delete the old `repo venv recipe state.json shim.json install.log` → `git clone --filter=blob:none <repo> repo` → `git -C repo checkout --quiet <pin>` (or `mkdir repo` when there's no repo) → `uv venv --python <py> venv` → each `install:` step and then each substitute's install commands as `/bin/sh -c` in `models/<id>/` with the venv active → if `shim`, `uv pip install <shared>/lift_shim` and the `.pth` one-liner → copy the recipe folder to `models/<id>/recipe/` and write `shim.json` → `venv/bin/python -m lift_worker --check …` → write `state.json`. Every command is logged as `$ <display>` followed by its output.
+  - `struct Installer(runner:models:workerRuntime:tools:toolEnvironment:hfToken:hfHub:)`.
+    - Paths: `dir(_ id) -> URL`, `logURL(_:)`, `venvPython(_:) -> String`, `installedRecipeDir(_:)`, `shimURL(_:)`.
+    - `status(id:source:pin:) -> ModelStatus` and `installedRecipe(_:) -> Recipe?`.
+    - `preflight(_ entry:) throws -> (registry:, shim: ShimConfig?)`: unsupported, git/uv, `brew:` without native brew, gated weights without a token, disk space and bad substitutes all give `LiftError.prerequisite`.
+    - `install(_ entry:, pin: String?, onLine:) async throws`.
+    - `workerConfig(_ recipe:, maxConcurrent:, heartbeat:) -> String`: the lift_worker JSON argument.
+    - `workerEnvironment(_ recipe:) -> [String: String]`.
+    - `downloadWeights(_ recipe:, onLine:) async throws`: `<venv>/bin/hf download <repo> --revision <rev>` per weight, appended to `install.log`. Without `hf` in the venv, or with gated weights and no token, it throws `.prerequisite`.
+    - `uninstall(_ id) throws`: removes only `models/<id>/`.
+    - `checkUpstream(_ recipe:, pin:) async throws -> UpstreamStatus`.
+  - Install order: delete the old `repo venv recipe state.json shim.json install.log` (all Lift's own) → `brew install <recipe.brew>` with the native brew → `git clone --filter=blob:none <repo> repo` → `git -C repo checkout --quiet <pin>` (or `mkdir repo` when there's no repo) → `uv venv --python <py> venv` → each `install:` step and then each substitute's install commands as `/bin/sh -c` in `models/<id>/` with the venv active → with a shim, `uv pip install <shared>/lift_shim` and the `.pth` one-liner → copy the recipe folder to `models/<id>/recipe/` and write `shim.json` → `venv/bin/python -m lift_worker --check …` → write `state.json`. Every command is logged as `$ <display>` followed by its output.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3595,9 +4479,10 @@ import Testing
         return CatalogEntry(recipe: recipe, source: "test", directory: folder, shared: shared)
     }
 
-    func installer(_ runner: FakeRunner, token: String? = "hf_x") throws -> Installer {
+    func installer(_ runner: FakeRunner, token: String? = "hf_x", brew: String? = "/brew/bin/brew") throws -> Installer {
         Installer(runner: runner, models: try Fixtures.tempDir(), workerRuntime: URL(filePath: "/lift/runtime"),
-                  tools: ToolPaths(brew: nil, git: "/bin/git", uv: "/bin/uv"), toolEnvironment: ["PATH": "/bin"], hfToken: { token })
+                  tools: ToolPaths(brew: brew, git: "/bin/git", uv: "/bin/uv"), toolEnvironment: ["PATH": "/bin"],
+                  hfToken: { token }, hfHub: URL(filePath: "/hf/hub"))
     }
 
     @Test func runsEveryStepInOrderAndMarksInstalled() async throws {
@@ -3607,6 +4492,7 @@ import Testing
         let m = inst.dir("pixal3d").path
         try await inst.install(entry, pin: nil, onLine: { _ in })
         #expect(runner.displays == [
+            "/brew/bin/brew install libusb",
             "/bin/git clone --filter=blob:none https://github.com/TencentARC/Pixal3D \(m)/repo",
             "/bin/git -C \(m)/repo checkout --quiet f7cf38429b0bd264f1995f0f8743a88b1c728b94",
             "/bin/uv venv --python 3.11 \(m)/venv",
@@ -3615,10 +4501,12 @@ import Testing
             "\(m)/venv/bin/python -c import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])",
             "\(m)/venv/bin/python -m lift_worker --check \(inst.workerConfig(entry.recipe, maxConcurrent: 1, heartbeat: 2))",
         ])
-        let step = runner.commands[3]
+        let step = runner.commands[4]
         #expect(step.environment["VIRTUAL_ENV"] == "\(m)/venv" && step.environment["PATH"] == "\(m)/venv/bin:/bin" && step.workingDirectory == m)
-        #expect(runner.commands[6].environment["LIFT_SHIM"] == #"{"aliases":{},"env":{},"standins":["flash_attn"]}"#)
-        #expect(runner.commands[6].environment["PYTHONPATH"] == "/lift/runtime")
+        let smoke = runner.commands[7].environment
+        #expect(smoke["LIFT_SHIM"] == #"{"aliases":{},"env":{"ATTN_BACKEND":"sdpa"},"patches":["transformers_fa2_to_sdpa"],"standins":["flash_attn"]}"#)
+        #expect(smoke["PYTHONPATH"] == "/lift/runtime" && smoke["HF_HUB_CACHE"] == "/hf/hub" && smoke["HF_TOKEN"] == "hf_x")
+        #expect(smoke["DYLD_FALLBACK_LIBRARY_PATH"] == "/brew/lib:/usr/lib")  // native brew only, never /usr/local
         #expect(inst.status(id: "pixal3d", source: entry, pin: nil) == .installed(commit: entry.recipe.commit))
         #expect(inst.installedRecipe("pixal3d") == entry.recipe)
         let log = try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8)
@@ -3637,6 +4525,12 @@ import Testing
         #expect(inst.installedRecipe("pixal3d") == nil)
         #expect(try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8).contains("error: no matching distribution"))
         #expect(!runner.displays.contains { $0.contains("lift_worker --check") })
+    }
+
+    @Test func brewPackagesNeedNativeHomebrew() async throws {
+        let runner = FakeRunner()
+        await #expect(throws: LiftError.self) { try await self.installer(runner, brew: nil).install(try self.source(), pin: nil, onLine: { _ in }) }
+        #expect(runner.commands.isEmpty)
     }
 
     @Test func gatedWeightsNeedAToken() async throws {
@@ -3676,7 +4570,7 @@ import Testing
         let inst = try installer(runner)
         let pin = String(repeating: "c", count: 40)
         try await inst.install(try source(), pin: pin, onLine: { _ in })
-        #expect(runner.displays[1].hasSuffix("checkout --quiet \(pin)"))
+        #expect(runner.displays[2].hasSuffix("checkout --quiet \(pin)"))
     }
 
     @Test func checkUpstreamCountsCommitsPastThePin() async throws {
@@ -3692,11 +4586,28 @@ import Testing
         #expect(try await inst.checkUpstream(entry.recipe, pin: nil) == UpstreamStatus(pin: entry.recipe.commit, head: head, commitsAhead: 7))
     }
 
-    @Test func uninstallRemovesTheModelFolder() async throws {
+    @Test func downloadWeightsRunsHFFromTheVenv() async throws {
+        let runner = FakeRunner()
+        let entry = try source()
+        let inst = try installer(runner)
+        await #expect(throws: LiftError.self) { try await inst.downloadWeights(entry.recipe, onLine: { _ in }) }  // no hf yet
+        let bin = inst.dir("pixal3d").appending(path: "venv/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try "#!/bin/sh\n".write(to: bin.appending(path: "hf"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appending(path: "hf").path)
+        try await inst.downloadWeights(entry.recipe, onLine: { _ in })
+        #expect(runner.displays == ["\(bin.path)/hf download TencentARC/Pixal3D --revision main",
+                                    "\(bin.path)/hf download briaai/RMBG-2.0 --revision 1f3e2a7c"])
+        #expect(runner.commands.allSatisfy { $0.environment["HF_HUB_CACHE"] == "/hf/hub" && $0.environment["HF_TOKEN"] == "hf_x" })
+        #expect(try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8).contains("$ \(bin.path)/hf download TencentARC/Pixal3D"))
+        await #expect(throws: LiftError.self) { try await self.installer(runner, token: nil).downloadWeights(entry.recipe, onLine: { _ in }) }
+    }
+
+    @Test func uninstallRemovesOnlyTheModelFolder() async throws {
         let entry = try source()
         let inst = try installer(FakeRunner())
         try await inst.install(entry, pin: nil, onLine: { _ in })
-        try inst.uninstall("pixal3d", deleteWeights: [])
+        try inst.uninstall("pixal3d")
         #expect(!FileManager.default.fileExists(atPath: inst.dir("pixal3d").path))
         #expect(inst.status(id: "pixal3d", source: entry, pin: nil) == .notInstalled)
     }
@@ -3715,15 +4626,19 @@ Expected: FAIL with `cannot find 'Installer' in scope`.
 import CryptoKit
 import Foundation
 
-/// Where a model stands (spec §6). `installing` is tracked in memory by the engine.
+/// Where a model stands (spec §6). `installing` and the weights states come from the engine.
 public enum ModelStatus: Codable, Sendable, Equatable {
     case notInstalled
-    case installing
+    /// `phase`: installing, downloading weights, verifying weights.
+    case installing(phase: String)
     case installed(commit: String?)
     /// Installed, but the source recipe (or its pin) changed since. Reinstall to update.
     case updateAvailable(installedCommit: String?, recipeCommit: String?)
     case installFailed(command: String, exitCode: Int32)
     case unsupported(reason: String)
+    /// Installed, but the last weights check found files missing / wrong.
+    case weightsMissing([WeightProblem])
+    case weightsCorrupt([WeightProblem])
 }
 
 /// `models/<id>/state.json`: written last, so a partial install never counts as installed.
@@ -3744,7 +4659,9 @@ public struct UpstreamStatus: Codable, Sendable, Equatable {
     public var commitsAhead: Int?
 }
 
-/// clone pinned commit → uv venv → install steps → substitutes → lift_shim + .pth → recipe copy → smoke import.
+/// brew prerequisites → clone pinned commit → uv venv → install steps → substitutes → lift_shim + .pth →
+/// recipe copy → smoke import; then, separately, weight downloads. Only ever writes inside `models/<id>/`
+/// (and, through `brew` and `hf download`, Homebrew's prefix and the Hugging Face cache).
 public struct Installer: Sendable {
     let runner: any CommandRunner
     let models: URL
@@ -3752,16 +4669,21 @@ public struct Installer: Sendable {
     let tools: ToolPaths
     let toolEnvironment: [String: String]
     let hfToken: @Sendable () -> String?
+    let hfHub: URL
 
     public init(runner: any CommandRunner, models: URL, workerRuntime: URL, tools: ToolPaths,
-                toolEnvironment: [String: String], hfToken: @escaping @Sendable () -> String?) {
+                toolEnvironment: [String: String], hfToken: @escaping @Sendable () -> String?, hfHub: URL) {
         self.runner = runner
         self.models = models
         self.workerRuntime = workerRuntime
         self.tools = tools
         self.toolEnvironment = toolEnvironment
         self.hfToken = hfToken
+        self.hfHub = hfHub
     }
+
+    /// Native Homebrew's prefix (`/opt/homebrew`), from the detected brew.
+    var brewPrefix: String? { tools.brew.map { URL(filePath: $0).deletingLastPathComponent().deletingLastPathComponent().path } }
 
     public func dir(_ id: String) -> URL { models.appending(path: id) }
     public func logURL(_ id: String) -> URL { dir(id).appending(path: "install.log") }
@@ -3813,14 +4735,17 @@ public struct Installer: Sendable {
         return recipe
     }
 
-    /// Checks that run before anything is touched: platform, tools, Hugging Face token, disk space,
-    /// substitutes. Returns the substitute registry and the `LIFT_SHIM` config.
-    public func preflight(_ entry: CatalogEntry) throws -> (registry: [String: Substitute], shim: ShimConfig) {
+    /// Checks that run before anything is touched: platform, tools, native brew for `brew:` packages,
+    /// Hugging Face token, disk space, substitutes. Returns the substitute registry and the `LIFT_SHIM` config.
+    public func preflight(_ entry: CatalogEntry) throws -> (registry: [String: Substitute], shim: ShimConfig?) {
         let recipe = entry.recipe
         guard recipe.platform.status == .supported else {
             throw LiftError.prerequisite("\(recipe.name) is unsupported on this Mac: \(recipe.platform.reason ?? "")")
         }
         guard tools.git != nil, tools.uv != nil else { throw LiftError.prerequisite("git and uv are required; run system_install_prereqs") }
+        if !recipe.brew.isEmpty && tools.brew == nil {
+            throw LiftError.prerequisite("\(recipe.name) needs native Homebrew for \(recipe.brew.joined(separator: ", ")); run system_install_prereqs")
+        }
         if recipe.weights.contains(where: \.gated) && hfToken() == nil {
             let gated = recipe.weights.filter(\.gated).map(\.repo).joined(separator: ", ")
             throw LiftError.prerequisite("\(recipe.name) needs a Hugging Face token with access to \(gated)")
@@ -3832,7 +4757,7 @@ public struct Installer: Sendable {
             throw LiftError.prerequisite("not enough disk space: \(recipe.resources.diskGB) GB needed, \(Double(free) / 1e9) GB free")
         }
         let registry = try Substitute.registry(shared: entry.shared)
-        return (registry, try ShimConfig.build(substitutes: recipe.substitutes, registry: registry))
+        return (registry, try ShimConfig.build(recipe, registry: registry))
     }
 
     /// Runs the whole install. Every command and its output go to `install.log` and `onLine`.
@@ -3861,6 +4786,10 @@ public struct Installer: Sendable {
         let repo = root.appending(path: "repo").path
 
         var steps: [ShellCommand] = []
+        if !recipe.brew.isEmpty, let brew = tools.brew {
+            // First, so install steps that build native code can link against them.
+            steps.append(ShellCommand(brew, ["install"] + recipe.brew, environment: toolEnvironment))
+        }
         if let url = recipe.repo, let commit {
             steps.append(ShellCommand(git, ["clone", "--filter=blob:none", url, repo], environment: toolEnvironment))
             steps.append(ShellCommand(git, ["-C", repo, "checkout", "--quiet", commit], environment: toolEnvironment))
@@ -3870,7 +4799,7 @@ public struct Installer: Sendable {
         steps.append(ShellCommand(uv, ["venv", "--python", recipe.python, venv], environment: toolEnvironment, workingDirectory: root.path))
         let shell = recipe.install + recipe.substitutes.flatMap { registry[$0]?.install ?? [] }
         steps += shell.map { ShellCommand("/bin/sh", ["-c", $0], environment: env, workingDirectory: root.path) }
-        if recipe.shim {
+        if shimConfig != nil {
             steps.append(ShellCommand(uv, ["pip", "install", entry.shared.appending(path: "lift_shim").path], environment: env, workingDirectory: root.path))
             steps.append(ShellCommand(venvPython(recipe.id), ["-c", "import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])"], environment: env))
         }
@@ -3881,7 +4810,7 @@ public struct Installer: Sendable {
                 try await runner.check(step, onLine: lines)
             }
             try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
-            if recipe.shim { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
+            if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
             let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, maxConcurrent: 1, heartbeat: 2)],
                                      environment: workerEnvironment(recipe), workingDirectory: repo)
             lines("$ \(smoke.display)")
@@ -3921,7 +4850,8 @@ public struct Installer: Sendable {
     }
 
     /// Environment for a worker or the smoke check: lift_worker on PYTHONPATH, the venv first on PATH,
-    /// `LIFT_SHIM` when the recipe uses the shim, and the Hugging Face token when there is one.
+    /// `LIFT_SHIM` when the recipe uses the shim, native brew's `lib/` for `brew:` packages, the
+    /// Hugging Face cache and token.
     public func workerEnvironment(_ recipe: Recipe) -> [String: String] {
         let venv = dir(recipe.id).appending(path: "venv").path
         var env = toolEnvironment
@@ -3930,24 +4860,38 @@ public struct Installer: Sendable {
         env["PYTHONPATH"] = workerRuntime.path
         env["PYTHONUNBUFFERED"] = "1"
         if let shim = try? String(contentsOf: shimURL(recipe.id), encoding: .utf8) { env["LIFT_SHIM"] = shim }
+        // dyld's default fallback includes /usr/local/lib, where a Rosetta Homebrew keeps x86_64 libraries.
+        if !recipe.brew.isEmpty, let prefix = brewPrefix { env["DYLD_FALLBACK_LIBRARY_PATH"] = "\(prefix)/lib:/usr/lib" }
+        env["HF_HUB_CACHE"] = hfHub.path
         if let token = hfToken() { env["HF_TOKEN"] = token }
         return env
     }
 
-    /// Hugging Face cache folders for these weight repos that exist on disk.
-    public static func cachedWeights(_ weights: [Recipe.Weight]) -> [URL] {
-        let env = ProcessInfo.processInfo.environment
-        let hub = env["HF_HUB_CACHE"].map { URL(filePath: $0) }
-            ?? env["HF_HOME"].map { URL(filePath: $0).appending(path: "hub") }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".cache/huggingface/hub")
-        return weights.map { hub.appending(path: "models--" + $0.repo.replacingOccurrences(of: "/", with: "--")) }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    /// `hf download <repo> --revision <rev>` for each weight, from the model's venv into the shared cache.
+    /// Appends to `install.log`. Only ever started by an explicit user action (spec §6).
+    public func downloadWeights(_ recipe: Recipe, onLine: @escaping @Sendable (String) -> Void) async throws {
+        let hf = dir(recipe.id).appending(path: "venv/bin/hf").path
+        guard FileManager.default.isExecutableFile(atPath: hf) else {
+            throw LiftError.prerequisite("\(recipe.id)'s venv has no `hf` (huggingface_hub); add it to the recipe's install steps")
+        }
+        if recipe.weights.contains(where: \.gated) && hfToken() == nil {
+            throw LiftError.prerequisite("\(recipe.name) has gated weights; set a Hugging Face token first")
+        }
+        let log = try LogFile(logURL(recipe.id))
+        let lines: @Sendable (String) -> Void = { line in
+            log.write(line)
+            onLine(line)
+        }
+        for w in recipe.weights {
+            let command = ShellCommand(hf, ["download", w.repo, "--revision", w.revision], environment: workerEnvironment(recipe))
+            lines("$ \(command.display)")
+            try await runner.check(command, onLine: lines)
+        }
     }
 
-    /// Removes `models/<id>/`, and the listed weight caches if given.
-    public func uninstall(_ id: String, deleteWeights: [URL]) throws {
+    /// Removes `models/<id>/` — Lift's own folder. Weights in the shared Hugging Face cache are never deleted.
+    public func uninstall(_ id: String) throws {
         try? FileManager.default.removeItem(at: dir(id))
-        for url in deleteWeights { try FileManager.default.removeItem(at: url) }
     }
 
     /// `git ls-remote` for upstream HEAD; when installed, also fetch and count commits past the pin.
@@ -3970,20 +4914,20 @@ public struct Installer: Sendable {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `swift test --filter InstallerTests`
-Expected: `✔ Test run with 9 tests in 1 suite passed`.
+Expected: `✔ Test run with 11 tests in 1 suite passed`. Every command goes to `FakeRunner`, so nothing is cloned, installed or downloaded.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add Sources/LiftCore/Installer Tests/LiftCoreTests/InstallerTests.swift
-git commit -m "feat(core): installer — pinned clone, uv venv, steps, substitutes, lift_shim, smoke check
+git commit -m "feat(core): installer — brew deps, pinned clone, uv venv, steps, substitutes, lift_shim, smoke check, hf download
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
 
 ---
 
-### Task 10: The `Lift` engine and the job and queue commands
+### Task 11: The `Lift` engine and the job and queue commands
 
 **Files:**
 - Create: `Sources/LiftCore/Engine/Lift.swift`
@@ -3991,15 +4935,27 @@ Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 - Test: `Tests/LiftCoreTests/EngineTests.swift`
 
 **Interfaces:**
-- Consumes: everything from Tasks 1 and 3–9: `Store`, `Settings`, `Catalog`, `Installer`, `Toolchain`, `Scheduler`, `Estimates`, `Memory`, `WorkerProcess`, `WorkerOp/WorkerEvent`, `Tail`, `LogFile`.
+- Consumes: everything from Tasks 1 and 3–10: `Store`, `Settings`, `Catalog`, `RecipeSourceDir`, `BundledRecipes`, `Installer`, `Toolchain`, `Scheduler`, `Estimates`, `Memory`, `WeightsVerifier`, `WeightsMetadata`, `HFHubAPI`, `WorkerProcess`, `WorkerOp/WorkerEvent`, `Tail`, `LogFile`. Test fixtures: `FakeMetadata` (Task 8), `FakeRunner` (Task 4).
 - Produces:
-  - `struct LiftConfig(workdir:workerRuntime:devRecipes: = nil, runner: = SubprocessRunner(), toolSearchDirs: = nil, housekeepingInterval: = .seconds(15), heartbeatSeconds: = 2, systemFree: = Memory.systemFree, hfToken: = { $HF_TOKEN })`.
-  - `actor Lift` with `nonisolated let config`, `nonisolated let store`, `static func open(_ config: LiftConfig) async throws -> Lift` (creates the workdir, migrates, marks jobs/steps left `loading`/`running` as `interrupted` and open worker rows as ended with `app_restart`, scans recipes, starts housekeeping, ticks) and `close()` (kills workers; their jobs become `interrupted` on the next open). The dev source (`"dev"` → `config.devRecipes`) comes first when `settings.devRecipes` or `LIFT_DEV_RECIPES=1` is set; then come `settings.recipeSources` under `<workdir>/recipes/<name>`.
-  - Internal API for Task 11: `settings`, `catalog`, `installed`, `installing`, `staleSources`, `workers: [String: WorkerHandle]`, `installer`, `toolchain`, `tools`, `jobsDir`, `recipesDir`, `sourceDirs`, `rescan()`, `status(_ id) -> ModelStatus`, `recipe(_ id) -> Recipe?`, `saveSettings(_:) throws`, `tick()`, `spawn(_ recipe:, baseline:) -> WorkerHandle`, `stop(_ w: WorkerHandle)` (shutdown, then SIGKILL after 5 s). `WorkerHandle` has `id, recipe, process, capacity, pid, ready, stopping, assigned: [jobId: Assignment], baseline, lastFootprint, idleSince, freeCapacity, reserved`.
+  - `struct LiftConfig(workdir:workerRuntime:bundledRecipes:runner: = SubprocessRunner(), toolSearchDirs: = nil, homebrewPrefix: = "/opt/homebrew", rosettaPrefix: = "/usr/local", housekeepingInterval: = .seconds(15), heartbeatSeconds: = 2, systemFree: = Memory.systemFree, hfToken: = { $HF_TOKEN }, hfHub: = HFHubAPI.defaultCache, weightsMetadata: (any WeightsMetadata)? = nil → HFHubAPI(token:), weightsRecheckInterval: = .seconds(30))`.
+  - `actor Lift` with `nonisolated let config` and `nonisolated let store`.
+  - `static func open(_ config: LiftConfig) async throws -> Lift` does, in order:
+    1. Create the workdir and migrate.
+    2. Mark jobs/steps left `loading`/`running` as `interrupted`, and open worker rows as ended with `app_restart`.
+    3. `BundledRecipes.sync()`: the first-launch copy, or the refresh after an app update.
+    4. Detect the toolchain (async), scan recipes, start housekeeping, tick.
+    It clones and downloads nothing.
+  - `close()` kills workers. Their jobs become `interrupted` on the next open.
+  - Sources come in the order `bundled-local` (if it exists), `bundled`, then `settings.recipeSources` under `<workdir>/recipes/<name>`. Developer recipes are shown only when `settings.devRecipes` or `LIFT_DEV_RECIPES=1` is set.
+  - Weights gating:
+    - A `.ready` candidate whose recipe has weights, and which has no worker with free capacity and no `verifiedForStart` entry, becomes `.weightsUnverified`. A background `WeightsVerifier.verify` then starts, at most once per `weightsRecheckInterval`.
+    - `verified(_ id, _ report)` records the report and, on `ok`, inserts into `verifiedForStart`. `spawn` removes the entry.
+    - `status` maps a missing/corrupt report on an installed model to `weightsMissing`/`weightsCorrupt`.
+  - Internal API for Task 12: `settings`, `catalog`, `installed`, `installing`, `phases`, `staleSources`, `bundleSync`, `weightReports`, `verifying`, `verifiedForStart`, `workers: [String: WorkerHandle]`, `installer`, `verifier`, `bundled`, `toolchain`, `tools`, `jobsDir`, `recipesDir`, `sourceDirs: [RecipeSourceDir]`, `developerMode`, `rescan()`, `status(_ id) -> ModelStatus`, `recipe(_ id) -> Recipe?`, `saveSettings(_:) throws`, `tick()`, `verified(_:_:)`, `spawn(_ recipe:, baseline:) -> WorkerHandle`, `stop(_ w: WorkerHandle)` (shutdown, then SIGKILL after 5 s). `WorkerHandle` has `id, recipe, process, capacity, pid, ready, stopping, assigned: [jobId: Assignment], baseline, lastFootprint, idleSince, freeCapacity, reserved`.
   - `enum Gated<T: Sendable> { done(T), confirmationRequired(String) }` with `value: T?` and `impact: String?`.
   - Requests: `StepRequest(recipe:task:inputs: = [:], settings: = [:])`, `SubmitRequest(steps:title: = nil, priority: = .normal, source: = .ui)`, `JobFilter(states:recipe:modality:text:)`, `MoveTarget { before(String), after(String), index(Int) }`, `InterruptedAction { requeue, discard }`. Views: `JobView { job, steps, outputs }`, `QueueStatus { paused, maxSlots, running, jobs }`.
   - Commands: `jobsSubmit(_:) throws -> JobView`, `jobsGet(_:)`, `jobsList(_: JobFilter = .init()) -> [JobView]` (newest first), `nonisolated jobsWait(_ id:, timeout: Duration, onProgress:) async throws -> JobView`, `jobsCancel(_:confirm:) -> Gated<JobView>`, `jobsRetry(_:settings:) -> JobView`, `jobsMove(_:to:) -> JobView`, `jobsSetPriority(_:_:) -> JobView`, `jobsForceStart(_:confirm:) -> Gated<JobView>`, `jobsDelete(_:confirm:) -> Gated<Bool>`, `jobsListInterrupted() -> [JobView]`, `jobsResolveInterrupted(ids: = nil, action:) -> [JobView]`, `queueStatus()`, `queuePause()`, `queueResume() -> QueueStatus`.
-  - Test helper: `Fixtures.lift(_ runner: FakeRunner = .init(), workdir: URL? = nil, searchDirs: [String] = []) async throws -> Lift`. It seeds `dev_recipes = true`, fixes system free memory at 64 GB and sets housekeeping to 1 h.
+  - Test helper: `Fixtures.lift(_ runner: FakeRunner = .init(), workdir: URL? = nil, searchDirs: [String] = [], bundle: URL = devRecipes, metadata: FakeMetadata = .init(), hub: URL? = nil) async throws -> Lift`. It seeds `dev_recipes = true` and uses nonexistent Homebrew prefixes, a temp HF cache, `hfToken` nil, fixed system free memory of 64 GB, 1 h housekeeping and a 100 ms weights recheck.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4011,9 +4967,11 @@ import Testing
 @testable import LiftCore
 
 extension Fixtures {
-    /// A Lift on a fresh workdir with the dev recipes on, a fake runner and fixed system memory.
-    /// Nothing is installed, so jobs wait with `model_not_installed`.
-    static func lift(_ runner: FakeRunner = FakeRunner(), workdir: URL? = nil, searchDirs: [String] = []) async throws -> Lift {
+    /// A Lift on a fresh workdir with developer recipes shown, a fake runner, fake weights metadata,
+    /// a temp Hugging Face cache, no Homebrew and fixed system memory. Nothing real is installed or
+    /// downloaded, so jobs wait with `model_not_installed`.
+    static func lift(_ runner: FakeRunner = FakeRunner(), workdir: URL? = nil, searchDirs: [String] = [],
+                     bundle: URL = devRecipes, metadata: FakeMetadata = FakeMetadata(), hub: URL? = nil) async throws -> Lift {
         let workdir = try workdir ?? tempDir()
         let seed = try Store(path: workdir.appending(path: "lift.sqlite").path)
         try await seed.db.write { db in
@@ -4021,9 +4979,12 @@ extension Fixtures {
             s.devRecipes = true
             try s.save(db)
         }
-        return try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: workerRuntime, devRecipes: devRecipes,
-                                              runner: runner, toolSearchDirs: searchDirs, housekeepingInterval: .seconds(3600),
-                                              systemFree: { 64_000_000_000 }))
+        return try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: workerRuntime, bundledRecipes: bundle,
+                                              runner: runner, toolSearchDirs: searchDirs,
+                                              homebrewPrefix: "/nonexistent-homebrew", rosettaPrefix: "/nonexistent-rosetta",
+                                              housekeepingInterval: .seconds(3600), systemFree: { 64_000_000_000 },
+                                              hfToken: { nil }, hfHub: try hub ?? tempDir(), weightsMetadata: metadata,
+                                              weightsRecheckInterval: .milliseconds(100)))
     }
 }
 
@@ -4099,6 +5060,17 @@ extension Fixtures {
         #expect(!FileManager.default.fileExists(atPath: lift.config.workdir.appending(path: "jobs/\(id)").path))
     }
 
+    @Test func firstOpenCopiesTheBundledRecipes() async throws {
+        let lift = try await Fixtures.lift()
+        let copy = lift.config.workdir.appending(path: "recipes/bundled")
+        #expect(FileManager.default.fileExists(atPath: copy.appending(path: "test-cube/recipe.yaml").path))
+        #expect(FileManager.default.fileExists(atPath: copy.appending(path: "shared/lift_shim/pyproject.toml").path))
+        #expect(!FileManager.default.fileExists(atPath: copy.appending(path: "shared/lift_shim/.venv").path))
+        #expect(await lift.bundleSync.copied)
+        #expect(await lift.sourceDirs.map(\.name) == ["bundled"])
+        #expect(!FileManager.default.fileExists(atPath: lift.config.workdir.appending(path: "models").path))  // nothing installed
+    }
+
     @Test func forceStartNeedsConfirm() async throws {
         let lift = try await Fixtures.lift()
         let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).job.id
@@ -4143,7 +5115,7 @@ Expected: FAIL with `cannot find type 'Lift' in scope` and `cannot find 'SubmitR
 
 - [ ] **Step 3: Implement the engine**
 
-`Sources/LiftCore/Engine/Lift.swift`. The state machine follows spec §7: `queued → waiting(reason) → loading → running → succeeded | failed | cancelled | interrupted`. The job mirrors its current step. A finished non-final step moves the job to the next step and puts it back to `queued`. A worker that exits fails every active step on it with the last 20 stderr lines, unless it was stopped on purpose or the app is closing.
+`Sources/LiftCore/Engine/Lift.swift`. The state machine follows spec §7: `queued → waiting(reason) → loading → running → succeeded | failed | cancelled | interrupted`. The job mirrors its current step. A finished non-final step moves the job to the next step and puts it back to `queued`. A worker that exits fails every active step on it with the last 20 stderr lines, unless it was stopped on purpose or the app is closing. `tick()` keeps the GRDB read to the estimates and does readiness and verification requests on the actor.
 ```swift
 import Foundation
 import GRDB
@@ -4153,29 +5125,46 @@ public struct LiftConfig: Sendable {
     public var workdir: URL
     /// The folder that contains the `lift_worker` package (`python/lift_worker/src` in this repo; the app bundle later).
     public var workerRuntime: URL
-    /// The repo's `dev-recipes/`, used as the first source when the `dev_recipes` setting or `LIFT_DEV_RECIPES=1` is on.
-    public var devRecipes: URL?
+    /// The recipes built into the app: this repo's `dev-recipes/` (recipes + `shared/`). Copied to
+    /// `<workdir>/recipes/bundled/` on open; only read here.
+    public var bundledRecipes: URL
     public var runner: any CommandRunner
     public var toolSearchDirs: [String]?
+    public var homebrewPrefix: String
+    public var rosettaPrefix: String
     public var housekeepingInterval: Duration
     public var heartbeatSeconds: Double
     public var systemFree: @Sendable () -> Int
     /// Plan 2 replaces this with the Keychain.
     public var hfToken: @Sendable () -> String?
+    /// The shared Hugging Face cache `hf download` writes to and verification reads.
+    public var hfHub: URL
+    /// Weight file lists (the Hugging Face API by default; a fake in tests).
+    public var weightsMetadata: any WeightsMetadata
+    /// How long a failed or unknown weights check waits before a waiting job triggers another.
+    public var weightsRecheckInterval: Duration
 
-    public init(workdir: URL, workerRuntime: URL, devRecipes: URL? = nil, runner: any CommandRunner = SubprocessRunner(),
-                toolSearchDirs: [String]? = nil, housekeepingInterval: Duration = .seconds(15), heartbeatSeconds: Double = 2,
+    public init(workdir: URL, workerRuntime: URL, bundledRecipes: URL, runner: any CommandRunner = SubprocessRunner(),
+                toolSearchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local",
+                housekeepingInterval: Duration = .seconds(15), heartbeatSeconds: Double = 2,
                 systemFree: @escaping @Sendable () -> Int = Memory.systemFree,
-                hfToken: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["HF_TOKEN"] }) {
+                hfToken: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["HF_TOKEN"] },
+                hfHub: URL = HFHubAPI.defaultCache, weightsMetadata: (any WeightsMetadata)? = nil,
+                weightsRecheckInterval: Duration = .seconds(30)) {
         self.workdir = workdir
         self.workerRuntime = workerRuntime
-        self.devRecipes = devRecipes
+        self.bundledRecipes = bundledRecipes
         self.runner = runner
         self.toolSearchDirs = toolSearchDirs
+        self.homebrewPrefix = homebrewPrefix
+        self.rosettaPrefix = rosettaPrefix
         self.housekeepingInterval = housekeepingInterval
         self.heartbeatSeconds = heartbeatSeconds
         self.systemFree = systemFree
         self.hfToken = hfToken
+        self.hfHub = hfHub
+        self.weightsMetadata = weightsMetadata ?? HFHubAPI(token: hfToken)
+        self.weightsRecheckInterval = weightsRecheckInterval
     }
 }
 
@@ -4232,7 +5221,16 @@ public actor Lift {
     /// Installed recipes, read from each model's own copy.
     var installed: [String: Recipe] = [:]
     var installing: [String: Task<Void, Never>] = [:]
+    /// What an install or download is doing now: installing, downloading weights, verifying weights.
+    var phases: [String: String] = [:]
     var staleSources: Set<String> = []
+    /// The last bundled-recipes sync (first launch or app update).
+    var bundleSync = BundledRecipes.Result(copied: false, keptLocal: [])
+    var weightReports: [String: WeightsReport] = [:]
+    var verifying: Set<String> = []
+    /// Recipes whose weights passed a check since their last worker start (spec §6: before every start).
+    var verifiedForStart: Set<String> = []
+    var lastVerify: [String: ContinuousClock.Instant] = [:]
     var workers: [String: WorkerHandle] = [:]
     var logs: [String: LogFile] = [:]
     var housekeeping: Task<Void, Never>?
@@ -4243,10 +5241,14 @@ public actor Lift {
 
     var installer: Installer {
         Installer(runner: config.runner, models: config.workdir.appending(path: "models"), workerRuntime: config.workerRuntime,
-                  tools: tools, toolEnvironment: toolchain.environment, hfToken: config.hfToken)
+                  tools: tools, toolEnvironment: toolchain.environment, hfToken: config.hfToken, hfHub: config.hfHub)
     }
 
-    /// Opens the workdir, marks jobs left loading/running as interrupted, scans recipes and starts scheduling.
+    var verifier: WeightsVerifier { WeightsVerifier(metadata: config.weightsMetadata, hub: config.hfHub, store: store) }
+    var bundled: BundledRecipes { BundledRecipes(bundle: config.bundledRecipes, recipes: recipesDir) }
+
+    /// Opens the workdir, copies or refreshes the bundled recipes, marks jobs left loading/running as
+    /// interrupted, detects the toolchain, scans recipes and starts scheduling. Nothing is cloned or downloaded.
     public static func open(_ config: LiftConfig) async throws -> Lift {
         let lift = try Lift(config: config)
         await lift.start()
@@ -4257,13 +5259,16 @@ public actor Lift {
         self.config = config
         try FileManager.default.createDirectory(at: config.workdir, withIntermediateDirectories: true)
         store = try Store(path: config.workdir.appending(path: "lift.sqlite").path)
-        toolchain = Toolchain(runner: config.runner, searchDirs: config.toolSearchDirs)
-        tools = toolchain.detect()
+        toolchain = Toolchain(runner: config.runner, searchDirs: config.toolSearchDirs,
+                              homebrewPrefix: config.homebrewPrefix, rosettaPrefix: config.rosettaPrefix)
+        tools = ToolPaths()
         settings = try store.db.read { try Settings.load($0) }
         try store.db.write { try Self.recoverInterrupted($0) }
+        bundleSync = try BundledRecipes(bundle: config.bundledRecipes, recipes: config.workdir.appending(path: "recipes")).sync()
     }
 
-    func start() {
+    func start() async {
+        tools = await toolchain.detect()
         rescan()
         let interval = config.housekeepingInterval
         housekeeping = Task { [weak self] in
@@ -4300,25 +5305,37 @@ public actor Lift {
 
     // MARK: recipes and models
 
-    var sourceDirs: [(name: String, dir: URL)] {
-        var out: [(name: String, dir: URL)] = []
-        if let dev = config.devRecipes, settings.devRecipes || ProcessInfo.processInfo.environment["LIFT_DEV_RECIPES"] == "1" {
-            out.append(("dev", dev))
+    /// `bundled-local` (your edited bundled recipes) first, then `bundled`, then git sources in the order added.
+    var sourceDirs: [RecipeSourceDir] {
+        let b = bundled
+        var out: [RecipeSourceDir] = []
+        if FileManager.default.fileExists(atPath: b.localDir.path) {
+            let localShared = b.localDir.appending(path: "shared")
+            out.append(RecipeSourceDir(name: "bundled-local", dir: b.localDir,
+                                       shared: FileManager.default.fileExists(atPath: localShared.path) ? localShared : b.copyDir.appending(path: "shared")))
         }
-        out += settings.recipeSources.map { ($0.name, recipesDir.appending(path: $0.name)) }
+        out.append(RecipeSourceDir(name: "bundled", dir: b.copyDir))
+        out += settings.recipeSources.map { RecipeSourceDir(name: $0.name, dir: recipesDir.appending(path: $0.name)) }
         return out
     }
 
+    var developerMode: Bool { settings.devRecipes || ProcessInfo.processInfo.environment["LIFT_DEV_RECIPES"] == "1" }
+
     func rescan() {
-        catalog = Catalog.scan(sourceDirs)
+        catalog = Catalog.scan(sourceDirs, includeDeveloper: developerMode)
         let models = config.workdir.appending(path: "models")
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: models.path)) ?? []
         installed = Dictionary(uniqueKeysWithValues: ids.compactMap { id in installer.installedRecipe(id).map { (id, $0) } })
     }
 
     func status(_ id: String) -> ModelStatus {
-        if installing[id] != nil { return .installing }
-        return installer.status(id: id, source: catalog.entries[id], pin: settings.pinOverrides[id])
+        if installing[id] != nil { return .installing(phase: phases[id] ?? "installing") }
+        let base = installer.status(id: id, source: catalog.entries[id], pin: settings.pinOverrides[id])
+        switch (base, weightReports[id]?.state) {
+        case (.installed, .missing?), (.updateAvailable, .missing?): return .weightsMissing(weightReports[id]!.problems)
+        case (.installed, .corrupt?), (.updateAvailable, .corrupt?): return .weightsCorrupt(weightReports[id]!.problems)
+        default: return base
+        }
     }
 
     /// The recipe a job step is validated and run against: the installed copy, else the source.
@@ -4327,7 +5344,7 @@ public actor Lift {
     func readiness(_ id: String) -> ModelReadiness {
         switch status(id) {
         case .installing: .installing
-        case .installed, .updateAvailable: installed[id] == nil ? .notInstalled : .ready
+        case .installed, .updateAvailable, .weightsMissing, .weightsCorrupt: installed[id] == nil ? .notInstalled : .ready
         case .unsupported: .unsupported
         case .notInstalled, .installFailed: .notInstalled
         }
@@ -4348,13 +5365,21 @@ public actor Lift {
                 try JobRecord.filter([JobState.queued.rawValue, JobState.waiting.rawValue].contains(Column("state"))).fetchAll(db)
                     .compactMap { job in try StepRecord.fetchOne(db, key: ["jobId": job.id, "idx": job.currentStep]).map { (job, $0) } }
             }
-            let candidates = try store.db.read { db in
-                try pending.map { job, step in
-                    let recipe = self.recipe(step.recipe)
-                    let need = try recipe.map { try Estimates.need(db, recipe: $0, task: step.task, settings: step.settings) } ?? MemoryNeed(load: 0, job: 0)
-                    return Candidate(jobId: job.id, recipe: step.recipe, priority: job.priority, position: job.position, createdAt: job.createdAt,
-                                     forceStart: job.forceStart, model: recipe == nil ? .notInstalled : readiness(step.recipe), need: need)
+            let recipes = pending.map { recipe($0.1.recipe) }
+            let needs = try store.db.read { db in
+                try zip(pending, recipes).map { pair, recipe in
+                    try recipe.map { try Estimates.need(db, recipe: $0, task: pair.1.task, settings: pair.1.settings) } ?? MemoryNeed(load: 0, job: 0)
                 }
+            }
+            var candidates: [Candidate] = []
+            for (i, (job, step)) in pending.enumerated() {
+                var model = recipes[i] == nil ? ModelReadiness.notInstalled : readiness(step.recipe)
+                if model == .ready, let r = installed[step.recipe], needsVerifiedStart(r) {
+                    model = .weightsUnverified
+                    requestVerify(r)
+                }
+                candidates.append(Candidate(jobId: job.id, recipe: step.recipe, priority: job.priority, position: job.position,
+                                            createdAt: job.createdAt, forceStart: job.forceStart, model: model, need: needs[i]))
             }
             let input = SchedulerInput(
                 candidates: candidates,
@@ -4422,7 +5447,35 @@ public actor Lift {
         if worker.ready { try send(worker, job: job.id) }
     }
 
+    // MARK: weights
+
+    /// A step would start a new worker for a recipe with weights that haven't passed a check since its last start.
+    func needsVerifiedStart(_ r: Recipe) -> Bool {
+        !r.weights.isEmpty && !verifiedForStart.contains(r.id) && !workers.values.contains { $0.recipe.id == r.id && $0.freeCapacity > 0 }
+    }
+
+    /// Starts a background weights check, at most once per `weightsRecheckInterval` per recipe.
+    func requestVerify(_ r: Recipe) {
+        if verifying.contains(r.id) { return }
+        if let last = lastVerify[r.id], ContinuousClock.now - last < config.weightsRecheckInterval { return }
+        verifying.insert(r.id)
+        lastVerify[r.id] = .now
+        let verifier = self.verifier
+        Task {
+            let report = try? await verifier.verify(r)
+            await self.verified(r.id, report)
+        }
+    }
+
+    func verified(_ id: String, _ report: WeightsReport?) {
+        verifying.remove(id)
+        weightReports[id] = report ?? WeightsReport(state: .unknown, problems: [], checkedAt: Date(), hashedFiles: 0, note: "the check itself failed")
+        if report?.state == .ok { verifiedForStart.insert(id) } else { verifiedForStart.remove(id) }
+        tick()
+    }
+
     func spawn(_ recipe: Recipe, baseline: Int) -> WorkerHandle {
+        verifiedForStart.remove(recipe.id)
         let id = "w-" + UUID().uuidString.prefix(8).lowercased()
         let process = WorkerProcess(
             executable: installer.venvPython(recipe.id),
@@ -4985,33 +6038,49 @@ public struct QueueStatus: Codable, Sendable, Equatable {
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `swift test --filter EngineTests`
-Expected: `✔ Test run with 7 tests in 1 suite passed`. No worker is spawned because nothing is installed, so jobs wait with `model_not_installed`.
+Expected: `✔ Test run with 8 tests in 1 suite passed`. No worker is spawned because nothing is installed, so jobs wait with `model_not_installed`. `firstOpenCopiesTheBundledRecipes` checks that the copy has no `.venv` and that `models/` doesn't exist.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add Sources/LiftCore/Engine Sources/LiftCore/Commands Tests/LiftCoreTests/EngineTests.swift
-git commit -m "feat(core): Lift engine — state machine, scheduling loop, workers; job and queue commands
+git commit -m "feat(core): Lift engine — bundled sync, state machine, scheduling, weights gating, workers; job and queue commands
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
 
 ---
 
-### Task 11: Model, recipe, worker, resource, settings and system commands
+### Task 12: Model, recipe, worker, resource, settings and system commands
 
 **Files:**
 - Create: `Sources/LiftCore/Commands/ModelCommands.swift`, `Sources/LiftCore/Commands/SystemCommands.swift`
 - Test: `Tests/LiftCoreTests/CommandTests.swift`
 
 **Interfaces:**
-- Consumes: the internal `Lift` API and `Gated` (Task 10); `Installer` (Task 9); `RecipeSources`, `CatalogProblem` (Task 8); `Toolchain`, `Prereqs` (Task 4); `Estimates` (Task 6).
+- Consumes: the internal `Lift` API and `Gated` (Task 11); `Installer` (Task 10); `RecipeSources`, `CatalogProblem`, `BundledRecipes.Result` (Task 9); `WeightsReport`, `WeightsVerifier` (Task 8); `Toolchain`, `Prereqs` (Task 4); `Estimates` (Task 6). Test fixtures: `FakeMetadata`, `writeHFCache`, `sha256Hex` (Task 8).
 - Produces:
-  - Views: `ModelView { id, name, source?, status, recipe, pin?, diskBytes? }`, `RecipeSourcesView { sources: [Source{name, url, stale, recipes}], problems }`, `WorkerView { id, recipe, pid, ready, jobs, maxConcurrent, footprintBytes, reservedBytes }`, `EstimateView { recipe, task, keyValues, loadBytes?, jobBytes? }`, `ResourcesView { maxSlots, budgetBytes, reservedBytes, systemFreeBytes, workers, estimates }`.
-  - Models: `modelsList() -> [ModelView]`, `modelsGet(_:) -> ModelView` (with disk size), `modelsInstall(_:confirm:wait: = false) async throws -> Gated<ModelView>` (runs the preflight synchronously, stops idle workers, installs in the background), `modelsReinstall(_:confirm:wait:)`, `modelsSetPin(_:commit:confirm:wait:)`, `modelsCheckUpstream(_:) async throws -> UpstreamStatus`, `modelsUninstall(_:deleteWeights:confirm:) -> Gated<ModelView?>`, `modelsInstallLog(_:) -> String`.
+  - Views:
+    - `ModelView { id, name, source?, status, recipe, pin?, diskBytes?, weights: WeightsReport? }`
+    - `RecipeSourcesView { sources: [Source{name, url, stale, recipes}], problems, bundle: BundledRecipes.Result }`
+    - `WorkerView { id, recipe, pid, ready, jobs, maxConcurrent, footprintBytes, reservedBytes }`
+    - `EstimateView { recipe, task, keyValues, loadBytes?, jobBytes? }`
+    - `ResourcesView { maxSlots, budgetBytes, reservedBytes, systemFreeBytes, workers, estimates }`
+  - Models:
+    - `modelsList() -> [ModelView]` and `modelsGet(_:) -> ModelView` (with disk size).
+    - `modelsInstall(_:confirm:wait: = false, downloadWeights: = true) async throws -> Gated<ModelView>` is Install/Use. The impact lists the brew packages and the weight repos with their total size from the API. It runs the preflight synchronously, stops idle workers, then in the background installs → downloads weights → verifies.
+    - `modelsReinstall(_:confirm:wait:)` and `modelsSetPin(_:commit:confirm:wait:)`.
+    - `modelsDownloadWeights(_:confirm:wait:) async throws -> Gated<ModelView>` (installed models only) and `modelsVerifyWeights(_:) async throws -> WeightsReport`.
+    - `modelsCheckUpstream(_:) async throws -> UpstreamStatus`.
+    - `modelsUninstall(_:confirm:) -> Gated<ModelView?>`: `models/<id>/` only, never the HF cache.
+    - `modelsInstallLog(_:) -> String`.
   - Recipes: `recipesListSources() -> RecipeSourcesView`, `recipesAddSource(_ url:confirm:) async throws -> Gated<RecipeSourcesView>`, `recipesRemoveSource(_ name:confirm:) -> Gated<RecipeSourcesView>`, `recipesRefresh(_ name: String? = nil) async throws -> RecipeSourcesView`.
-  - Workers and resources: `workersList() -> [WorkerView]`, `workersLoad(_ recipe:) -> WorkerView`, `workersUnload(_ id:confirm:) -> Gated<[WorkerView]>`, `resourcesGet() -> ResourcesView`, `resourcesSet(maxSlots:memoryBudgetGB:idleUnloadMinutes:) -> Settings`.
-  - Settings and system: `settingsGet() -> Settings`, `settingsSet(_ key:, _ value: SettingValue) -> Settings` (only `Settings.userKeys`), `systemPrereqs(checkMetal: = false) async -> Prereqs`, `systemInstallPrereqs(metal: = false, confirm: = false, onLine:) async throws -> Gated<Prereqs>`.
+  - Workers and resources: `workersList() -> [WorkerView]`, `workersLoad(_ recipe:) async throws -> WorkerView` (verifies weights first), `workersUnload(_ id:confirm:) -> Gated<[WorkerView]>`, `resourcesGet() -> ResourcesView`, `resourcesSet(maxSlots:memoryBudgetGB:idleUnloadMinutes:) -> Settings`.
+  - Settings and system:
+    - `settingsGet() -> Settings` and `settingsSet(_ key:, _ value: SettingValue) -> Settings` (only `Settings.userKeys`; changing `dev_recipes` rescans).
+    - `systemPrereqs(checkMetal: = false) async -> Prereqs`.
+    - `systemInstallPrereqs(metal: = false, confirm: = false, onLine:) async throws -> Gated<Prereqs>`. It installs native Homebrew (leaving a Rosetta one as it is), then `brew install` for the missing git/uv, then the Metal Toolchain.
+  - Test helper: `weightedBundle() throws -> URL`, a bundle with the Test Cube plus `weighted` (the cube with one `org/weights` weight).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5021,20 +6090,60 @@ import Foundation
 import Testing
 @testable import LiftCore
 
+/// A bundle with the Test Cube and `weighted`, a copy of it that needs one Hugging Face file.
+func weightedBundle() throws -> URL {
+    let b = try Fixtures.tempDir()
+    try FileManager.default.copyItem(at: Fixtures.devRecipes.appending(path: "test-cube"), to: b.appending(path: "test-cube"))
+    try FileManager.default.createDirectory(at: b.appending(path: "shared"), withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: Fixtures.devRecipes.appending(path: "shared/substitutes.yaml"), to: b.appending(path: "shared/substitutes.yaml"))
+    let cube = try String(contentsOf: Fixtures.devRecipes.appending(path: "test-cube/recipe.yaml"), encoding: .utf8)
+    _ = try writeRecipe(cube.replacingOccurrences(of: "id: test-cube", with: "id: weighted")
+        .replacingOccurrences(of: "resources:", with: "weights:\n  - { repo: org/weights }\nresources:"), id: "weighted", in: b)
+    return b
+}
+
 @Suite struct CommandTests {
+    let commit = String(repeating: "c", count: 40)
+
     @Test func riskyCommandsChangeNothingWithoutConfirm() async throws {
         let runner = FakeRunner()
-        let lift = try await Fixtures.lift(runner)
+        let meta = FakeMetadata()
+        meta.set("org/weights", .success(RepoSnapshot(repo: "org/weights", revision: "main", commit: commit, files: [RemoteFile(path: "w.bin", size: 2048)])))
+        let lift = try await Fixtures.lift(runner, bundle: try weightedBundle(), metadata: meta)
         #expect(try await lift.modelsInstall("test-cube").impact?.contains("Test Cube") == true)
+        let weighted = try #require(try await lift.modelsInstall("weighted").impact)
+        #expect(weighted.contains("org/weights@main") && weighted.contains("2 KB"))
         #expect(try await lift.modelsReinstall("test-cube").impact != nil)
         #expect(try await lift.modelsSetPin("test-cube", commit: String(repeating: "a", count: 40)).impact != nil)
         #expect(try await lift.settingsGet().pinOverrides.isEmpty)
-        #expect(try await lift.modelsUninstall("test-cube").impact != nil)
+        #expect(try await lift.modelsUninstall("test-cube").impact?.contains("stay in the Hugging Face cache") == true)
         #expect(try await lift.recipesAddSource("https://example.com/recipes.git").impact != nil)
-        #expect(try await lift.recipesListSources().sources.map(\.name) == ["dev"])
-        #expect(try await lift.systemInstallPrereqs().impact?.contains("install Homebrew") == true)
+        #expect(try await lift.recipesListSources().sources.map(\.name) == ["bundled"])
+        #expect(try await lift.systemInstallPrereqs().impact?.contains("install native Homebrew") == true)
         #expect(runner.commands.isEmpty)
         #expect(try await lift.modelsGet("test-cube").status == .notInstalled)
+        await #expect(throws: LiftError.self) { try await lift.modelsDownloadWeights("weighted") }  // not installed
+    }
+
+    @Test func jobsWaitForVerifiedWeights() async throws {
+        let meta = FakeMetadata()
+        let hub = try Fixtures.tempDir()
+        meta.set("org/weights", .success(RepoSnapshot(repo: "org/weights", revision: "main", commit: commit,
+                                                      files: [RemoteFile(path: "w.bin", size: 3, sha256: sha256Hex(Data([1, 2, 3])))])))
+        let lift = try await Fixtures.lift(FakeRunner(), searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path],
+                                           bundle: try weightedBundle(), metadata: meta, hub: hub)
+        // A fake install: no `hf` in the venv, so the download fails and verification finds the file missing.
+        let model = try await lift.modelsInstall("weighted", confirm: true, wait: true).value
+        #expect(model?.status == .weightsMissing([WeightProblem(repo: "org/weights", path: "w.bin", issue: .missing)]))
+        #expect(try await lift.modelsDownloadWeights("weighted").impact?.contains("org/weights@main") == true)
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "weighted", task: "image_to_3d",
+                                                                              inputs: ["image": try Fixtures.image()])])).job.id
+        #expect(try await eventually { try await lift.jobsGet(id).job.waitReason == .weightsUnverified })
+        try writeHFCache(hub: hub, repo: "org/weights", commit: commit, files: ["w.bin": Data([1, 2, 3])], lfs: ["w.bin"])  // the user downloaded it
+        #expect(try await lift.modelsVerifyWeights("weighted").state == .ok)
+        #expect(try await lift.modelsGet("weighted").status == .installed(commit: nil))
+        // Verified, so the job leaves the queue. (Its fake venv can't start a worker; it then fails, which is fine here.)
+        #expect(try await eventually { try await lift.jobsGet(id).job.state != .waiting })
     }
 
     @Test func settingsAndResources() async throws {
@@ -5044,6 +6153,14 @@ import Testing
         await #expect(throws: LiftError.self) { try await lift.resourcesSet(idleUnloadMinutes: -1) }
         await #expect(throws: LiftError.self) { try await lift.settingsSet("max_slots", .string("many")) }
         #expect(try await lift.settingsGet().maxSlots == 2)
+    }
+
+    @Test func developerRecipesNeedTheSetting() async throws {
+        let lift = try await Fixtures.lift()
+        _ = try await lift.settingsSet("dev_recipes", .bool(false))
+        #expect(try await lift.modelsList().isEmpty)  // the Test Cube is the only bundled recipe so far, and it's hidden
+        _ = try await lift.settingsSet("dev_recipes", .bool(true))
+        #expect(try await lift.modelsList().map(\.id) == ["test-cube"])
     }
 
     @Test func failedRefreshMarksTheSourceStaleAndKeepsItsRecipes() async throws {
@@ -5092,18 +6209,22 @@ public struct ModelView: Codable, Sendable, Equatable {
     public var pin: String?
     /// Size of `models/<id>/`; only filled by `models_get`.
     public var diskBytes: Int?
+    /// The last weights check this session (nil until one ran).
+    public var weights: WeightsReport?
 }
 
 public struct RecipeSourcesView: Codable, Sendable, Equatable {
     public struct Source: Codable, Sendable, Equatable {
         public var name: String
-        /// A git URL, or the local folder for the dev source.
+        /// A git URL, or the local folder for `bundled` / `bundled-local`.
         public var url: String
         public var stale: Bool
         public var recipes: [String]
     }
     public var sources: [Source]
     public var problems: [CatalogProblem]
+    /// What the last bundled-recipes sync did (first launch / app update), including edits kept as `bundled-local`.
+    public var bundle: BundledRecipes.Result
 }
 
 extension Lift {
@@ -5112,7 +6233,7 @@ extension Lift {
         guard let recipe = installed[id] ?? entry?.recipe else { throw LiftError.notFound("model \(id)") }
         return ModelView(id: id, name: recipe.name, source: entry?.source, status: status(id), recipe: recipe,
                          pin: settings.pinOverrides[id] ?? entry?.recipe.commit ?? recipe.commit,
-                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil)
+                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil, weights: weightReports[id])
     }
 
     static func diskSize(_ url: URL) -> Int {
@@ -5132,26 +6253,37 @@ extension Lift {
 
     public func modelsGet(_ id: String) throws -> ModelView { try modelView(id, disk: true) }
 
-    /// Starts an install in the background (or waits for it with `wait`). Progress goes to `install.log`.
-    public func modelsInstall(_ id: String, confirm: Bool = false, wait: Bool = false) async throws -> Gated<ModelView> {
+    /// "Using" a model (spec §4): in the background, install it, then download its weights (unless
+    /// `downloadWeights` is false) and verify them. `wait` waits for all of it. Progress goes to `install.log`.
+    public func modelsInstall(_ id: String, confirm: Bool = false, wait: Bool = false, downloadWeights: Bool = true) async throws -> Gated<ModelView> {
         guard let entry = catalog.entries[id] else { throw LiftError.notFound("recipe \(id)") }
         guard installing[id] == nil else { throw LiftError.invalidState("\(id) is already installing") }
         let r = entry.recipe
         guard confirm else {
             let pin = settings.pinOverrides[id] ?? r.commit
-            let weights = r.weights.map { $0.repo + ($0.gated ? " (gated)" : "") }
             var text = "Installs \(r.name): "
             if let repo = r.repo { text += "clones \(repo) at \(pin ?? "?"), " }
+            if !r.brew.isEmpty { text += "installs \(r.brew.joined(separator: ", ")) with Homebrew, " }
             text += "creates a Python \(r.python) environment and runs \(r.install.count) install steps (about \(r.resources.diskGB.formatted()) GB)."
-            if !weights.isEmpty { text += " Upstream downloads these weights on first run: \(weights.joined(separator: ", "))." }
+            if downloadWeights && !r.weights.isEmpty { text += " " + (await weightsImpact(r)) }
             return .confirmationRequired(text)
         }
-        let installer = self.installer
         _ = try installer.preflight(entry)  // prerequisite problems reach the caller, not just the log
         try stopWorkers(of: id)
+        let installer = self.installer, verifier = self.verifier
         let pin = settings.pinOverrides[id]
+        phases[id] = "installing"
         let task = Task {
-            _ = try? await installer.install(entry, pin: pin, onLine: { _ in })
+            let ok = (try? await installer.install(entry, pin: pin, onLine: { _ in })) != nil
+            await self.rescan()
+            if ok && downloadWeights && !r.weights.isEmpty {
+                await self.setPhase(id, "downloading weights")
+                try? await installer.downloadWeights(r, onLine: { _ in })
+            }
+            if ok {
+                await self.setPhase(id, "verifying weights")
+                await self.verified(id, try? await verifier.verify(r))
+            }
             await self.installFinished(id)
         }
         installing[id] = task
@@ -5160,10 +6292,51 @@ extension Lift {
         return .done(try modelView(id))
     }
 
+    /// "Downloads N GB from Hugging Face: repo@rev (gated), …", sizes from the API (unknown when offline).
+    func weightsImpact(_ r: Recipe) async -> String {
+        let size = await verifier.totalBytes(r).map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "an unknown amount (offline)"
+        let repos = r.weights.map { "\($0.repo)@\($0.revision)" + ($0.gated ? " (gated)" : "") }
+        return "Downloads \(size) of weights from Hugging Face into the shared cache: \(repos.joined(separator: ", "))."
+    }
+
+    func setPhase(_ id: String, _ phase: String) {
+        phases[id] = phase
+    }
+
     func installFinished(_ id: String) {
         installing[id] = nil
+        phases[id] = nil
         rescan()
         tick()
+    }
+
+    /// Downloads the model's weights with `hf download` from its venv, then verifies them.
+    public func modelsDownloadWeights(_ id: String, confirm: Bool = false, wait: Bool = false) async throws -> Gated<ModelView> {
+        guard let r = installed[id] else { throw LiftError.invalidState("\(id) is not installed") }
+        guard installing[id] == nil else { throw LiftError.invalidState("\(id) is busy: \(phases[id] ?? "installing")") }
+        guard !r.weights.isEmpty else { return .done(try modelView(id)) }
+        guard confirm else { return .confirmationRequired(await weightsImpact(r)) }
+        let installer = self.installer, verifier = self.verifier
+        phases[id] = "downloading weights"
+        let task = Task {
+            try? await installer.downloadWeights(r, onLine: { _ in })
+            await self.setPhase(id, "verifying weights")
+            await self.verified(id, try? await verifier.verify(r))
+            await self.installFinished(id)
+        }
+        installing[id] = task
+        tick()
+        if wait { await task.value }
+        return .done(try modelView(id))
+    }
+
+    /// Checks the model's weights now. A passing check also counts for the next worker start.
+    public func modelsVerifyWeights(_ id: String) async throws -> WeightsReport {
+        guard let r = recipe(id) else { throw LiftError.notFound("model \(id)") }
+        verifying.insert(id)
+        let report = try await verifier.verify(r)
+        verified(id, report)
+        return report
     }
 
     public func modelsReinstall(_ id: String, confirm: Bool = false, wait: Bool = false) async throws -> Gated<ModelView> {
@@ -5189,18 +6362,18 @@ extension Lift {
         return try await installer.checkUpstream(recipe, pin: settings.pinOverrides[id])
     }
 
-    /// Removes `models/<id>/`. Weights in the shared Hugging Face cache are kept unless `deleteWeights`.
-    public func modelsUninstall(_ id: String, deleteWeights: Bool = false, confirm: Bool = false) throws -> Gated<ModelView?> {
+    /// Removes `models/<id>/` only. Weights in the shared Hugging Face cache are never deleted: Lift
+    /// doesn't delete files it didn't create, and the cache is shared with other tools.
+    public func modelsUninstall(_ id: String, confirm: Bool = false) throws -> Gated<ModelView?> {
         guard let recipe = recipe(id) else { throw LiftError.notFound("model \(id)") }
         guard installing[id] == nil else { throw LiftError.invalidState("\(id) is installing") }
-        let weights = deleteWeights ? Installer.cachedWeights(recipe.weights) : []
         guard confirm else {
-            var text = "Removes \(recipe.name)'s repo and environment (models/\(id))."
-            text += weights.isEmpty ? " Downloaded weights are kept." : " Also deletes these cached weights: \(weights.map(\.lastPathComponent).joined(separator: ", "))."
-            return .confirmationRequired(text)
+            return .confirmationRequired("Removes \(recipe.name)'s repo and environment (models/\(id)). Downloaded weights stay in the Hugging Face cache.")
         }
         try stopWorkers(of: id)
-        try installer.uninstall(id, deleteWeights: weights)
+        try installer.uninstall(id)
+        weightReports[id] = nil
+        verifiedForStart.remove(id)
         rescan()
         tick()
         return .done(try? modelView(id))
@@ -5222,12 +6395,12 @@ extension Lift {
 
     public func recipesListSources() -> RecipeSourcesView {
         RecipeSourcesView(
-            sources: sourceDirs.map { name, dir in
-                let url = settings.recipeSources.first { $0.name == name }?.url ?? dir.path
-                return .init(name: name, url: url, stale: staleSources.contains(name),
-                             recipes: catalog.entries.values.filter { $0.source == name }.map(\.recipe.id).sorted())
+            sources: sourceDirs.map { s in
+                let url = settings.recipeSources.first { $0.name == s.name }?.url ?? s.dir.path
+                return .init(name: s.name, url: url, stale: staleSources.contains(s.name),
+                             recipes: catalog.entries.values.filter { $0.source == s.name }.map(\.recipe.id).sorted())
             },
-            problems: catalog.problems)
+            problems: catalog.problems, bundle: bundleSync)
     }
 
     public func recipesAddSource(_ url: String, confirm: Bool = false) async throws -> Gated<RecipeSourcesView> {
@@ -5235,7 +6408,7 @@ extension Lift {
         guard !settings.recipeSources.contains(where: { $0.url == url }) else { throw LiftError.invalidState("source \(url) is already added") }
         guard confirm else { return .confirmationRequired("Clones \(url) into recipes/ and lists its recipes. Recipes run code from that repo on this Mac.") }
         guard let git = tools.git else { throw LiftError.prerequisite("git is required; run system_install_prereqs") }
-        let name = RecipeSources.name(for: url, taken: Set(settings.recipeSources.map(\.name) + ["dev"]))
+        let name = RecipeSources.name(for: url, taken: Set(settings.recipeSources.map(\.name) + ["bundled", "bundled-local"]))
         try await RecipeSources(runner: config.runner, root: recipesDir, git: git, environment: toolchain.environment).clone(url: url, name: name)
         var s = settings
         s.recipeSources.append(RecipeSourceRef(name: name, url: url))
@@ -5316,10 +6489,16 @@ extension Lift {
         }
     }
 
-    /// Starts a worker ahead of time. The caller decides; no budget check.
-    public func workersLoad(_ recipe: String) throws -> WorkerView {
+    /// Starts a worker ahead of time. The caller decides; no budget check. Weights are verified first.
+    public func workersLoad(_ recipe: String) async throws -> WorkerView {
         guard let r = installed[recipe] else { throw LiftError.invalidState("\(recipe) is not installed") }
-        let need = try store.db.read { try Estimates.need($0, recipe: r, task: r.tasks[0].id, settings: [:]) }
+        if !r.weights.isEmpty {
+            let report = try await modelsVerifyWeights(recipe)
+            guard report.state == .ok else {
+                throw LiftError.invalidState("\(recipe)'s weights are \(report.state.rawValue): " + report.problems.map(\.path).joined(separator: ", "))
+            }
+        }
+        let need = try await store.db.read { try Estimates.need($0, recipe: r, task: r.tasks[0].id, settings: [:]) }
         let w = spawn(r, baseline: need.load)
         w.idleSince = .now
         return workersList().first { $0.id == w.id }!
@@ -5376,24 +6555,31 @@ extension Lift {
     // MARK: system
 
     public func systemPrereqs(checkMetal: Bool = false) async -> Prereqs {
-        tools = toolchain.detect()
+        tools = await toolchain.detect()
         return Prereqs(tools: tools, metalToolchain: checkMetal ? await toolchain.metalToolchainInstalled() : nil)
     }
 
-    /// Installs what's missing: Homebrew (system password dialog), then `brew install git uv`, and the
-    /// Metal Toolchain when `metal` is set. Output streams to `onLine`.
+    /// Installs what's missing: native Homebrew (one administrator dialog, spec §6), then
+    /// `brew install git uv` with it, and the Metal Toolchain when `metal` is set. Output streams to `onLine`.
     public func systemInstallPrereqs(metal: Bool = false, confirm: Bool = false,
                                      onLine: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Gated<Prereqs> {
         let now = await systemPrereqs(checkMetal: metal)
         var plan: [String] = []
-        if now.tools.brew == nil { plan.append("install Homebrew (asks for your admin password)") }
+        if now.tools.brew == nil {
+            var step = "install native Homebrew in \(toolchain.homebrewPrefix) (one administrator dialog)"
+            if let rosetta = now.tools.rosettaBrew { step += "; the Intel Homebrew at \(rosetta) is left as it is" }
+            plan.append(step)
+        }
         let formulae = [("git", now.tools.git), ("uv", now.tools.uv)].filter { $0.1 == nil }.map(\.0)
         if !formulae.isEmpty { plan.append("brew install \(formulae.joined(separator: " "))") }
         if metal && now.metalToolchain == false { plan.append("xcodebuild -downloadComponent MetalToolchain") }
         guard !plan.isEmpty else { return .done(now) }
         guard confirm else { return .confirmationRequired("Will " + plan.joined(separator: ", then ") + ".") }
         if now.tools.brew == nil {
-            try await toolchain.installHomebrew(askpass: try Toolchain.writeAskpass(in: config.workdir), onLine: onLine)
+            guard let git = now.tools.git else {
+                throw LiftError.prerequisite("installing Homebrew needs git: install the Xcode Command Line Tools (xcode-select --install)")
+            }
+            try await toolchain.installHomebrew(git: git, onLine: onLine)
         }
         if !formulae.isEmpty { try await toolchain.brewInstall(formulae, onLine: onLine) }
         if metal && now.metalToolchain == false { try await toolchain.installMetalToolchain(onLine: onLine) }
@@ -5405,31 +6591,31 @@ extension Lift {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `swift test --filter CommandTests`
-Expected: `✔ Test run with 4 tests in 1 suite passed`. `riskyCommandsChangeNothingWithoutConfirm` also checks that `FakeRunner` recorded no commands.
+Expected: `✔ Test run with 6 tests in 1 suite passed`. `riskyCommandsChangeNothingWithoutConfirm` also checks that `FakeRunner` recorded no commands. In `jobsWaitForVerifiedWeights`, the job waits `weights_unverified` until the test writes the file into the temp HF cache and verifies.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add Sources/LiftCore/Commands Tests/LiftCoreTests/CommandTests.swift
-git commit -m "feat(core): model, recipe, worker, resource, settings and system commands with confirm gates
+git commit -m "feat(core): model (incl. weights download/verify), recipe, worker, resource, settings and system commands
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
 
 ---
 
-### Task 12: Test Cube integration (real install, real workers)
+### Task 13: Test Cube integration (real install, real workers)
 
 **Files:**
 - Test: `Tests/LiftCoreTests/CubeIntegrationTests.swift`
 
 **Interfaces:**
-- Consumes: every public command (Tasks 10–11), `dev-recipes/test-cube` (Task 8), `python/lift_worker` (Task 2) and `dev-recipes/shared/lift_shim` (Plan 0).
+- Consumes: every public command (Tasks 11–12), `dev-recipes/test-cube` (Task 9), `python/lift_worker` (Task 2), `dev-recipes/shared/lift_shim` (Plan 0) and `FakeMetadata` (Task 8).
 - Produces: nothing new. This task proves the pieces work together. If a test fails, fix the engine code, not the assertion, and say in the commit message what changed.
 
 - [ ] **Step 1: Write the integration tests**
 
-`Tests/LiftCoreTests/CubeIntegrationTests.swift`. One `Lift` per suite installs Test Cube for real: a uv venv, `trimesh` and `numpy`, and `lift_shim` with its `.pth`. The tests then run against live workers:
+`Tests/LiftCoreTests/CubeIntegrationTests.swift`. One `Lift` per suite installs Test Cube for real: a uv venv, `trimesh` and `numpy`, and `lift_shim` with its `.pth`, all in a temp workdir. That's the product path for this recipe, with no Homebrew and no weights. The tests then run against live workers:
 ```swift
 import Foundation
 import Synchronization
@@ -5443,8 +6629,12 @@ actor CubeFixture {
 
     func get() async throws -> Lift {
         if let lift { return lift }
-        let lift = try await Lift.open(LiftConfig(workdir: try Fixtures.tempDir(), workerRuntime: Fixtures.workerRuntime, devRecipes: Fixtures.devRecipes,
-                                                  housekeepingInterval: .milliseconds(200), heartbeatSeconds: 0.2))
+        // Real uv, git and Python; no Homebrew, a temp Hugging Face cache and fake weights metadata
+        // (the Test Cube has no weights, and nothing in the tests may download any).
+        let lift = try await Lift.open(LiftConfig(workdir: try Fixtures.tempDir(), workerRuntime: Fixtures.workerRuntime, bundledRecipes: Fixtures.devRecipes,
+                                                  homebrewPrefix: "/nonexistent-homebrew", rosettaPrefix: "/nonexistent-rosetta",
+                                                  housekeepingInterval: .milliseconds(200), heartbeatSeconds: 0.2,
+                                                  hfToken: { nil }, hfHub: try Fixtures.tempDir(), weightsMetadata: FakeMetadata()))
         _ = try await lift.settingsSet("dev_recipes", .bool(true))
         let model = try await lift.modelsInstall("test-cube", confirm: true, wait: true).value
         guard case .installed = model?.status else {
@@ -5487,6 +6677,7 @@ actor CubeFixture {
         #expect(seen.withLock { $0.contains(.running) })
         let log = try String(contentsOf: lift.config.workdir.appending(path: "jobs/\(id)/log.txt"), encoding: .utf8)
         #expect(log.contains("[Stage] Generating"))
+        #expect(log.contains("shim env: on"))  // lift_shim + .pth + LIFT_SHIM reached the worker
     }
 
     @Test func chainedStepsPassOutputs() async throws {
@@ -5558,26 +6749,26 @@ Expected: `✔ Test run with 9 tests in 1 suite passed`. The first run downloads
 - [ ] **Step 3: Run everything**
 
 Run: `swift test && (cd python/lift_worker && uv run --python 3.11 pytest -q) && (cd dev-recipes/shared/lift_shim && uv run --python 3.11 pytest -q)`
-Expected: `✔ Test run with 84 tests in 15 suites passed`, `22 passed` and `30 passed`.
+Expected: `✔ Test run with 107 tests in 17 suites passed`, `22 passed`, and all `lift_shim` tests passing.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add Tests/LiftCoreTests/CubeIntegrationTests.swift
-git commit -m "test(core): Test Cube integration — install, run, chain, fail, crash, cancel, estimates, idle unload
+git commit -m "test(core): Test Cube integration — install, shim, run, chain, fail, crash, cancel, estimates, idle unload
 
 Claude-Session: https://claude.ai/code/session_01YQaNtMcUoMHe2knND64orw"
 ```
 
 ---
 
-### Task 13: Test CI workflow
+### Task 14: Test CI workflow
 
 **Files:**
 - Create: `.github/workflows/test.yml`
 
 **Interfaces:**
-- Consumes: the commands from Tasks 1–12.
+- Consumes: the commands from Tasks 1–13.
 - Produces: a `test` workflow on push and pull request. It builds LiftCore, runs every Swift test (unit plus Test Cube integration, with no real models and no weights), runs pytest for `lift_shim` and `lift_worker`, and uploads `test-results/`. Plan 3 adds `xcodebuild build` of the app and `lift-mcp` (spec §14) once they exist.
 
 - [ ] **Step 1: Write the workflow**
@@ -5645,7 +6836,7 @@ jobs:
 
 - [ ] **Step 2: Lint it and run its commands locally**
 
-Run: `actionlint .github/workflows/test.yml` (if it's missing: `brew install actionlint`), then:
+Run: `actionlint .github/workflows/test.yml` if actionlint is already installed (don't install it: no manual prerequisite installs), then:
 ```bash
 swift package resolve && swift build --build-tests \
   && mkdir -p test-results && swift test --skip-build --xunit-output test-results/swift.xml \
@@ -5653,7 +6844,7 @@ swift package resolve && swift build --build-tests \
   && (cd python/lift_worker && uv run --python 3.11 pytest -q --junitxml=../../test-results/lift_worker.xml) \
   && ls test-results
 ```
-Expected: actionlint prints nothing. The tests pass as in Task 12, and `test-results/` holds `swift-swift-testing.xml`, `lift_shim.xml` and `lift_worker.xml`.
+Expected: actionlint, if run, prints nothing. The tests pass as in Task 13, and `test-results/` holds `swift-swift-testing.xml`, `lift_shim.xml` and `lift_worker.xml`.
 
 - [ ] **Step 3: Commit**
 
