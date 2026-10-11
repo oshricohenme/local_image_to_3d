@@ -94,6 +94,23 @@ actor CubeFixture {
         #expect(try await run(lift, [try cube()]).job.state == .succeeded)
     }
 
+    @Test func badShimConfigFailsTheWorkerStartWithTheShimError() async throws {
+        let lift = try await CubeFixture.shared.get()
+        for w in await lift.workersList() { _ = try await lift.workersUnload(w.id, confirm: true) }
+        #expect(try await eventually(10) { await lift.workersList().isEmpty })
+        // What a recipe whose shim.patches names an unknown patch puts in LIFT_SHIM. (Installing such a
+        // recipe already fails at the smoke check; this is a config that goes bad after install.)
+        let shim = lift.config.workdir.appending(path: "models/test-cube/shim.json")
+        let good = try String(contentsOf: shim, encoding: .utf8)
+        try #"{"aliases":{},"env":{},"patches":["no_such_patch"],"standins":["flash_attn"]}"#.write(to: shim, atomically: true, encoding: .utf8)
+        defer { try? good.write(to: shim, atomically: true, encoding: .utf8) }
+        let v = try await run(lift, [try cube()])
+        #expect(v.job.state == .failed)
+        let error = v.job.error ?? ""
+        #expect(error.contains("worker exited with code 1"))
+        #expect(error.contains("lift_shim: unknown patch 'no_such_patch'"))  // the stderr tail, not just the exit code
+    }
+
     @Test func learnsMemoryEstimates() async throws {
         let lift = try await CubeFixture.shared.get()
         _ = try await run(lift, [try cube()])
