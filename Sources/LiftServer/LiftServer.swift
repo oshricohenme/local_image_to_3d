@@ -43,7 +43,7 @@ public struct ServerChange: Codable, Sendable, Equatable {
 /// MCP at `/mcp`, all on one port. Owns the server_* commands, which both adapters call.
 public actor LiftServer {
     public struct Configuration: Sendable {
-        /// The LAN token and the Hugging Face token. The app passes `KeychainSecretStore()` (and gives the same
+        /// The LAN token and the Hugging Face token. The app passes `CachedSecretStore(KeychainSecretStore())` (and gives the same
         /// store's `hfTokenReader` to `LiftConfig`); the default keeps tests off the Keychain.
         public var secrets: any SecretStore
         /// nil: the `port` setting (7777 by default), else the next free port after it. 0: any free port (tests).

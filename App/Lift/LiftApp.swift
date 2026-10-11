@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let smokeTest = UserDefaults.standard.bool(forKey: "LiftSmokeTest")
     /// The smoke test skips the launch tools check (`checkPrereqs: nil`), so a Mac or CI runner without native
     /// Homebrew, git or uv still lands on the sidebar: it tests that the app starts, not this Mac's tools.
-    lazy var app = AppModel(secrets: smokeTest ? MemorySecretStore() : KeychainSecretStore(),
+    lazy var app = AppModel(secrets: smokeTest ? MemorySecretStore() : CachedSecretStore(KeychainSecretStore()),
                             checkPrereqs: smokeTest ? nil : AppModel.detectPrereqs)
     var notifier: Notifier?
 
