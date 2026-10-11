@@ -783,6 +783,10 @@ components:
         hashed_files: { type: integer, description: Files hashed in this check; unchanged files reuse cached hashes. }
         metadata_from: { type: string, format: date-time, description: Set when Lift was offline and used the file lists of the last good check. }
         note: { type: string }
+        upstream_moved:
+          type: array
+          items: { type: string }
+          description: Informational, never blocking. A branch or tag that has moved upstream past the downloaded commit.
     UpstreamStatus:
       type: object
       required: [head]

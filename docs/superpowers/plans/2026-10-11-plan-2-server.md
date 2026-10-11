@@ -63,7 +63,7 @@
    - `secrets_set_hf_token` → `LiftServer.secretsSetHFToken`.
    - The app gives LiftCore `LiftConfig(hfToken: secrets.hfTokenReader)`: the stored token, else `$HF_TOKEN`.
    - The LAN token is returned only by `server_set_lan` (enabling) and `server_rotate_token`. `lanToken()` is for the UI.
-8. **Recipes:** only `recipes_list` (spec §4: no sources or URLs). Its `recipes` field is passed through as LiftCore returns it.
+8. **Recipes:** only `recipes_list` (spec §4: no sources or URLs), returning `{recipes: [RecipeListing]}`. `recipesBundleSync()` stays internal: no HTTP route and no MCP tool, because it's a first-launch/app-update fact the UI reads directly.
 9. **`jobs_wait`** defaults to 30 s (at most 3600), below common HTTP client timeouts; `GET /v1/jobs/{id}/wait?timeout_seconds=`.
 10. **MCP notifications.** swift-sdk 0.12.1 sends all server notifications (progress, resource updates) on the session's GET stream. A client that never opens it gets results but no progress, and notifications sent before the stream connects are not replayed.
 11. **Implementation notes that matter.**

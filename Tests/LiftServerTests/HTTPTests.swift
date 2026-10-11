@@ -72,14 +72,15 @@ import Testing
     @Test func badInputIs422WithOneErrorPerField() async throws {
         let (lift, _, base) = try await ServerFixture.shared.get()
         let http = HTTP(base: base)
-        let before = try await lift.jobsList().count
+        // Other suites submit to the same server meanwhile, so look for these requests' title, not a job count.
+        let title = "bad-input-\(UUID().uuidString)"
         let bad = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()], settings: ["size": 0]),
-                                                                          ["recipe": "nope", "task": "x"]]])
+                                                                          ["recipe": "nope", "task": "x"]], "title": title])
         #expect(bad.status == 422 && bad.json["error"] as? String == "invalid_input")
         #expect((bad.json["fields"] as? [[String: Any]])?.compactMap { $0["field"] as? String } == ["steps[0].settings.size", "steps[1].recipe"])
-        let schema = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": "/x.png"])], "priority": "urgent"])
+        let schema = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": "/x.png"])], "priority": "urgent", "title": title])
         #expect(schema.status == 422 && (schema.json["fields"] as? [[String: Any]])?.first?["field"] as? String == "priority")
-        #expect(try await lift.jobsList().count == before)
+        #expect(try await lift.jobsList(JobFilter(text: title)).isEmpty)
     }
 
     @Test func confirmGatesAnswer409AndChangeNothing() async throws {
