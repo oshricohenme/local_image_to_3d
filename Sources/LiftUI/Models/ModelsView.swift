@@ -3,7 +3,7 @@ import LiftCore
 import SwiftUI
 
 enum ModelTab: String, CaseIterable {
-    case overview = "Overview", options = "Options", install = "Install", shim = "Mac shim"
+    case about = "About", overview = "Overview", options = "Options", install = "Install", shim = "Mac shim"
 }
 
 /// Recipes grouped by the modalities of their tasks (a recipe can appear in several groups).
@@ -20,12 +20,14 @@ enum ModelGroups {
 struct ModelsView: View {
     let app: AppModel
     @State private var selected: String?
-    @State private var tab = ModelTab.overview
+    @State private var tab = ModelTab.about
     @State private var detail: ModelView?
     @State private var note: String?
     @State private var listings: [RecipeListing] = []
     @State private var pinning = false
     @State private var pin = ""
+    @State private var readme: Readme?
+    @State private var loadingReadme = false
 
     var body: some View {
         HSplitView {
@@ -50,9 +52,9 @@ struct ModelsView: View {
         }
         .navigationTitle("Models")
         .task(id: app.models.count) { listings = await app.lift?.recipesList() ?? [] }
-        .task(id: selected) { await loadDetail() }
+        .task(id: selected) { await loadDetail(); await loadReadme() }
         .onChange(of: app.models) { Task { await loadDetail() } }
-        .onChange(of: app.developer) { if !app.developer { tab = .overview } }
+        .onChange(of: app.developer) { if !app.developer && !tabs.contains(tab) { tab = .about } }
         .alert("Change pin", isPresented: $pinning) {
             TextField("40-character commit", text: $pin)
             Button("Reinstall at this commit") {
@@ -78,6 +80,14 @@ struct ModelsView: View {
         detail = try? await lift.modelsGet(id)
     }
 
+    func loadReadme() async {
+        readme = nil
+        guard let id = selected, let lift = app.lift else { return }
+        loadingReadme = true
+        defer { loadingReadme = false }
+        readme = try? await lift.modelsReadme(id)
+    }
+
     func problemText(_ l: RecipeListing) -> String {
         switch l.state {
         case .needsNewerLift: "needs a newer version of Lift"
@@ -87,7 +97,7 @@ struct ModelsView: View {
         }
     }
 
-    var tabs: [ModelTab] { app.developer ? ModelTab.allCases : [.overview, .install] }
+    var tabs: [ModelTab] { app.developer ? ModelTab.allCases : [.about, .overview, .install] }
 
     @ViewBuilder var detailPane: some View {
         if let m = detail {
@@ -95,7 +105,8 @@ struct ModelsView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading) {
                         Text(m.name).font(.title2).bold()
-                        Text([m.recipe.publisher, m.recipe.homepage].compactMap { $0 }.joined(separator: " · ")).foregroundStyle(.secondary)
+                        Text("by " + m.recipe.attribution.authors.joined(separator: ", ") + " · " + m.recipe.attribution.license.spdx).foregroundStyle(.secondary)
+                        if let d = m.recipe.description { Text(d).font(.callout) }
                     }
                     Spacer()
                     actions(m)
@@ -111,6 +122,7 @@ struct ModelsView: View {
                 .labelsHidden()
                 ScrollView {
                     switch tab {
+                    case .about: AboutView(attribution: m.recipe.attribution, readme: readme, loadingReadme: loadingReadme)
                     case .overview: overview(m)
                     case .options: options(m)
                     case .install: install(m)
@@ -168,9 +180,9 @@ struct ModelsView: View {
     func overview(_ m: ModelView) -> some View {
         let r = m.recipe
         var rows: [(String, String)] = [
-            ("Made by", r.publisher ?? "—"),
-            ("License", r.license ?? "—"),
-            ("Project page", r.homepage ?? r.repo ?? "—"),
+            ("Made by", r.attribution.authors.joined(separator: ", ")),
+            ("License", r.attribution.license.spdx),
+            ("Project page", r.attribution.homepage.absoluteString),
             ("Tasks", r.tasks.map { "\($0.label) (\($0.inputs.map(\.type.rawValue).joined(separator: ", ")) → \($0.output.rawValue))" }.joined(separator: "\n")),
             ("Python", "\(r.python) · its own environment, separate from the rest of the Mac"),
             ("Memory", "\(r.resources.memoryGB.formatted()) GB estimate" + r.resources.memoryOverrides.map { o in
@@ -184,9 +196,7 @@ struct ModelsView: View {
         }
         return VStack(alignment: .leading, spacing: 10) {
             facts(rows)
-            Text("\(r.name) was created by \(r.publisher ?? "its authors"). Lift is an independent app that runs open-source projects on your Mac. "
-                 + "Lift did not create \(r.name) and is not affiliated with or endorsed by its authors.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(r.attribution.disclaimer).font(.caption).foregroundStyle(.secondary)
         }
         .padding(.vertical)
     }
