@@ -27,7 +27,7 @@ built for any modality (image, video, audio) so later projects need only a recip
 
 - Native SwiftUI app, macOS 26+, Apple Silicon only, personal build (Xcode-signed, not notarized, no App Sandbox).
 - Recipes: **Pixal3D** (image→3D), **Pixal3D multi-view** (multi-view→3D), **UniRig** (mesh→rigged),
-  **TRELLIS.2** (image→3D), **Test Cube** (fake, for tests).
+  **TRELLIS.2 via trellis-mac** (image→3D), **Test Cube** (fake, for tests).
 - Persistent job queue (SQLite) with parallel slots, a memory budget, priorities and manual reordering.
 - Multi-step jobs (e.g. Pixal3D → UniRig).
 - Export formats: GLB always, plus USDZ, FBX and OBJ, chosen by the user per job.
@@ -106,7 +106,7 @@ They live in **recipe sources**: git repos cloned into `<workdir>/recipes/<sourc
   keep their pinned upstream commit; a refreshed recipe that changes the pin shows "update available"
   and reinstalls only when you say so.
 - **Compatibility:** a recipe with `schema` newer than the app supports is listed as "needs a newer Lift" and can't be installed.
-- **Test Cube** is a test fixture in this app repo (`Tests/Fixtures/recipes/test-cube`), loaded only by the
+- **Test Cube** lives in the dev recipe source (`dev-recipes/test-cube`, see below), loaded only by the
   test suite and by a hidden developer setting. It is not in the public source.
 
 ### `recipe.yaml` (schema v1)
@@ -168,8 +168,22 @@ tasks:
 | pixal3d | TencentARC/Pixal3D `f7cf384` | image→mesh | `inference.run_inference` |
 | pixal3d (same recipe) | same | image_set→mesh | `inference_mv` main path, `pipeline_mv.json` weights |
 | unirig | VAST-AI-Research/UniRig `6793c66` | mesh→rigged_mesh | `launch/inference/generate_skeleton.sh` → `generate_skin.sh` → `merge.sh` (run as subprocesses from the worker) |
-| trellis2 | microsoft/TRELLIS.2 `75fbf01` | image→mesh | upstream example entry (confirmed during its go/no-go test) |
-| test-cube | test fixture in this repo | image→mesh | `cube.generate` (writes a cube GLB; options: size, delay, fail) |
+| trellis2-mac | shivampkumar/trellis-mac `d58628f` (MIT), which brings microsoft/TRELLIS.2 pinned at `75fbf01` | image→mesh | `generate.py <image> --seed --output --pipeline-type {512,1024,1024_cascade} --texture-size {512,1024,2048} [--no-texture]` |
+| test-cube | dev-recipes/ in this repo | image→mesh | `cube.generate` (writes a cube GLB; options: size, delay, fail) |
+
+**trellis2-mac** is an existing Mac port, so it uses no `lift_shim`. Its install steps are:
+1. Clone trellis-mac at its pin.
+2. Clone TRELLIS.2 at `75fbf01` into `repo/TRELLIS.2`. trellis-mac's `setup.sh` skips its own unpinned
+   clone when that folder exists.
+3. Run `setup.sh` unchanged. It needs the Metal Toolchain, and Hugging Face access to the gated
+   `facebook/dinov3-vitl16-pretrain-lvd1689m` and `briaai/RMBG-2.0`.
+
+Its launcher keeps the loaded pipeline between jobs by importing `generate.py`'s functions, not by running a new process per job.
+
+**Dev recipe source:** `dev-recipes/` in this app repo holds `pixal3d`, `trellis2-mac` and `test-cube`. A
+developer setting (`LIFT_DEV_RECIPES=1` or Settings → Developer) adds it as a local source, so
+development and tests don't depend on the public `lift-recipes` repo. The public repo is created later
+from the same folders.
 
 Multi-view input (`image_set`) accepts any of: a 4-view preset (front/right/back/left slots; Lift writes the
 upstream example `transforms.json` with your file names), a folder that already contains
@@ -198,7 +212,7 @@ upstream, and only when `torch.cuda.is_available()` is false:
 
 - The registry grows as recipes are added. Building the Metal substitutes needs `xcodebuild -downloadComponent MetalToolchain`.
 
-**Go/no-go test (first milestone):** run Pixal3D, Pixal3D-MV, UniRig and TRELLIS.2 through the shim on this
+**Go/no-go test (first milestone):** run Pixal3D, Pixal3D-MV and UniRig through the shim, and trellis2-mac as is, on this
 Mac. Record pass/fail, wall time, peak memory, and whether two jobs can run concurrently in one process.
 A failure marks that recipe `platform.status: unsupported` with the reason. It ships disabled and
 everything else is still built.
