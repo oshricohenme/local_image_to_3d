@@ -41,6 +41,14 @@ def test_autoload_sets_env_before_torch():
     assert r.stdout.strip() == "1", r.stderr
 
 
+def test_dynamo_imports_after_install():
+    # Regression: assigning one function object to both cuda.manual_seed and manual_seed_all made
+    # torch._dynamo's trace rules fail ("Duplicate torch object") — lightning/torchvision import it.
+    code = "import lift_shim; lift_shim.install(); import torch._dynamo; print('ok')"
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.stdout.strip() == "ok", r.stderr[-2000:]
+
+
 def test_write_and_remove_pth(tmp_path):
     from lift_shim.pth import remove_pth, write_pth
     p = write_pth(tmp_path)
