@@ -160,6 +160,16 @@ tasks:
       # … every keyword argument of run_inference, with upstream defaults
 ```
 
+- **Plan 1 schema additions:** `shim: bool` (whether to install lift_shim; false for existing Mac ports
+  like trellis-mac), `stages: [{pattern}]` (regexes for stage/progress parsing), `resources.disk_gb`,
+  and `brew: [pkg]`. `repo`/`commit` are optional but must appear together (bundled test recipes have
+  neither), and `entry` is informational only.
+- **Launcher contract:** `launcher.py` defines an optional `load(ctx)`, run once per worker to load the
+  model, and a required `run(state, job)`. `job.cancelled` and `job.stage(name, fraction)` are available.
+  The worker starts as `venv/bin/python -m lift_worker '<json>'` with `PYTHONPATH` pointing at the bundled
+  `lift_worker`. Workers run the installed copy of the recipe in `models/<id>/recipe/`.
+- **Scheduler:** each waiting job is judged on its own, so a large job waiting for memory doesn't block a
+  smaller job behind it. `force_start` doesn't override a paused queue.
 - **Input types:** `text`, `image`, `image_set` (multi-view), `mesh`, `video`, `audio`. **Output types:** `mesh`, `rigged_mesh`, `image`, `video`, `audio`.
 - **Modality** groups tasks into the UI tabs (3D, Image, Video, Audio).
 - **Settings** generate the UI form and validate HTTP/MCP input. Types: `int`, `float`, `bool`, `enum`,
