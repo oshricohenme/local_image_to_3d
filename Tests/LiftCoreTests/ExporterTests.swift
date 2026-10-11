@@ -82,7 +82,7 @@ let cubeCredits = [try! attribution(cubeAttributionJSON)]
         let (dir, results) = try await export([glb], [.fbx], blender: blender, runner: runner)
         #expect(results.first?.path == dir.appending(path: "My cube.fbx").path)
         let command = try #require(runner.commands.first)
-        #expect(command.executable == blender && command.arguments[0] == "-c" && command.arguments[1] == Exporter.fbxScript)
+        #expect(command.executable == blender && command.arguments[0] == "-c" && command.arguments[1] == Exporter.blenderScript)
         #expect(command.arguments[2] == glb.path && command.arguments[3].hasSuffix("/fbx/My cube.fbx"))
         #expect(command.environment["BLENDER_USER_RESOURCES"]?.hasSuffix("/fbx/blender") == true)
     }
@@ -101,7 +101,37 @@ let cubeCredits = [try! attribution(cubeAttributionJSON)]
         let runner = RecordingRunner()
         let (dir, results) = try await export([fbx], [.fbx, .usdz], runner: runner)
         #expect(results[0].path == dir.appending(path: "My cube.fbx").path && runner.commands.isEmpty)
-        #expect(results[1].error == "no GLB output to make usdz from")
+        #expect(results[1].error?.contains("This model was saved as FBX only") == true)
+    }
+
+    /// UniRig's outputs: the rigged model first, then its intermediate skin and skeleton passes.
+    func unirigOutputs(_ ext: String) throws -> [URL] {
+        let dir = try Fixtures.tempDir()
+        let rigged = dir.appending(path: "rigged.\(ext)")
+        if ext == "glb" { try FileManager.default.copyItem(at: try Fixtures.cubeGLB(), to: rigged) } else { try Data("unirig fbx".utf8).write(to: rigged) }
+        for name in ["skin.fbx", "skeleton.fbx"] { try Data(name.utf8).write(to: dir.appending(path: name)) }
+        return [rigged, dir.appending(path: "skin.fbx"), dir.appending(path: "skeleton.fbx")]
+    }
+
+    @Test func fbxIsMadeFromTheRiggedGLBNotUniRigsIntermediates() async throws {
+        let outputs = try unirigOutputs("glb")
+        let runner = RecordingRunner()
+        let (dir, results) = try await export(outputs, [.fbx], blender: try fakeBlender(), runner: runner)
+        #expect(results.first?.path == dir.appending(path: "My cube.fbx").path)
+        #expect(runner.commands.first?.arguments[2] == outputs[0].path)
+    }
+
+    @Test func anFBXOnlyModelGetsItsGLBFromBlender() async throws {
+        let outputs = try unirigOutputs("fbx")
+        let bin = try Fixtures.fakeBin(["python"]).appending(path: "python")  // writes a real GLB like Blender would
+        try "#!/bin/sh\nfor a; do last=\"$a\"; done\ncp '\(try Fixtures.cubeGLB().path)' \"$last\"\n".write(to: bin, atomically: true, encoding: .utf8)
+        let runner = RecordingRunner()
+        let (dir, results) = try await export(outputs, [.glb, .usdz], blender: bin.path, runner: runner)
+        #expect(results[0].error == nil && results[0].path == dir.appending(path: "My cube.glb").path)
+        #expect(results[1].error == nil)
+        #expect(runner.commands.first?.arguments[2] == outputs[0].path && runner.commands.first?.arguments[3].hasSuffix(".glb") == true)
+        let (_, without) = try await export(outputs, [.glb])
+        #expect(without[0].error?.contains("This model was saved as FBX only") == true)
     }
 
     @Test func existingFilesAreNeverOverwritten() async throws {

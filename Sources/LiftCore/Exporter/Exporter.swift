@@ -129,19 +129,30 @@ public struct Exporter: Sendable {
         try? fm.removeItem(at: work)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
         let files = outputs.map { URL(filePath: $0) }
-        // An output already in this format (e.g. UniRig's own FBX) is used as is. OBJ is always made from the
-        // GLB: an upstream OBJ (trellis-mac's) is bare geometry.
-        if format != .obj, let same = files.first(where: { $0.pathExtension.lowercased() == format.rawValue }) {
+        // The primary output (the first) is used as is when it's already in this format, e.g. UniRig's rigged FBX.
+        // Only the primary: UniRig's later outputs are intermediate skin/skeleton passes, not the rigged model.
+        // OBJ is always made from the GLB: an upstream OBJ (trellis-mac's) is bare geometry.
+        if format != .obj, let primary = files.first, primary.pathExtension.lowercased() == format.rawValue {
             let dest = work.appending(path: "\(name).\(format.rawValue)")
-            try fm.copyItem(at: same, to: dest)
+            try fm.copyItem(at: primary, to: dest)
             return dest
         }
-        guard let glb = files.first(where: { $0.pathExtension.lowercased() == "glb" }) else {
+        var glb = files.first(where: { $0.pathExtension.lowercased() == "glb" })
+        if glb == nil, let primary = files.first, primary.pathExtension.lowercased() == "fbx" {
+            guard blenderPython != nil else {
+                throw LiftError.prerequisite("This model was saved as FBX only. Choose FBX in the export formats, or set UniRig's File type to GLB.")
+            }
+            // ponytail: one Blender run per format that needs the GLB; share it if several formats get slow.
+            glb = try await blender(primary, to: work.appending(path: "from-fbx/\(name).glb"), work: work)
+        }
+        guard let glb else {
             throw LiftError.invalidState("no GLB output to make \(format.rawValue) from")
         }
         switch format {
         case .glb:
-            preconditionFailure("a GLB output is always used as is")
+            let dest = work.appending(path: "\(name).glb")
+            try fm.copyItem(at: glb, to: dest)
+            return dest
         case .usdz:
             // ModelIO can't write USDZ, and its USDC loses texture references; SceneKit embeds them.
             let dest = work.appending(path: "\(name).usdz")
@@ -157,26 +168,38 @@ public struct Exporter: Sendable {
             try MDLAsset(gltfAsset: try GLTFAsset(url: glb)).export(to: folder.appending(path: "\(name).obj"))
             return folder
         case .fbx:
-            guard let blenderPython else {
+            guard blenderPython != nil else {
                 throw LiftError.prerequisite("FBX export uses Blender's bpy from the UniRig model; install UniRig to export FBX")
             }
-            let dest = work.appending(path: "\(name).fbx")
-            try await runner.check(ShellCommand(blenderPython, ["-c", Self.fbxScript, glb.path, dest.path],
-                                                environment: ["BLENDER_USER_RESOURCES": work.appending(path: "blender").path]))
-            guard fm.fileExists(atPath: dest.path) else { throw LiftError.invalidState("Blender wrote no \(dest.lastPathComponent)") }
-            return dest
+            return try await blender(glb, to: work.appending(path: "\(name).fbx"), work: work)
         }
     }
 
-    /// Blender's own glTF importer and FBX exporter; armatures and skin weights carry over, textures are embedded.
-    /// bpy 4.2 as a Python module segfaults at interpreter exit (code 139), hence `os._exit(0)` once written.
-    static let fbxScript = """
+    /// Converts between GLB and FBX with Blender (`blenderPython` must be set).
+    func blender(_ source: URL, to dest: URL, work: URL) async throws -> URL {
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try await runner.check(ShellCommand(blenderPython!, ["-c", Self.blenderScript, source.path, dest.path],
+                                            environment: ["BLENDER_USER_RESOURCES": work.appending(path: "blender").path]))
+        guard FileManager.default.fileExists(atPath: dest.path) else { throw LiftError.invalidState("Blender wrote no \(dest.lastPathComponent)") }
+        return dest
+    }
+
+    /// Blender's own glTF and FBX importers and exporters, picked by extension; armatures and skin weights carry
+    /// over, textures are embedded. bpy 4.2 as a Python module segfaults at interpreter exit (code 139), hence
+    /// `os._exit(0)` once written.
+    static let blenderScript = """
     import os, sys
     import bpy
     source, target = sys.argv[-2], sys.argv[-1]
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.gltf(filepath=source)
-    bpy.ops.export_scene.fbx(filepath=target, path_mode="COPY", embed_textures=True, add_leaf_bones=False)
+    if source.lower().endswith(".fbx"):
+        bpy.ops.import_scene.fbx(filepath=source)
+    else:
+        bpy.ops.import_scene.gltf(filepath=source)
+    if target.lower().endswith(".fbx"):
+        bpy.ops.export_scene.fbx(filepath=target, path_mode="COPY", embed_textures=True, add_leaf_bones=False)
+    else:
+        bpy.ops.export_scene.gltf(filepath=target, export_format="GLB")
     sys.stdout.flush()
     os._exit(0)
     """
