@@ -1,4 +1,5 @@
 import LiftCore
+import MarkdownUI
 import SwiftUI
 
 /// Plain sentences about a model's credits (spec §4a), shared by About and the first-install sheet.
@@ -74,7 +75,7 @@ struct AboutView: View {
             Text("README").font(.headline)
             if let readme {
                 if readme.cached { Text("Saved copy (Lift couldn't reach the internet).").font(.caption).foregroundStyle(.secondary) }
-                Text(markdown(readme)).textSelection(.enabled)
+                ReadmeView(readme: readme)
             } else if loadingReadme {
                 ProgressView().controlSize(.small)
             } else {
@@ -84,10 +85,16 @@ struct AboutView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical)
     }
+}
 
-    /// The README as Markdown, links resolved at the pinned commit; falls back to plain text.
-    func markdown(_ r: Readme) -> AttributedString {
-        (try? AttributedString(markdown: r.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace), baseURL: r.baseURL))
-            ?? AttributedString(r.text)
+/// The project's README in full (spec §4a): headings, lists, tables, code and images, with relative links
+/// and images resolved at the pinned commit (`Readme.baseURL`). Links open in the browser.
+struct ReadmeView: View {
+    let readme: Readme
+
+    var body: some View {
+        Markdown(readme.text, baseURL: readme.baseURL, imageBaseURL: readme.baseURL)
+            .markdownTheme(.gitHub)
+            .textSelection(.enabled)
     }
 }
