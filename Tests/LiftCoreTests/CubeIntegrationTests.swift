@@ -98,7 +98,7 @@ actor CubeFixture {
         let lift = try await CubeFixture.shared.get()
         let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60)])])).accepted().job.id
         #expect(try await eventually { try await lift.jobsGet(id).job.state == .running })
-        #expect(try await lift.jobsCancel(id).impact != nil)
+        #expect(try await lift.jobsCancel(id).impact == "Stops this job immediately. Its progress will be lost.")
         #expect(try await lift.jobsCancel(id, confirm: true).value?.job.state == .cancelled)
         #expect(try await eventually(5) { await lift.workersList().allSatisfy { $0.job != id } })
         #expect(try await run(lift, [try cube()]).job.state == .succeeded)

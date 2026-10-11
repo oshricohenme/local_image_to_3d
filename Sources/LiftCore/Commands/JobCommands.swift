@@ -216,7 +216,7 @@ extension Lift {
         guard !v.job.state.isTerminal else { throw LiftError.invalidState("job \(id) already \(v.job.state.rawValue)") }
         let step = v.steps[v.job.currentStep]
         if v.job.state.isActive {
-            guard confirm else { return .confirmationRequired("Job \"\(v.job.title)\" is \(v.job.state.rawValue); cancelling stops its work and discards any result.") }
+            guard confirm else { return .confirmationRequired("Stops this job immediately. Its progress will be lost.") }
             _ = try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
             if let w = workers.values.first(where: { $0.job?.jobId == id }) { kill(w) }
         } else {
