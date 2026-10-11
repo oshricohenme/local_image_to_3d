@@ -1,0 +1,286 @@
+import CryptoKit
+import Foundation
+
+/// Where a model stands (spec §6). `installing` and the weights states come from the engine.
+public enum ModelStatus: Codable, Sendable, Equatable {
+    case notInstalled
+    /// `phase`: installing, downloading weights, verifying weights.
+    case installing(phase: String)
+    case installed(commit: String?)
+    /// Installed, but the source recipe (or its pin) changed since. Reinstall to update.
+    case updateAvailable(installedCommit: String?, recipeCommit: String?)
+    case installFailed(command: String, exitCode: Int32)
+    case unsupported(reason: String)
+    /// Installed, but the last weights check found files missing / wrong.
+    case weightsMissing([WeightProblem])
+    case weightsCorrupt([WeightProblem])
+}
+
+/// `models/<id>/state.json`: written last, so a partial install never counts as installed.
+struct InstallState: Codable {
+    var installed: Bool
+    var commit: String?
+    /// SHA-256 of the source recipe.yaml + launcher.py at install time.
+    var digest: String
+    var failedCommand: String?
+    var exitCode: Int32?
+    var at: Date
+}
+
+public struct UpstreamStatus: Codable, Sendable, Equatable {
+    public var pin: String?
+    public var head: String
+    /// Commits upstream is past the pin; nil when not installed (only `git ls-remote` was run).
+    public var commitsAhead: Int?
+}
+
+/// brew prerequisites → clone pinned commit → uv venv → install steps → substitutes → lift_shim + .pth →
+/// recipe copy → smoke import; then, separately, weight downloads. Only ever writes inside `models/<id>/`
+/// (and, through `brew` and `hf download`, Homebrew's prefix and the Hugging Face cache).
+public struct Installer: Sendable {
+    let runner: any CommandRunner
+    let models: URL
+    let workerRuntime: URL
+    let tools: ToolPaths
+    let toolEnvironment: [String: String]
+    let hfToken: @Sendable () -> String?
+    let hfHub: URL
+
+    public init(runner: any CommandRunner, models: URL, workerRuntime: URL, tools: ToolPaths,
+                toolEnvironment: [String: String], hfToken: @escaping @Sendable () -> String?, hfHub: URL) {
+        self.runner = runner
+        self.models = models
+        self.workerRuntime = workerRuntime
+        self.tools = tools
+        self.toolEnvironment = toolEnvironment
+        self.hfToken = hfToken
+        self.hfHub = hfHub
+    }
+
+    /// Native Homebrew's prefix (`/opt/homebrew`), from the detected brew.
+    var brewPrefix: String? { tools.brew.map { URL(filePath: $0).deletingLastPathComponent().deletingLastPathComponent().path } }
+
+    public func dir(_ id: String) -> URL { models.appending(path: id) }
+    public func logURL(_ id: String) -> URL { dir(id).appending(path: "install.log") }
+    func stateURL(_ id: String) -> URL { dir(id).appending(path: "state.json") }
+    public func venvPython(_ id: String) -> String { dir(id).appending(path: "venv/bin/python").path }
+    /// The installed copy of the recipe folder; workers run this, not the source.
+    public func installedRecipeDir(_ id: String) -> URL { dir(id).appending(path: "recipe") }
+    public func shimURL(_ id: String) -> URL { dir(id).appending(path: "shim.json") }
+
+    static func digest(_ recipeDir: URL) -> String {
+        var hash = SHA256()
+        for name in ["recipe.yaml", "launcher.py"] {
+            hash.update(data: (try? Data(contentsOf: recipeDir.appending(path: name))) ?? Data())
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    func readState(_ id: String) -> InstallState? {
+        guard let data = try? Data(contentsOf: stateURL(id)) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(InstallState.self, from: data)
+    }
+
+    func writeState(_ state: InstallState, id: String) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(state).write(to: stateURL(id))
+    }
+
+    /// Status from the files on disk. `source` is the recipe as the sources have it now (nil if gone).
+    public func status(id: String, source: CatalogEntry?, pin: String?) -> ModelStatus {
+        guard let state = readState(id) else {
+            if let source, source.recipe.platform.status == .unsupported {
+                return .unsupported(reason: source.recipe.platform.reason ?? "")
+            }
+            return .notInstalled
+        }
+        guard state.installed else { return .installFailed(command: state.failedCommand ?? "", exitCode: state.exitCode ?? -1) }
+        if let source, state.digest != Self.digest(source.directory) || state.commit != (pin ?? source.recipe.commit) {
+            return .updateAvailable(installedCommit: state.commit, recipeCommit: pin ?? source.recipe.commit)
+        }
+        return .installed(commit: state.commit)
+    }
+
+    /// The installed recipe, read from the model's own copy.
+    public func installedRecipe(_ id: String) -> Recipe? {
+        guard readState(id)?.installed == true, case .ok(let recipe) = RecipeLoad.read(directory: installedRecipeDir(id), matchFolder: false) else { return nil }
+        return recipe
+    }
+
+    /// Checks that run before anything is touched: platform, tools, native brew for `brew:` packages,
+    /// Hugging Face token, disk space, substitutes. Returns the substitute registry and the `LIFT_SHIM` config.
+    public func preflight(_ entry: CatalogEntry) throws -> (registry: [String: Substitute], shim: ShimConfig?) {
+        let recipe = entry.recipe
+        guard recipe.platform.status == .supported else {
+            throw LiftError.prerequisite("\(recipe.name) is unsupported on this Mac: \(recipe.platform.reason ?? "")")
+        }
+        guard tools.git != nil, tools.uv != nil else { throw LiftError.prerequisite("git and uv are required; run system_install_prereqs") }
+        if !recipe.brew.isEmpty && tools.brew == nil {
+            throw LiftError.prerequisite("\(recipe.name) needs native Homebrew for \(recipe.brew.joined(separator: ", ")); run system_install_prereqs")
+        }
+        if recipe.weights.contains(where: \.gated) && hfToken() == nil {
+            let gated = recipe.weights.filter(\.gated).map(\.repo).joined(separator: ", ")
+            throw LiftError.prerequisite("\(recipe.name) needs a Hugging Face token with access to \(gated)")
+        }
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        let needed = Int64(recipe.resources.diskGB * 1_000_000_000)
+        if let free = (try? models.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage,
+           free < needed {
+            throw LiftError.prerequisite("not enough disk space: \(recipe.resources.diskGB) GB needed, \(Double(free) / 1e9) GB free")
+        }
+        let registry = try Substitute.registry(shared: entry.shared)
+        return (registry, try ShimConfig.build(recipe, registry: registry))
+    }
+
+    /// Runs the whole install. Every command and its output go to `install.log` and `onLine`.
+    /// Throws `LiftError.prerequisite` before touching anything, or `.commandFailed` with the log kept
+    /// and state.json marked failed.
+    public func install(_ entry: CatalogEntry, pin: String?, onLine: @escaping @Sendable (String) -> Void) async throws {
+        let (registry, shimConfig) = try preflight(entry)
+        let recipe = entry.recipe
+        let commit = pin ?? recipe.commit
+        let git = tools.git!, uv = tools.uv!
+        let fm = FileManager.default
+        let root = dir(recipe.id)
+        for name in ["repo", "venv", "recipe", "state.json", "shim.json", "install.log"] {
+            try? fm.removeItem(at: root.appending(path: name))
+        }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let log = try LogFile(logURL(recipe.id))
+        let lines: @Sendable (String) -> Void = { line in
+            log.write(line)
+            onLine(line)
+        }
+        let venv = root.appending(path: "venv").path
+        var env = toolEnvironment
+        env["PATH"] = "\(venv)/bin:" + (toolEnvironment["PATH"] ?? "/usr/bin:/bin")
+        env["VIRTUAL_ENV"] = venv
+        let repo = root.appending(path: "repo").path
+
+        var steps: [ShellCommand] = []
+        if !recipe.brew.isEmpty, let brew = tools.brew {
+            // First, so install steps that build native code can link against them.
+            steps.append(ShellCommand(brew, ["install"] + recipe.brew, environment: toolEnvironment))
+        }
+        if let url = recipe.repo, let commit {
+            steps.append(ShellCommand(git, ["clone", "--filter=blob:none", url, repo], environment: toolEnvironment))
+            steps.append(ShellCommand(git, ["-C", repo, "checkout", "--quiet", commit], environment: toolEnvironment))
+        } else {
+            try fm.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        }
+        steps.append(ShellCommand(uv, ["venv", "--python", recipe.python, venv], environment: toolEnvironment, workingDirectory: root.path))
+        let shell = recipe.install + recipe.substitutes.flatMap { registry[$0]?.install ?? [] }
+        steps += shell.map { ShellCommand("/bin/sh", ["-c", $0], environment: env, workingDirectory: root.path) }
+        if shimConfig != nil {
+            steps.append(ShellCommand(uv, ["pip", "install", entry.shared.appending(path: "lift_shim").path], environment: env, workingDirectory: root.path))
+            steps.append(ShellCommand(venvPython(recipe.id), ["-c", "import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])"], environment: env))
+        }
+
+        do {
+            for step in steps {
+                lines("$ \(step.display)")
+                try await runner.check(step, onLine: lines)
+            }
+            try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
+            if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
+            let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, maxConcurrent: 1, heartbeat: 2)],
+                                     environment: workerEnvironment(recipe), workingDirectory: repo)
+            lines("$ \(smoke.display)")
+            try await runner.check(smoke, onLine: lines)
+            try writeState(InstallState(installed: true, commit: commit, digest: Self.digest(entry.directory), at: Date()), id: recipe.id)
+            lines("installed \(recipe.id)")
+        } catch let error as LiftError {
+            if case .commandFailed(let command, let code, _) = error {
+                try? writeState(InstallState(installed: false, commit: commit, digest: "", failedCommand: command, exitCode: code, at: Date()), id: recipe.id)
+            }
+            lines("install failed: \(error)")
+            throw error
+        }
+    }
+
+    /// The JSON argument for `python -m lift_worker`.
+    public func workerConfig(_ recipe: Recipe, maxConcurrent: Int, heartbeat: Double) -> String {
+        struct Config: Encodable {
+            var launcher: String
+            var repo_dir: String
+            var recipe_dir: String
+            var max_concurrent: Int
+            var stages: [Recipe.StagePattern]
+            var heartbeat_seconds: Double
+            var setting_types: [String: [String: String]]
+        }
+        let config = Config(launcher: installedRecipeDir(recipe.id).appending(path: "launcher.py").path,
+                            repo_dir: dir(recipe.id).appending(path: "repo").path,
+                            recipe_dir: installedRecipeDir(recipe.id).path,
+                            max_concurrent: maxConcurrent, stages: recipe.stages, heartbeat_seconds: heartbeat,
+                            setting_types: Dictionary(uniqueKeysWithValues: recipe.tasks.map { task in
+                                (task.id, Dictionary(uniqueKeysWithValues: task.settings.map { ($0.key, $0.type.rawValue) }))
+                            }))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: try! encoder.encode(config), as: UTF8.self)
+    }
+
+    /// Environment for a worker or the smoke check: lift_worker on PYTHONPATH, the venv first on PATH,
+    /// `LIFT_SHIM` when the recipe uses the shim, native brew's `lib/` for `brew:` packages, the
+    /// Hugging Face cache and token.
+    public func workerEnvironment(_ recipe: Recipe) -> [String: String] {
+        let venv = dir(recipe.id).appending(path: "venv").path
+        var env = toolEnvironment
+        env["PATH"] = "\(venv)/bin:" + (toolEnvironment["PATH"] ?? "/usr/bin:/bin")
+        env["VIRTUAL_ENV"] = venv
+        env["PYTHONPATH"] = workerRuntime.path
+        env["PYTHONUNBUFFERED"] = "1"
+        if let shim = try? String(contentsOf: shimURL(recipe.id), encoding: .utf8) { env["LIFT_SHIM"] = shim }
+        // dyld's default fallback includes /usr/local/lib, where a Rosetta Homebrew keeps x86_64 libraries.
+        if !recipe.brew.isEmpty, let prefix = brewPrefix { env["DYLD_FALLBACK_LIBRARY_PATH"] = "\(prefix)/lib:/usr/lib" }
+        env["HF_HUB_CACHE"] = hfHub.path
+        if let token = hfToken() { env["HF_TOKEN"] = token }
+        return env
+    }
+
+    /// `hf download <repo> --revision <rev>` for each weight, from the model's venv into the shared cache.
+    /// Appends to `install.log`. Only ever started by an explicit user action (spec §6).
+    public func downloadWeights(_ recipe: Recipe, onLine: @escaping @Sendable (String) -> Void) async throws {
+        let hf = dir(recipe.id).appending(path: "venv/bin/hf").path
+        guard FileManager.default.isExecutableFile(atPath: hf) else {
+            throw LiftError.prerequisite("\(recipe.id)'s venv has no `hf` (huggingface_hub); add it to the recipe's install steps")
+        }
+        if recipe.weights.contains(where: \.gated) && hfToken() == nil {
+            throw LiftError.prerequisite("\(recipe.name) has gated weights; set a Hugging Face token first")
+        }
+        let log = try LogFile(logURL(recipe.id))
+        let lines: @Sendable (String) -> Void = { line in
+            log.write(line)
+            onLine(line)
+        }
+        for w in recipe.weights {
+            let command = ShellCommand(hf, ["download", w.repo, "--revision", w.revision], environment: workerEnvironment(recipe))
+            lines("$ \(command.display)")
+            try await runner.check(command, onLine: lines)
+        }
+    }
+
+    /// Removes `models/<id>/` — Lift's own folder. Weights in the shared Hugging Face cache are never deleted.
+    public func uninstall(_ id: String) throws {
+        try? FileManager.default.removeItem(at: dir(id))
+    }
+
+    /// `git ls-remote` for upstream HEAD; when installed, also fetch and count commits past the pin.
+    public func checkUpstream(_ recipe: Recipe, pin: String?) async throws -> UpstreamStatus {
+        guard let url = recipe.repo, let git = tools.git else { throw LiftError.invalidState("\(recipe.id) has no upstream repo") }
+        let head = try await runner.output(ShellCommand(git, ["ls-remote", url, "HEAD"], environment: toolEnvironment))
+            .split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        let pin = pin ?? recipe.commit
+        let repo = dir(recipe.id).appending(path: "repo").path
+        guard readState(recipe.id)?.installed == true, let pin, FileManager.default.fileExists(atPath: repo) else {
+            return UpstreamStatus(pin: pin, head: head, commitsAhead: nil)
+        }
+        try await runner.check(ShellCommand(git, ["-C", repo, "fetch", "--quiet", "origin", head], environment: toolEnvironment))
+        let count = try await runner.output(ShellCommand(git, ["-C", repo, "rev-list", "--count", "\(pin)..\(head)"], environment: toolEnvironment))
+        return UpstreamStatus(pin: pin, head: head, commitsAhead: Int(count.trimmingCharacters(in: .whitespacesAndNewlines)))
+    }
+}
