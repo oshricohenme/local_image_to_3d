@@ -220,6 +220,12 @@ everything else is still built.
 ## 6. Toolchain and model lifecycle
 
 **At launch (Toolchain):** detect `brew`, `git`, `uv` and the Metal Toolchain.
+- **Native Homebrew only.** Lift uses `/opt/homebrew/bin/brew` (arm64). An Intel/Rosetta Homebrew in
+  `/usr/local` is detected and never used for native libraries: its packages are x86_64 and can't be
+  loaded by arm64 Python (found on the dev machine: `open3d` couldn't load an x86_64 `libusb`).
+- If only the Rosetta Homebrew exists, the setup screen offers to install native Homebrew alongside it.
+- Recipes can declare `brew: [libusb, …]`. These are installed with the native brew, and its `lib/` is
+  added to the worker's `DYLD_FALLBACK_LIBRARY_PATH`.
 - If `brew` is missing, a setup screen offers **Install Homebrew**. That runs the official install script
   with a live log; macOS asks for your admin password.
 - If `git` or `uv` is missing, the app runs `brew install git uv` with a live log.
