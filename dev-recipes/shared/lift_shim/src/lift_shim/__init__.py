@@ -23,10 +23,31 @@ def apply_env(extra: dict[str, str] | None = None) -> None:
         os.environ.setdefault(k, v)
 
 
+_CONFIG_TYPES = {"aliases": dict, "standins": list, "patches": list, "env": dict}
+
+
+def validate_config(config: dict) -> None:
+    """ValueError for config the shim would otherwise ignore (typo'd keys) or choke on later.
+    Unknown stand-in/patch names are rejected by install_module_finder/install_patches."""
+    if not isinstance(config, dict):
+        raise ValueError("lift_shim: config must be a JSON object")
+    unknown = sorted(set(config) - set(_CONFIG_TYPES))
+    if unknown:
+        raise ValueError(f"lift_shim: unknown config key(s) {unknown}; allowed: {sorted(_CONFIG_TYPES)}")
+    for key, typ in _CONFIG_TYPES.items():
+        if key in config and not isinstance(config[key], typ):
+            raise ValueError(f"lift_shim: config {key!r} must be a {'list' if typ is list else 'JSON object'}")
+    for key in ("aliases", "env"):
+        for k, v in config.get(key, {}).items():
+            if not isinstance(v, str):
+                raise ValueError(f"lift_shim: config {key}[{k!r}] must be a string, got {v!r}")
+
+
 def install(config: dict | None = None) -> str:
     """Install once per process; returns 'mps', 'cpu', or 'cuda' (real CUDA: no-op)."""
     global _result
     config = config or {}
+    validate_config(config)
     with _lock:
         if _result is not None:
             return _result

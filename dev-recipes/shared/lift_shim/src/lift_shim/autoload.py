@@ -26,13 +26,20 @@ def _boot() -> None:
     cfg = _config()
     if cfg is None:
         return
-    import lift_shim
-    from lift_shim.modules import after_import, install_module_finder
-    from lift_shim.patches import install_patches
-    lift_shim.apply_env(cfg.get("env"))
-    install_module_finder(cfg.get("aliases", {}), cfg.get("standins", []))
-    install_patches(cfg.get("patches", []))  # as early as possible; install() repeats it (deduped) for direct callers
-    after_import("torch", lambda _: lift_shim.install(cfg))
+    # site.addpackage() prints and swallows any Exception from a .pth line, then runs the program
+    # unshimmed; only SystemExit actually stops startup.
+    try:
+        import lift_shim
+        from lift_shim.modules import after_import, install_module_finder
+        from lift_shim.patches import install_patches
+        lift_shim.validate_config(cfg)
+        lift_shim.apply_env(cfg.get("env"))
+        install_module_finder(cfg.get("aliases", {}), cfg.get("standins", []))
+        install_patches(cfg.get("patches", []))  # as early as possible; install() repeats it (deduped) for direct callers
+        after_import("torch", lambda _: lift_shim.install(cfg))
+    except Exception as e:
+        msg = str(e)
+        raise SystemExit(msg if msg.startswith("lift_shim:") else f"lift_shim: {msg}") from e
 
 
 _boot()

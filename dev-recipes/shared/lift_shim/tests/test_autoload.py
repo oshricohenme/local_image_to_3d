@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 
+import pytest
 import torch
 
 TARGET = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -107,3 +108,43 @@ def test_autoload_survives_find_spec_torch_before_import():
 def test_autoload_survives_transformers_before_torch():
     r = _autoload_probe("import transformers")
     assert r.stdout.strip() == TARGET, r.stderr[-2000:]
+
+
+def run_via_pth(tmp_path, env_value, body="import torch; print(torch.zeros(1).cuda().device.type)"):
+    # site.addsitedir processes .pth files with the same addpackage() as interpreter startup, which
+    # swallows every Exception from a .pth line — only SystemExit stops the process.
+    from lift_shim.pth import write_pth
+    write_pth(tmp_path)
+    code = f"import site; site.addsitedir({str(tmp_path)!r}); {body}"
+    env = {**{k: v for k, v in os.environ.items() if k != "LIFT_SHIM"}, "LIFT_SHIM": env_value}
+    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120)
+
+
+def test_pth_redirects(tmp_path):
+    r = run_via_pth(tmp_path, json.dumps({"standins": ["flash_attn"]}))
+    assert r.returncode == 0 and r.stdout.strip() == TARGET, r.stderr[-2000:]
+
+
+@pytest.mark.parametrize("cfg,msg", [
+    ({"patches": ["nope"]}, "unknown patch"),
+    ({"standins": ["nope"]}, "unknown stand-in"),
+    ({"standin": ["flash_attn"]}, "unknown config key"),
+    ({"env": {"X": 1}}, "env"),
+    ({"aliases": {"nvdiffrast": 1}}, "aliases"),
+    ({"standins": "flash_attn"}, "standins"),
+    ({"patches": "transformers_fa2_to_sdpa"}, "patches"),
+    ({"env": ["X"]}, "env"),
+])
+def test_pth_bad_config_stops_startup(tmp_path, cfg, msg):
+    r = run_via_pth(tmp_path, json.dumps(cfg), body="print('RAN')")
+    assert r.returncode != 0, (r.stdout, r.stderr)
+    assert "RAN" not in r.stdout
+    assert "lift_shim:" in r.stderr and msg in r.stderr, r.stderr[-2000:]
+
+
+@pytest.mark.parametrize("cfg", [{"standin": ["flash_attn"]}, {"env": {"X": 1}}, {"aliases": {"a": 1}},
+                                 {"standins": "flash_attn"}, {"patches": "x"}])
+def test_install_rejects_bad_config(cfg):
+    import lift_shim
+    with pytest.raises(ValueError, match="lift_shim"):
+        lift_shim.install(cfg)
