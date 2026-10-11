@@ -7,6 +7,13 @@ publisher: Lift
 license: MIT
 python: "3.11"
 platform: { status: supported }
+attribution:   # spec §4a: even the test fixture credits what it uses
+  project: Test Cube (Lift test fixture)
+  authors: [Lift]
+  homepage: https://github.com/oshricohenme/local_image_to_3d
+  license: { spdx: MIT, url: https://github.com/oshricohenme/local_image_to_3d }
+  components:
+    - { name: trimesh, role: writes the cube GLB, url: https://github.com/mikedh/trimesh, license: { spdx: MIT, url: https://github.com/mikedh/trimesh/blob/main/LICENSE.md } }
 install:
   - uv pip install "trimesh>=4,<5" numpy
 shim: { env: { TEST_CUBE_SHIM: "on" } }   # exercises lift_shim + .pth + LIFT_SHIM end to end
