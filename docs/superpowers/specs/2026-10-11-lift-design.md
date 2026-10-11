@@ -59,12 +59,18 @@ Lift.app (Swift 6, SwiftUI)
 ├─ LiftUI              SwiftUI screens (see the mockups)
 └─ lift-mcp            stdio ↔ HTTP MCP bridge (command-line tool in the app bundle)
 
-~/Library/Application Support/Lift/            (chosen at first launch, see §11)
+<workdir>/                                     (one folder chosen at first launch, see §11)
 ├─ lift.sqlite
-├─ recipes/<source>/<recipe-id>/               git-sourced recipes
-├─ models/<recipe-id>/{repo,venv,launcher.py,install.log}
+├─ recipes/<source>/                           git clone of each recipe source
+│   ├─ <recipe-id>/{recipe.yaml,launcher.py,files/}
+│   └─ shared/{substitutes.yaml,lift_shim/}    shared Mac shim + substitute registry
+├─ models/<recipe-id>/{repo,venv,install.log}
 └─ jobs/<job-id>/{inputs/,steps/<n>/,outputs/,log.txt}
+<export dir>/                                  chosen separately at first launch
 ```
+
+The app bundle contains no recipes. It ships only `lift_worker`, the Python runtime for the worker
+protocol (§8). That's versioned with the app because the protocol is the app's contract.
 
 ### Packages
 
@@ -88,9 +94,20 @@ Lift.app (Swift 6, SwiftUI)
 
 ## 4. Recipes
 
-A recipe is a folder: `recipe.yaml`, `launcher.py`, optional `files/`. Bundled recipes ship in the app.
-Additional recipe sources are git URLs (e.g. a future public community recipes repo). Each source is
-cloned to `recipes/<source>/` and pulled only when you click Refresh or call `recipes.refresh`.
+A recipe is a folder: `recipe.yaml`, `launcher.py`, optional `files/`. Recipes are not part of the app.
+They live in **recipe sources**: git repos cloned into `<workdir>/recipes/<source>/`.
+
+- **Default source:** the public repo `oshricohenme/lift-recipes`, open to community contributions. It
+  holds the v1 recipes plus `shared/` (the `lift_shim` package and `substitutes.yaml`, so contributors can
+  extend Mac support without an app release). It's cloned at first launch.
+- **More sources:** any git URL (`recipes_add_source`). If two sources define the same recipe id, the one
+  added first wins, and the clash is shown as a warning.
+- **Updates:** a source is pulled only when you click Refresh or call `recipes_refresh`. Installed models
+  keep their pinned upstream commit; a refreshed recipe that changes the pin shows "update available"
+  and reinstalls only when you say so.
+- **Compatibility:** a recipe with `schema` newer than the app supports is listed as "needs a newer Lift" and can't be installed.
+- **Test Cube** is a test fixture in this app repo (`Tests/Fixtures/recipes/test-cube`), loaded only by the
+  test suite and by a hidden developer setting. It is not in the public source.
 
 ### `recipe.yaml` (schema v1)
 
@@ -152,7 +169,7 @@ tasks:
 | pixal3d (same recipe) | same | image_set→mesh | `inference_mv` main path, `pipeline_mv.json` weights |
 | unirig | VAST-AI-Research/UniRig `6793c66` | mesh→rigged_mesh | `launch/inference/generate_skeleton.sh` → `generate_skin.sh` → `merge.sh` (run as subprocesses from the worker) |
 | trellis2 | microsoft/TRELLIS.2 `75fbf01` | image→mesh | upstream example entry (confirmed during its go/no-go test) |
-| test-cube | bundled | image→mesh | `cube.generate` (writes a cube GLB; options: size, delay, fail) |
+| test-cube | test fixture in this repo | image→mesh | `cube.generate` (writes a cube GLB; options: size, delay, fail) |
 
 Multi-view input (`image_set`) accepts any of: a 4-view preset (front/right/back/left slots; Lift writes the
 upstream example `transforms.json` with your file names), a folder that already contains
@@ -322,11 +339,14 @@ Without it they return `confirmation_required` with a description of the impact 
 
 **First-launch wizard:**
 1. Toolchain check/installs (§6).
-2. Choose the **jobs folder** and **export folder**, plus the default for `cleanup_after_export`.
-3. Optional Hugging Face token.
-4. Show the MCP setup snippet.
+2. Choose the **working directory** (holds recipes, models, jobs and the database) and the **export
+   folder**, plus the default for `cleanup_after_export`.
+3. Clone the default recipe source into `<workdir>/recipes/`, with a live log; on failure, Retry.
+4. Optional Hugging Face token.
+5. Show the MCP setup snippet.
 
-All settings can be changed later in Settings, HTTP and MCP: jobs folder, export folder, default export
+All settings can be changed later in Settings, HTTP and MCP: working directory (moving it needs confirm
+and moves the data), export folder, default export
 formats, cleanup default, port, LAN mode, token, HF token, `max_slots`, `memory_budget_gb`,
 `idle_unload_minutes`, notifications on/off, launch at login, keep running in the menu bar.
 
@@ -384,6 +404,7 @@ As in the mockups (Generate, Queue, Models, Settings, History, Result viewers, M
 ## 15. Milestones
 
 0. **Go/no-go test** for the four real recipes (§5). Throwaway code, and the findings feed the recipes.
+   Then create the public `oshricohenme/lift-recipes` repo with the v1 recipes and `shared/` (only with your go-ahead).
 1. LiftCore: Store, Recipes, Toolchain, Installer, Workers, Scheduler, Resources, Commands. Tested with
    Test Cube. The test CI workflow is added here, so every later milestone runs in CI.
 2. LiftServer: OpenAPI HTTP, MCP (tools, resources, progress), auth, the `lift-mcp` bridge.
