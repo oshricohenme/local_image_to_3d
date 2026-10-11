@@ -13,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
         .package(url: "https://github.com/jpsim/Yams", from: "6.2.2"),
         .package(url: "https://github.com/swiftlang/swift-subprocess", from: "1.0.1"),
+        .package(url: "https://github.com/warrenm/GLTFKit2", from: "0.5.15"),
         // Plan 2: LiftServer (HTTP + MCP) and lift-mcp.
         .package(url: "https://github.com/kishikawakatsumi/KeychainAccess", from: "4.2.2"),
         .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.27.1"),
@@ -30,6 +31,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "LiftCore", dependencies: [
+            .product(name: "GLTFKit2", package: "GLTFKit2"),
             .product(name: "GRDB", package: "GRDB.swift"),
             .product(name: "Yams", package: "Yams"),
             .product(name: "Subprocess", package: "swift-subprocess"),

@@ -1,5 +1,5 @@
 {
-  "originHash" : "40a87b2bdaeeece68d6b5ee5e85d94f087ef7d70ddfa1044c9fa5d50f95ec94b",
+  "originHash" : "a60c9b89942bee7492e42ce17c03123ee57b8807d69534a52a54d64e21c91eb6",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "86b5096ac59ab46e66bd1f6377c604bc1dab0bc2",
         "version" : "1.5.1"
+      }
+    },
+    {
+      "identity" : "gltfkit2",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/warrenm/GLTFKit2",
+      "state" : {
+        "revision" : "e69e354c4f31ea07b7816b8cbe2ddb28e897d073",
+        "version" : "0.5.15"
       }
     },
     {
