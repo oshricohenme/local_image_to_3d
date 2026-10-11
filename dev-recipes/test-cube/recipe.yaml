@@ -18,6 +18,8 @@ install:
   - uv pip install "trimesh>=4,<5" numpy
 shim: { env: { TEST_CUBE_SHIM: "on" } }   # exercises lift_shim + .pth + LIFT_SHIM end to end
 substitutes: [flash_attn]
+errors:   # plain messages for known failures (the raw error follows as details)
+  - { match: "failed on purpose", message: "The Test Cube failed because its Fail setting is on." }
 resources:
   memory_gb: 0.5
   memory_keys: [size]

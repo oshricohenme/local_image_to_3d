@@ -26,6 +26,8 @@ public struct LiftConfig: Sendable {
     public var weightsMetadata: any WeightsMetadata
     /// How long a failed or unknown weights check waits before a waiting job triggers another.
     public var weightsRecheckInterval: Duration
+    /// Where `models_readme` fetches READMEs before a model is installed (a fake in tests).
+    public var readmeHTTP: any ReadmeHTTP
 
     public init(workdir: URL, workerRuntime: URL, bundledRecipes: URL, runner: any CommandRunner = SubprocessRunner(),
                 toolSearchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local",
@@ -33,7 +35,7 @@ public struct LiftConfig: Sendable {
                 systemFree: @escaping @Sendable () -> Int = Memory.systemFree, physicalMemory: Int = Memory.physical,
                 hfToken: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["HF_TOKEN"] },
                 hfHub: URL = HFHubAPI.defaultCache, weightsMetadata: (any WeightsMetadata)? = nil,
-                weightsRecheckInterval: Duration = .seconds(30)) {
+                weightsRecheckInterval: Duration = .seconds(30), readmeHTTP: any ReadmeHTTP = URLSessionReadmeHTTP()) {
         self.workdir = workdir
         self.workerRuntime = workerRuntime
         self.bundledRecipes = bundledRecipes
@@ -49,6 +51,7 @@ public struct LiftConfig: Sendable {
         self.hfHub = hfHub
         self.weightsMetadata = weightsMetadata ?? HFHubAPI(token: hfToken)
         self.weightsRecheckInterval = weightsRecheckInterval
+        self.readmeHTTP = readmeHTTP
     }
 }
 
@@ -509,7 +512,7 @@ public actor Lift {
                   var step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]),
                   step.state == .running, step.workerId == w.id else { return }  // cancelled, or retried elsewhere: discarded
             if let error {
-                try self.setState(db, job: job, step: step, .failed, error: error)
+                try self.setState(db, job: job, step: step, .failed, error: w.recipe.failureMessage(error))
                 return
             }
             try Estimates.record(db, recipe: w.recipe.id, task: a.task, keyValues: a.keyValues, kind: .job, bytes: jobBytes)
@@ -545,7 +548,7 @@ public actor Lift {
             let id = a.jobId
             try store.db.write { db in
                 if let job = try JobRecord.fetchOne(db, key: id), let step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]), step.state.isActive, step.workerId == w.id {
-                    try self.setState(db, job: job, step: step, .failed, error: message)
+                    try self.setState(db, job: job, step: step, .failed, error: w.recipe.failureMessage(message))
                 }
             }
             logs[id] = nil

@@ -216,6 +216,11 @@ public struct Recipe: Codable, Sendable, Equatable {
         let text = ([error] + log).joined(separator: "\n")
         return errors.first { text.range(of: $0.match, options: .regularExpression) != nil }?.message
     }
+
+    /// What a failed step shows: the plain message first when one matches, then the raw error as details.
+    public func failureMessage(_ error: String, log: [String] = []) -> String {
+        plainError(error, log: log).map { "\($0)\n\nDetails: \(error)" } ?? error
+    }
 }
 
 /// The outcome of reading one recipe folder.

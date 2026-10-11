@@ -191,6 +191,14 @@ extension Lift {
         return .done(try? modelView(id))
     }
 
+    /// The model's upstream README (spec §4a): Lift's own clone once installed, else fetched at the pin and
+    /// cached; offline, the cached copy (`cached: true`); nil when there is none.
+    public func modelsReadme(_ id: String) async throws -> Readme? {
+        guard let recipe = recipe(id) else { throw LiftError.notFound("recipe \(id)") }
+        return await ReadmeLoader(http: config.readmeHTTP)
+            .load(recipe, pin: settings.pinOverrides[id], modelDir: installer.dir(id), installed: installed[id] != nil)
+    }
+
     public func modelsInstallLog(_ id: String) throws -> String {
         guard let text = try? String(contentsOf: installer.logURL(id), encoding: .utf8) else { throw LiftError.notFound("install log for \(id)") }
         return text
