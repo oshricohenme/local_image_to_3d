@@ -107,3 +107,28 @@ def test_timer_redirected():
     t.start()
     t.join()
     assert result == {"dev": TARGET}
+
+
+@pytest.fixture
+def cuda_checkpoint(tmp_path, monkeypatch):
+    # No CUDA here to save from, so tag the CPU storages 'cuda:0' at save time, as a CUDA box would.
+    t = torch.arange(6, dtype=torch.float32)
+    p = tmp_path / "ckpt.pt"
+    with monkeypatch.context() as m:
+        m.setattr(torch.serialization, "location_tag", lambda storage: "cuda:0")
+        torch.save({"w": t}, p)
+    return p, t
+
+
+@pytest.mark.parametrize("kw", [{}, {"map_location": "cuda"}, {"map_location": "cuda:0"},
+                                {"map_location": torch.device("cuda")}, {"map_location": {"cpu": "cuda:0"}},
+                                {"map_location": lambda storage, loc: None}])
+def test_load_cuda_checkpoint(cuda_checkpoint, kw):
+    p, t = cuda_checkpoint
+    w = torch.load(p, **kw)["w"]
+    assert w.device.type == TARGET and torch.equal(w.cpu(), t)
+
+
+def test_load_cuda_checkpoint_explicit_cpu_stays_cpu(cuda_checkpoint):
+    p, t = cuda_checkpoint
+    assert torch.load(p, map_location="cpu")["w"].device.type == "cpu"

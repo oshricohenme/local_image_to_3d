@@ -101,6 +101,16 @@ def _patch_cuda_module() -> None:
 
     torch.autocast.__init__ = autocast_init
 
+    # torch.load: every map_location form (None, str, device, dict, callable returning None) ends in
+    # this module-global lookup, so CUDA-saved checkpoints land on the target. Patching torch.load
+    # itself would break its safetensors/jit paths, which only accept str/device.
+    original_restore = torch.serialization.default_restore_location
+
+    def default_restore_location(storage, location):
+        return original_restore(storage, _target if _is_cuda(location) else location)
+
+    torch.serialization.default_restore_location = default_restore_location
+
 
 def install_device_redirect(target: str) -> None:
     global _target
