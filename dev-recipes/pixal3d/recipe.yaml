@@ -1,0 +1,142 @@
+# Pixal3D (TencentARC) through lift_shim. Install steps and pins: docs/superpowers/findings/2026-10-go-no-go.md.
+schema: 1
+id: pixal3d
+name: Pixal3D
+description: >-
+  Turns one photo of an object, or a few photos of it from different sides, into a detailed textured 3D model.
+  Works best on a single object on a plain background; needs about 18 GB of memory (12 GB in low-memory mode)
+  and takes several minutes per model.
+publisher: TencentARC
+license: MIT
+homepage: https://github.com/TencentARC/Pixal3D
+repo: https://github.com/TencentARC/Pixal3D
+commit: f7cf38429b0bd264f1995f0f8743a88b1c728b94
+python: "3.11"
+platform: { status: supported }
+shim: {}          # on; the substitutes below add the nvdiffrast alias and the flash_attn stand-in
+metal_toolchain: true
+install:
+  # torch 2.11: the mtl* substitutes need >=2.11 and build with C++17, which 2.14 headers reject.
+  - uv pip install "torch==2.11.*" torchvision
+  # MoGe (unpinned in requirements.txt) is installed below at a pin and without its CUDA-only deps;
+  # MoGe needs trimesh>=4.11 while requirements.txt pins 4.10.1.
+  - grep -v MoGe repo/requirements.txt > requirements-mac.txt && echo "trimesh>=4.11" > overrides-mac.txt
+  - uv pip install -r requirements-mac.txt --override overrides-mac.txt
+  - uv pip install --no-deps "moge @ git+https://github.com/microsoft/MoGe.git@74fbce054ebed49800de42d0ad0e83495065719a"
+  - uv pip install "click>=8.3.1" matplotlib requests huggingface-hub starlette "utils3d_moge @ git+https://github.com/EasternJournalist/utils3d-moge.git@62f09d58509485564e24d5d9f6aac9ee9ebc0c37" "pipeline @ git+https://github.com/EasternJournalist/pipeline.git@1c511390d90226c00c101f34b84df26a0f8789b4"
+  - uv pip install https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
+  - uv pip install setuptools wheel pybind11 xatlas fast-simplification scipy
+substitutes: [flex_gemm, nvdiffrast, cumesh, o_voxel, flash_attn]
+attribution:   # spec §4a; facts from the README, NOTICE and LICENSE at the pin and the Hugging Face cards
+  project: Pixal3D
+  authors: [Dong-Yang Li, Wang Zhao, Yuxin Chen, Wenbo Hu, Meng-Hao Guo, Fang-Lue Zhang, Ying Shan, Shi-Min Hu,
+            Tsinghua University (BNRist), Tencent ARC Lab, Victoria University of Wellington]
+  homepage: https://ldyang694.github.io/projects/pixal3d/
+  repo: https://github.com/TencentARC/Pixal3D
+  paper:
+    title: "Pixal3D: Pixel-Aligned 3D Generation from Images (SIGGRAPH 2026)"
+    url: https://arxiv.org/abs/2605.10922
+    bibtex: |
+      @article{li2026pixal3d,
+          title={Pixal3D: Pixel-Aligned 3D Generation from Images},
+          author={Li, Dong-Yang and Zhao, Wang and Chen, Yuxin and Hu, Wenbo and Guo, Meng-Hao and Zhang, Fang-Lue and Shan, Ying and Hu, Shi-Min},
+          journal={arXiv preprint arXiv:2605.10922},
+          year={2026}
+      }
+  license: { spdx: MIT, url: https://github.com/TencentARC/Pixal3D/blob/f7cf38429b0bd264f1995f0f8743a88b1c728b94/LICENSE }
+  components:
+    - { name: Pixal3D weights, role: model weights, url: https://huggingface.co/TencentARC/Pixal3D, license: { spdx: MIT, url: https://huggingface.co/TencentARC/Pixal3D/blob/main/LICENSE } }
+    - { name: MoGe-2 ViT-L, role: camera estimation, url: https://huggingface.co/Ruicheng/moge-2-vitl, license: { spdx: MIT, url: https://huggingface.co/Ruicheng/moge-2-vitl } }
+    - { name: MoGe, role: camera estimation code, url: https://github.com/microsoft/MoGe, license: { spdx: NOASSERTION, url: https://github.com/microsoft/MoGe/blob/74fbce054ebed49800de42d0ad0e83495065719a/LICENSE } }
+    - { name: DINOv3 ViT-L/16 (camenduru mirror of Meta's model), role: image features, url: https://huggingface.co/camenduru/dinov3-vitl16-pretrain-lvd1689m,
+        license: { spdx: LicenseRef-DINOv3, url: https://ai.meta.com/resources/models-and-libraries/dinov3-license/ },
+        restrictions: [no military or weapons use, "show \"Built with DINOv3\" when redistributing"] }
+    - { name: RMBG-2.0 by BRIA AI, role: background removal, url: https://huggingface.co/briaai/RMBG-2.0,
+        license: { spdx: CC-BY-NC-4.0, url: https://creativecommons.org/licenses/by-nc/4.0/ }, restrictions: [non-commercial] }
+    - { name: NAF by valeo.ai, role: feature upsampling (torch.hub), url: https://github.com/valeoai/NAF, license: { spdx: Apache-2.0, url: https://github.com/valeoai/NAF/blob/main/LICENSE } }
+    - { name: utils3d-moge and pipeline by EasternJournalist, role: library, url: https://github.com/EasternJournalist/utils3d-moge, license: { spdx: MIT, url: https://github.com/EasternJournalist/utils3d-moge/blob/62f09d58509485564e24d5d9f6aac9ee9ebc0c37/LICENSE } }
+    - { name: utils3d 0.0.2 wheel, role: library, url: https://github.com/LDYang694/Storages, license: { spdx: MIT, url: https://github.com/LDYang694/Storages/blob/master/LICENSE } }
+    - { name: mtlgemm by pedronaugusto, role: Mac port (sparse convolution on Metal), url: https://github.com/pedronaugusto/mtlgemm, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlgemm/blob/566c133781ce4992de3f77c3a97dd6feaae9d013/LICENSE } }
+    - { name: mtldiffrast by pedronaugusto, role: Mac port (rasterizer on Metal), url: https://github.com/pedronaugusto/mtldiffrast, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtldiffrast/blob/c9499ba2e4ed6849e95ce5da7aae5bf61addb528/LICENSE.txt } }
+    - { name: mtlbvh by pedronaugusto, role: Mac port (BVH on Metal), url: https://github.com/pedronaugusto/mtlbvh, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlbvh/blob/6b2a0f63b476ad8225695d092902104beafd7f58/LICENSE.txt } }
+    - { name: mtlmesh by pedronaugusto, role: Mac port (mesh ops on Metal), url: https://github.com/pedronaugusto/mtlmesh, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlmesh/blob/7de3864f783407201486bf6c900a4bd76a4018a3/LICENSE } }
+    - { name: trellis2-apple (o-voxel) by pedronaugusto, role: Mac port (texture baking), url: https://github.com/pedronaugusto/trellis2-apple, license: { spdx: MIT, url: https://github.com/pedronaugusto/trellis2-apple/blob/17347247c91c36c8cdc1896234983e878a457bba/LICENSE } }
+weights:
+  - { repo: TencentARC/Pixal3D }
+  - { repo: Ruicheng/moge-2-vitl }
+  - { repo: camenduru/dinov3-vitl16-pretrain-lvd1689m }
+  - { repo: briaai/RMBG-2.0, gated: true, files: [config.json, BiRefNet_config.py, birefnet.py, model.safetensors] }   # BiRefNet; not the ONNX exports
+  # Also fetched by upstream at first run, outside Hugging Face: the NAF upsampler via torch.hub (github.com/valeoai/NAF).
+resources:
+  memory_gb: 18
+  memory_keys: [low_vram, resolution]
+  memory_overrides: [{ when: { low_vram: true }, memory_gb: 12 }]
+  disk_gb: 3
+stages:
+  - { pattern: '^\[(?:Pipeline|ImageCond|NAF|MoGe-2|Views|Camera|Inference|Done)\] (?P<name>.+)$' }
+  - { pattern: '^(?P<name>[^:|]+):\s*(?P<pct>\d+)%\|' }
+  - { pattern: '^\s*(?P<pct>\d+)%\|' }
+errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
+  - { match: "MPS backend out of memory|Invalid buffer size|out of memory", message: "Your Mac ran out of memory for this model. Turn on Low memory mode, or close other apps and try again." }
+  - { match: "views=four_view needs images named", message: "For the 4-view layout, name the photos front, right, back and left." }
+  - { match: "views=transforms needs", message: "This folder has no transforms.json. Choose the 4-view or orbit layout instead." }
+  - { match: "403|401|gated", message: "Your Hugging Face account doesn't have access to RMBG-2.0 yet. Open the model page, accept its terms, then try again." }
+tasks:
+  - id: image_to_3d
+    modality: 3d
+    label: Photo → 3D model
+    inputs: [{ name: image, type: image }]
+    output: mesh
+    entry: inference:run_inference
+    settings:   # every keyword argument of inference.run_inference except image_path/output_path, with its defaults
+      - { key: resolution, label: Quality, type: enum, options: [-1, 1024, 1536], default: -1, group: basic, help: "Higher is more detailed but slower and needs more memory. -1 picks 1536, or 1024 in low-memory mode." }
+      - { key: low_vram, label: Low memory mode, type: bool, default: false, group: basic, help: "Uses about 10–12 GB instead of about 18 GB, but takes longer." }
+      - { key: seed, label: Variation, type: int, default: 42, group: basic, help: "Change this number to get a different version of the same object." }
+      - { key: manual_fov, label: Camera field of view, type: float, default: -1.0, group: advanced, help: "In radians, e.g. 0.2. Leave at -1 to have it estimated from the photo." }
+      - { key: ss_guidance_strength, label: Shape outline guidance, type: float, default: 7.5, group: advanced, help: "How closely the rough shape follows the photo." }
+      - { key: ss_guidance_rescale, label: Shape outline guidance rescale, type: float, default: 0.7, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: ss_sampling_steps, label: Shape outline steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: ss_rescale_t, label: Shape outline time rescale, type: float, default: 5.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: shape_slat_guidance_strength, label: Shape detail guidance, type: float, default: 7.5, group: advanced, help: "How closely the fine shape follows the photo." }
+      - { key: shape_slat_guidance_rescale, label: Shape detail guidance rescale, type: float, default: 0.5, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: shape_slat_sampling_steps, label: Shape detail steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: shape_slat_rescale_t, label: Shape detail time rescale, type: float, default: 3.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: tex_slat_guidance_strength, label: Texture guidance, type: float, default: 1.0, group: advanced, help: "How closely the colors follow the photo." }
+      - { key: tex_slat_guidance_rescale, label: Texture guidance rescale, type: float, default: 0.0, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: tex_slat_sampling_steps, label: Texture steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: tex_slat_rescale_t, label: Texture time rescale, type: float, default: 3.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: mesh_scale, label: Object size in frame, type: float, default: 1.0, group: advanced, help: "How much of the frame the object fills, for camera estimation." }
+      - { key: extend_pixel, label: Extra border (pixels), type: int, default: 0, group: advanced, help: "Extra margin around the object for camera estimation." }
+      - { key: image_resolution, label: Working image size, type: int, default: 512, min: 1, group: advanced, help: "Size the photo is scaled to for camera estimation." }
+      - { key: max_num_tokens, label: Detail budget, type: int, default: 49152, min: 1, group: advanced, help: "Upper limit on detail; lower it if you run out of memory." }
+      - { key: model_path, label: Model, type: string, default: TencentARC/Pixal3D, group: advanced, help: "Hugging Face model name or a local folder with the weights." }
+  - id: image_set_to_3d
+    modality: 3d
+    label: Several photos → 3D model
+    inputs: [{ name: views, type: image_set }]
+    output: mesh
+    entry: inference_mv:run_inference
+    settings:   # the view layout (spec §4), then every keyword argument of inference_mv.run_inference except views_dir/output_path
+      - { key: views, label: Photo layout, type: enum, options: [transforms, four_view, orbit], default: four_view, group: basic, help: "four_view: photos named front, right, back and left. orbit: photos taken all around the object, in name order. transforms: the folder has a transforms.json camera file." }
+      - { key: resolution, label: Quality, type: enum, options: [-1, 1024, 1536], default: -1, group: basic, help: "Higher is more detailed but slower and needs more memory. -1 picks 1536, or 1024 in low-memory mode." }
+      - { key: low_vram, label: Low memory mode, type: bool, default: false, group: basic, help: "Uses less memory, but takes longer." }
+      - { key: seed, label: Variation, type: int, default: 42, group: basic, help: "Change this number to get a different version of the same object." }
+      - { key: orbit_elevation_deg, label: Camera height (degrees), type: float, default: 0.0, min: -89, max: 89, group: advanced, help: "Orbit layout only: how far above the object the photos were taken." }
+      - { key: orbit_fov_deg, label: Camera field of view (degrees), type: float, default: 20.0, min: 1, max: 179, group: advanced, help: "Orbit layout only: the lens's horizontal angle. The upstream example uses 20°." }
+      - { key: orbit_distance, label: Camera distance, type: float, default: 3.1192049980163574, min: 0.01, group: advanced, help: "Orbit layout only: camera distance in object units (the upstream example's value for 20°)." }
+      - { key: num_views, label: Photos used, type: int, default: 0, min: 0, group: advanced, help: "Use only the first N photos; 0 uses all of them." }
+      - { key: ss_guidance_strength, label: Shape outline guidance, type: float, default: 7.5, group: advanced, help: "How closely the rough shape follows the photos." }
+      - { key: ss_guidance_rescale, label: Shape outline guidance rescale, type: float, default: 0.7, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: ss_sampling_steps, label: Shape outline steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: ss_rescale_t, label: Shape outline time rescale, type: float, default: 5.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: shape_slat_guidance_strength, label: Shape detail guidance, type: float, default: 7.5, group: advanced, help: "How closely the fine shape follows the photos." }
+      - { key: shape_slat_guidance_rescale, label: Shape detail guidance rescale, type: float, default: 0.5, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: shape_slat_sampling_steps, label: Shape detail steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: shape_slat_rescale_t, label: Shape detail time rescale, type: float, default: 3.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: tex_slat_guidance_strength, label: Texture guidance, type: float, default: 1.0, group: advanced, help: "How closely the colors follow the photos." }
+      - { key: tex_slat_guidance_rescale, label: Texture guidance rescale, type: float, default: 0.0, group: advanced, help: "Softens strong guidance to avoid artifacts." }
+      - { key: tex_slat_sampling_steps, label: Texture steps, type: int, default: 12, min: 1, group: advanced, help: "More steps can add detail and take longer." }
+      - { key: tex_slat_rescale_t, label: Texture time rescale, type: float, default: 3.0, group: advanced, help: "Sampler schedule setting; leave as is unless you know it." }
+      - { key: max_num_tokens, label: Detail budget, type: int, default: 49152, min: 1, group: advanced, help: "Upper limit on detail; lower it if you run out of memory." }
+      - { key: model_path, label: Model, type: string, default: TencentARC/Pixal3D, group: advanced, help: "Hugging Face model name or a local folder with the weights." }
+      - { key: config_file, label: Pipeline file, type: string, default: pipeline_mv.json, group: advanced, help: "The multi-view pipeline file inside the model." }

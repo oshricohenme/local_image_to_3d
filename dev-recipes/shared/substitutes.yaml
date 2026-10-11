@@ -1,10 +1,56 @@
 # Substitute registry (spec §5): CUDA-only package → how to provide it on Apple Silicon.
 # Keys are the names recipes list under `substitutes:`. Fields:
-#   install: commands run in models/<id>/ with the venv active
+#   install: commands run in models/<id>/ with the venv active, after the recipe's own install steps
 #   alias:   `import <key>` resolves to this installed module (lift_shim alias)
 #   standin: a lift_shim built-in stand-in
 #   patches: named lift_shim runtime patches the substitute needs
-# Recipes using alias/standin/patches must have `shim:`. Metal substitutes (flex_gemm, nvdiffrast,
-# o_voxel, cumesh) and torch_scatter/torch_cluster are added in Plan 4 from the go/no-go findings.
+# Recipes using alias/standin/patches must have `shim:`.
+#
+# Metal builds: pedronaugusto's forks, pinned to the commits verified in the go/no-go test
+# (docs/superpowers/findings/2026-10-go-no-go.md). They compile against the venv's torch
+# (--no-build-isolation) with a hardcoded -std=c++17, so they need torch >=2.11 (at::mps::dispatch_sync_with_rethrow)
+# and <2.14 (its headers need C++20); each checks that first. MACOSX_DEPLOYMENT_TARGET=12.0 because PyTorch's MPS
+# headers reject uv Python's default 11.0. They need the Metal Toolchain: recipes using them set `metal_toolchain: true`.
+# deps/ is Lift's own folder in models/<id>/; the installer empties it before every install, and each clone
+# step converges anyway (clones when missing, else fetches and force-checks-out the pin).
+
+flex_gemm:
+  install:
+    - python -c "import torch; v = torch.__version__; assert '2.11' <= v < '2.14', f'mtlgemm needs torch >=2.11,<2.14; found {v}'"
+    - '{ [ -d deps/mtlgemm/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlgemm deps/mtlgemm; } && git -C deps/mtlgemm fetch -q origin && git -C deps/mtlgemm checkout -qf 566c133781ce4992de3f77c3a97dd6feaae9d013'
+    - MACOSX_DEPLOYMENT_TARGET=12.0 uv pip install --no-build-isolation deps/mtlgemm
+
+nvdiffrast:
+  alias: mtldiffrast
+  install:
+    - python -c "import torch; v = torch.__version__; assert '2.11' <= v < '2.14', f'mtldiffrast needs torch >=2.11,<2.14; found {v}'"
+    - '{ [ -d deps/mtldiffrast/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtldiffrast deps/mtldiffrast; } && git -C deps/mtldiffrast fetch -q origin && git -C deps/mtldiffrast checkout -qf c9499ba2e4ed6849e95ce5da7aae5bf61addb528'
+    - MACOSX_DEPLOYMENT_TARGET=12.0 uv pip install --no-build-isolation deps/mtldiffrast
+
+# mtlmesh provides the `cumesh` module and imports mtlbvh, so mtlbvh is built first.
+cumesh:
+  install:
+    - python -c "import torch; v = torch.__version__; assert '2.11' <= v < '2.14', f'mtlmesh needs torch >=2.11,<2.14; found {v}'"
+    - '{ [ -d deps/mtlbvh/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlbvh deps/mtlbvh; } && git -C deps/mtlbvh fetch -q origin && git -C deps/mtlbvh checkout -qf 6b2a0f63b476ad8225695d092902104beafd7f58'
+    - '{ [ -d deps/mtlmesh/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlmesh deps/mtlmesh; } && git -C deps/mtlmesh fetch -q origin && git -C deps/mtlmesh checkout -qf 7de3864f783407201486bf6c900a4bd76a4018a3'
+    - MACOSX_DEPLOYMENT_TARGET=12.0 uv pip install --no-build-isolation deps/mtlbvh
+    - MACOSX_DEPLOYMENT_TARGET=12.0 uv pip install --no-build-isolation deps/mtlmesh
+
+# o_voxel from the Apple fork. Without its Eigen submodule it silently builds without the Metal baker.
+o_voxel:
+  install:
+    - python -c "import torch; v = torch.__version__; assert '2.11' <= v < '2.14', f'o_voxel needs torch >=2.11,<2.14; found {v}'"
+    - '{ [ -d deps/trellis2-apple/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/trellis2-apple deps/trellis2-apple; } && git -C deps/trellis2-apple fetch -q origin && git -C deps/trellis2-apple checkout -qf 17347247c91c36c8cdc1896234983e878a457bba'
+    - git -C deps/trellis2-apple submodule update --init --depth 1 o-voxel/third_party/eigen
+    - MACOSX_DEPLOYMENT_TARGET=12.0 uv pip install --no-build-isolation deps/trellis2-apple/o-voxel
+
 flash_attn: { standin: flash_attn }
+
+# spconv has no macOS wheel or sdist: lift_shim's pure-torch SubMConv3d / SparseConvTensor.
 spconv: { standin: spconv }
+
+# The recipe installs CPU builds of torch_scatter / torch_cluster; these patches move their CPU-only
+# compiled ops (segment_csr, fps) through the CPU when called with MPS tensors.
+torch_scatter: { patches: [torch_scatter_mps] }
+torch_cluster: { patches: [torch_cluster_mps] }
+
