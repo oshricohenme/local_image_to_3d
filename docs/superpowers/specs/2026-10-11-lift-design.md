@@ -162,7 +162,6 @@ resources:
   memory_gb: 18                        # starting estimate
   memory_keys: [low_vram, resolution]  # settings that change memory; learned per combination
   memory_overrides: [{ when: { low_vram: true }, memory_gb: 12 }]
-  max_concurrent_per_process: 1        # >1 only once verified safe (see §8)
 tasks:
   - id: image_to_3d
     modality: 3d
@@ -402,8 +401,8 @@ Condition 3 uses `host_statistics64` free + inactive pages.
 notifications. `jobs.force_start` (with confirm) skips conditions 2 and 3 but not 1.
 
 **Workers:** each worker is one Python process for one recipe that keeps its model loaded.
-- If an idle worker for the recipe exists and `max_concurrent_per_process` allows it, the step goes there
-  and only its per-job working memory is added (learned).
+- If an idle worker (no running job) for the recipe exists, the step goes there and only its per-job
+  working memory is added (learned).
 - Otherwise a new worker (a new loaded copy) is started, if it fits in the budget.
 - A worker with no jobs for `idle_unload_minutes` is stopped. MCP/HTTP/UI can also load a worker ahead
   of time (`workers.load`) or unload one.
@@ -417,10 +416,16 @@ notifications. `jobs.force_start` (with confirm) skips conditions 2 and 3 but no
 
 These are measurements, not decisions.
 
-**Concurrency inside one process:** the launcher keeps a thread pool of size `max_concurrent_per_process`.
-Upstream `torch.manual_seed` is process-global, so concurrent jobs in one process can't guarantee
-seed reproducibility. The UI and API say so wherever concurrency is greater than 1. Every v1 recipe
-defaults to 1 and is raised only if the go/no-go test shows it is safe.
+**One job per worker process; every job can be killed at any moment** (user decision).
+- Every model runs in a background worker process, never in the app. It streams status, progress, logs
+  and outputs back to the app, and the app's UI never blocks on it.
+- A worker runs one job at a time. A loaded worker serves job after job without reloading, and parallelism
+  comes from more worker processes (more loaded copies), under the memory warning rules.
+- **Cancel/Kill of a running job is immediate.** It sends SIGKILL to that job's worker and its whole
+  process group, so grandchildren and any GPU memory they hold go too. The step is marked cancelled, and
+  the next job for that model starts a fresh worker.
+- The earlier option of several jobs sharing one process (`max_concurrent_per_process`) is removed:
+  jobs sharing a process can't be killed individually.
 
 ### Worker protocol (JSON lines, version 1)
 
