@@ -49,7 +49,7 @@ func weightedBundle() throws -> URL {
         #expect(model?.status == .weightsMissing([WeightProblem(repo: "org/weights", path: "w.bin", issue: .missing)]))
         #expect(try await lift.modelsDownloadWeights("weighted").impact?.contains("org/weights@main") == true)
         let id = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "weighted", task: "image_to_3d",
-                                                                              inputs: ["image": try Fixtures.image()])])).job.id
+                                                                              inputs: ["image": try Fixtures.image()])])).accepted().job.id
         #expect(try await eventually { try await lift.jobsGet(id).job.waitReason == .weightsUnverified })
         try writeHFCache(hub: hub, repo: "org/weights", commit: commit, files: ["w.bin": Data([1, 2, 3])], lfs: ["w.bin"])  // the user downloaded it
         #expect(try await lift.modelsVerifyWeights("weighted").state == .ok)
@@ -70,7 +70,7 @@ func weightedBundle() throws -> URL {
         await #expect(throws: DecodingError.self) { try await lift.modelsVerifyWeights("weighted") }
         #expect(await !lift.verifying.contains("weighted"))
         let id = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "weighted", task: "image_to_3d",
-                                                                              inputs: ["image": try Fixtures.image()])])).job.id
+                                                                              inputs: ["image": try Fixtures.image()])])).accepted().job.id
         #expect(try await eventually { try await lift.jobsGet(id).job.waitReason == .weightsUnverified })
         // The API recovers and the files are there: the background recheck must run and let the job go.
         let snap = try writeHFCache(hub: hub, repo: "org/weights", commit: commit, files: ["w.bin": Data([1])], lfs: ["w.bin"])

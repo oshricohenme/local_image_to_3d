@@ -33,7 +33,7 @@ actor CubeFixture {
     }
 
     func run(_ lift: Lift, _ steps: [StepRequest]) async throws -> JobView {
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: steps)).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: steps)).accepted().job.id
         return try await lift.jobsWait(id, timeout: .seconds(120))
     }
 
@@ -48,7 +48,7 @@ actor CubeFixture {
     @Test func submitWaitSucceeds() async throws {
         let lift = try await CubeFixture.shared.get()
         let seen = Mutex<Set<JobState>>([])
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["size": .float(2)])])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["size": .float(2)])])).accepted().job.id
         let v = try await lift.jobsWait(id, timeout: .seconds(120)) { v in _ = seen.withLock { $0.insert(v.job.state) } }
         #expect(v.job.state == .succeeded)
         let glb = try #require(v.outputs.first)
@@ -80,7 +80,7 @@ actor CubeFixture {
         let lift = try await CubeFixture.shared.get()
         let name = "a\u{2028}b\u{2029}c\u{85}d.png"
         let step = StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image(named: name)], settings: ["fail": .bool(true)])
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [step])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [step])).accepted().job.id
         let v = try await lift.jobsWait(id, timeout: .seconds(20))
         #expect(v.job.state == .failed)  // not stuck in running because the error line got split
         #expect(v.job.error?.contains("for \(name)") == true)
@@ -96,7 +96,7 @@ actor CubeFixture {
 
     @Test func cancelRunningStopsTheWorker() async throws {
         let lift = try await CubeFixture.shared.get()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60)])])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60)])])).accepted().job.id
         #expect(try await eventually { try await lift.jobsGet(id).job.state == .running })
         #expect(try await lift.jobsCancel(id).impact != nil)
         #expect(try await lift.jobsCancel(id, confirm: true).value?.job.state == .cancelled)
@@ -124,7 +124,7 @@ actor CubeFixture {
     /// Spec §8: cancel of a running job is an immediate SIGKILL of its worker's whole process group.
     @Test func cancelKillsTheWorkerAndItsChildrenImmediately() async throws {
         let lift = try await CubeFixture.shared.get()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60), "grandchild": .bool(true)])])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60), "grandchild": .bool(true)])])).accepted().job.id
         let log = lift.config.workdir.appending(path: "jobs/\(id)/log.txt")
         var grandchild: Int32 = 0
         #expect(try await eventually {

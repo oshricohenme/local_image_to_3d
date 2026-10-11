@@ -94,6 +94,9 @@ public final class Store: Sendable {
                 t.column("value", .text).notNull()
             }
         }
+        m.registerMigration("v2") { db in
+            try db.alter(table: "job") { t in t.add(column: "memoryAccepted", .boolean).notNull().defaults(to: false) }
+        }
         return m
     }
 }

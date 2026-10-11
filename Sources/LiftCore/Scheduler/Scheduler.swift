@@ -25,9 +25,12 @@ public struct Candidate: Sendable, Equatable {
     public var forceStart: Bool
     public var model: ModelReadiness
     public var need: MemoryNeed
+    /// The caller accepted a memory warning for this job.
+    public var memoryAccepted: Bool
 
     public init(jobId: String, recipe: String, priority: Priority = .normal, position: Double, createdAt: Date = Date(timeIntervalSince1970: 0),
-                forceStart: Bool = false, model: ModelReadiness = .ready, need: MemoryNeed) {
+                forceStart: Bool = false, model: ModelReadiness = .ready, need: MemoryNeed, memoryAccepted: Bool = false) {
+        self.memoryAccepted = memoryAccepted
         self.jobId = jobId
         self.recipe = recipe
         self.priority = priority
@@ -60,10 +63,12 @@ public struct SchedulerInput: Sendable {
     public var maxSlots: Int
     public var budget: Int
     public var systemFree: Int
+    public var physical: Int
     public var paused: Bool
 
     public init(candidates: [Candidate], workers: [WorkerSnapshot] = [], runningSteps: Int = 0, maxSlots: Int = 1,
-                budget: Int, systemFree: Int, paused: Bool = false) {
+                budget: Int, systemFree: Int, physical: Int = .max, paused: Bool = false) {
+        self.physical = physical
         self.candidates = candidates
         self.workers = workers
         self.runningSteps = runningSteps
@@ -94,6 +99,7 @@ public enum Scheduler {
         var reserved = input.workers.reduce(0) { $0 + $1.reserved }
         var systemFree = input.systemFree
         var capacity = input.workers.map { ($0.recipe, $0.freeCapacity) }
+        var startedHere = 0
         var out: [Decision] = []
         for c in input.candidates.sorted(by: order) {
             if input.paused { out.append(.wait(c.jobId, .queuePaused)); continue }
@@ -108,11 +114,16 @@ public enum Scheduler {
             let shared = capacity.firstIndex { $0.0 == c.recipe && $0.1 > 0 }
             let needed = shared == nil ? c.need.newWorker : c.need.job
             let budgetFree = input.budget - reserved
-            if !c.forceStart && (needed > budgetFree || needed > systemFree) {
+            // An accepted too-big job (over the budget or this Mac's RAM) can never fit, so it starts when the
+            // machine is otherwise idle, skipping the memory checks; until then it waits like any other.
+            let tooBig = c.memoryAccepted && (needed > input.budget || needed > input.physical)
+            let idle = input.runningSteps == 0 && startedHere == 0
+            if !c.forceStart && !(tooBig && idle) && (tooBig || needed > budgetFree || needed > systemFree) {
                 out.append(.wait(c.jobId, .memory(needed: needed, free: max(0, min(budgetFree, systemFree)))))
                 continue
             }
             out.append(.start(c.jobId))
+            startedHere += 1
             slots -= 1
             reserved += needed
             systemFree -= needed

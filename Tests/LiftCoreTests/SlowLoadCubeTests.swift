@@ -37,14 +37,14 @@ actor SlowLoadCubeFixture {
     /// this job, one job per worker); the job never runs and the next job gets a fresh worker.
     @Test func cancellingWhileTheWorkerLoadsKillsItAndTheJobNeverRuns() async throws {
         let lift = try await SlowLoadCubeFixture.shared.get()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
         #expect(try await eventually { try await lift.jobsGet(id).job.state == .loading })
         let worker = try #require(await lift.workersList().first { $0.job == id })
         #expect(try await lift.jobsCancel(id, confirm: true).value?.job.state == .cancelled)
         #expect(try await eventually(3) { await lift.workersList().allSatisfy { $0.id != worker.id } })
         try await Task.sleep(for: .seconds(2))
         #expect(!FileManager.default.fileExists(atPath: lift.config.workdir.appending(path: "jobs/\(id)/steps/0/cube.glb").path))
-        let next = try await lift.jobsWait(try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).job.id, timeout: .seconds(60))
+        let next = try await lift.jobsWait(try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id, timeout: .seconds(60))
         #expect(next.job.state == .succeeded && next.steps[0].workerId != worker.id)
     }
 }

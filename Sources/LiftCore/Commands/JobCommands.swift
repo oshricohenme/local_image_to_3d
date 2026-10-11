@@ -78,7 +78,7 @@ extension Lift {
 
     /// Validates every step (recipe, task, settings, inputs, chain types), copies inputs into
     /// `jobs/<id>/inputs/` (off the actor), and queues the job. Bad input throws `invalidInput` with per-field errors.
-    public func jobsSubmit(_ request: SubmitRequest) async throws -> JobView {
+    public func jobsSubmit(_ request: SubmitRequest, acceptMemoryWarning: Bool = false) async throws -> Admission<JobView> {
         guard !request.steps.isEmpty else { throw LiftError.invalidInput([FieldError("steps", "at least one step is required")]) }
         var errors: [FieldError] = []
         var checked: [(StepRequest, RecipeTask)] = []
@@ -95,6 +95,8 @@ extension Lift {
             checked.append((step, task))
         }
         if !errors.isEmpty { throw LiftError.invalidInput(errors) }
+        let warning = try memoryWarning(checked.map { ($0.0.recipe, $0.0.task, $0.0.settings) }, firstIndex: 0)
+        if let warning, !acceptMemoryWarning { return .memoryWarning(warning) }
 
         let id = UUID().uuidString.lowercased()
         let now = Date()
@@ -108,15 +110,33 @@ extension Lift {
         try await store.db.write { db in
             let position = (try Double.fetchOne(db, sql: "SELECT MAX(position) FROM job") ?? 0) + 1
             let job = JobRecord(id: id, title: request.title ?? firstInput ?? request.steps[0].recipe, priority: request.priority,
-                                position: position, source: request.source, state: .queued, forceStart: false, currentStep: 0,
-                                createdAt: now, updatedAt: now)
+                                position: position, source: request.source, state: .queued, forceStart: false,
+                                memoryAccepted: warning != nil, currentStep: 0, createdAt: now, updatedAt: now)
             try job.insert(db)
             for step in steps { try step.insert(db) }
             var e = EventRecord(id: nil, jobId: id, stepIdx: nil, at: now, kind: "state", detail: "queued")
             try e.insert(db)
         }
         tick()
-        return try view(id)
+        return .accepted(try view(id))
+    }
+
+    /// The first step whose memory estimate (a new worker: load + job) is above this Mac's RAM or the budget.
+    func memoryWarning(_ steps: [(recipe: String, task: String, settings: [String: SettingValue])], firstIndex: Int) throws -> MemoryWarning? {
+        let physical = config.physicalMemory, budget = settings.memoryBudgetBytes
+        for (i, s) in steps.enumerated() {
+            guard let r = recipe(s.recipe) else { continue }
+            let need = try store.db.read { try Estimates.need($0, recipe: r, task: s.task, settings: s.settings) }.newWorker
+            guard need > physical || need > budget else { continue }
+            func gb(_ b: Int, binary: Bool = false) -> Double { Double(b) / (binary ? 1_073_741_824 : 1e9) }
+            func text(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...1))) }
+            let (neededGB, physicalGB, budgetGB) = (gb(need), gb(physical, binary: true), gb(budget))
+            let message = need > physical
+                ? "This model usually needs about \(text(neededGB)) GB; this Mac has \(text(physicalGB)) GB. It may be very slow or fail."
+                : "This model usually needs about \(text(neededGB)) GB; your memory budget is \(text(budgetGB)) GB (this Mac has \(text(physicalGB)) GB). It may be very slow or fail."
+            return MemoryWarning(message: message, neededGB: neededGB, physicalGB: physicalGB, budgetGB: budgetGB, step: firstIndex + i)
+        }
+        return nil
     }
 
     /// Copies each step's file inputs into `<jobDir>/inputs/<step>-<name>/`; an image set copies only its
@@ -208,7 +228,7 @@ extension Lift {
 
     /// Re-queues a finished job from its first unfinished step (all steps if it succeeded).
     /// `settings` replaces that step's settings (validated) when given.
-    public func jobsRetry(_ id: String, settings: [String: SettingValue]? = nil) throws -> JobView {
+    public func jobsRetry(_ id: String, settings: [String: SettingValue]? = nil, acceptMemoryWarning: Bool = false) throws -> Admission<JobView> {
         let v = try view(id)
         guard v.job.state.isTerminal || v.job.state == .interrupted else { throw LiftError.invalidState("job \(id) is \(v.job.state.rawValue); only finished jobs can be retried") }
         let from = v.steps.firstIndex { $0.state != .succeeded } ?? 0
@@ -218,6 +238,9 @@ extension Lift {
             guard let task = recipe(s.recipe)?.task(s.task) else { throw LiftError.notFound("recipe \(s.recipe)") }
             newSettings = try task.validated(settings: settings, prefix: "settings")
         }
+        let warning = try memoryWarning(v.steps.filter { $0.idx >= from }.map { s in (s.recipe, s.task, s.idx == from ? newSettings ?? s.settings : s.settings) },
+                                        firstIndex: from)
+        if let warning, !acceptMemoryWarning { return .memoryWarning(warning) }
         try store.db.write { db in
             for var s in v.steps where s.idx >= from {
                 s.state = .queued
@@ -234,12 +257,13 @@ extension Lift {
             }
             var job = v.job
             job.currentStep = from
+            job.memoryAccepted = warning != nil
             job.error = nil
             job.finishedAt = nil
             try self.setState(db, job: job, step: nil, .queued)
         }
         tick()
-        return try view(id)
+        return .accepted(try view(id))
     }
 
     /// Sets the job's manual position among unfinished jobs and renumbers them 1…n.

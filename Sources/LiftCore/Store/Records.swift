@@ -79,6 +79,8 @@ public struct JobRecord: Codable, Sendable, Equatable, FetchableRecord, Persista
     public var state: JobState
     public var waitReason: WaitReason?
     public var forceStart: Bool
+    /// The caller accepted a memory warning: a too-big job starts once the machine is otherwise idle.
+    public var memoryAccepted: Bool = false
     /// Index of the step that runs next (or ran last).
     public var currentStep: Int
     public var error: String?

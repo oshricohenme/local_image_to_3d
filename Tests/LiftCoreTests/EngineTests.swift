@@ -8,18 +8,15 @@ extension Fixtures {
     /// a temp Hugging Face cache, no Homebrew and fixed system memory. Nothing real is installed or
     /// downloaded, so jobs wait with `model_not_installed`.
     static func lift(_ runner: FakeRunner = FakeRunner(), workdir: URL? = nil, searchDirs: [String] = [],
-                     bundle: URL = devRecipes, metadata: FakeMetadata = FakeMetadata(), hub: URL? = nil) async throws -> Lift {
+                     bundle: URL = devRecipes, metadata: FakeMetadata = FakeMetadata(), hub: URL? = nil,
+                     physical: Int = 64 << 30) async throws -> Lift {
         let workdir = try workdir ?? tempDir()
         let seed = try Store(path: workdir.appending(path: "lift.sqlite").path)
-        try await seed.db.write { db in
-            var s = try Settings.load(db)
-            s.devRecipes = true
-            try s.save(db)
-        }
+        try await seed.db.write { try SettingRecord(key: "dev_recipes", value: "true").save($0) }  // only this row
         return try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: workerRuntime, bundledRecipes: bundle,
                                               runner: runner, toolSearchDirs: searchDirs,
                                               homebrewPrefix: "/nonexistent-homebrew", rosettaPrefix: "/nonexistent-rosetta",
-                                              housekeepingInterval: .seconds(3600), systemFree: { 64_000_000_000 },
+                                              housekeepingInterval: .seconds(3600), systemFree: { 64_000_000_000 }, physicalMemory: physical,
                                               hfToken: { nil }, hfHub: try hub ?? tempDir(), weightsMetadata: metadata,
                                               weightsRecheckInterval: .milliseconds(100)))
     }
@@ -33,19 +30,19 @@ extension Fixtures {
     @Test func submitRejectsBadInputPerField() async throws {
         let lift = try await Fixtures.lift()
         let image = try Fixtures.image()
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [])) } == ["steps"])
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "nope", task: "x")])) } == ["steps[0].recipe"])
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "x")])) } == ["steps[0].task"])
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [self.cube(image, ["size": .int(0)])])) } == ["steps[0].settings.size"])
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d")])) } == ["steps[0].inputs.image"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [])).accepted() } == ["steps"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "nope", task: "x")])).accepted() } == ["steps[0].recipe"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "x")])).accepted() } == ["steps[0].task"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [self.cube(image, ["size": .int(0)])])).accepted() } == ["steps[0].settings.size"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d")])).accepted() } == ["steps[0].inputs.image"])
         let wrongChain = SubmitRequest(steps: [cube(image), StepRequest(recipe: "test-cube", task: "image_to_3d")])
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(wrongChain) } == ["steps[1].task"])
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(wrongChain).accepted() } == ["steps[1].task"])
         #expect(try await lift.jobsList().isEmpty)
     }
 
     @Test func submitCopiesInputsAndWaitsForTheModel() async throws {
         let lift = try await Fixtures.lift()
-        let v = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")]))
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")])).accepted()
         #expect(v.job.title == "photo")
         let input = try #require(v.steps[0].inputs["image"])
         #expect(input.hasPrefix(lift.config.workdir.appending(path: "jobs/\(v.job.id)/inputs").path))
@@ -58,7 +55,7 @@ extension Fixtures {
 
     @Test func pauseAndResume() async throws {
         let lift = try await Fixtures.lift()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).accepted().job.id
         _ = try await lift.queuePause()
         #expect(try await lift.jobsGet(id).job.waitReason == .queuePaused)
         _ = try await lift.queueResume()
@@ -69,7 +66,7 @@ extension Fixtures {
         let lift = try await Fixtures.lift()
         let image = try Fixtures.image()
         var ids: [String] = []
-        for _ in 0..<3 { ids.append(try await lift.jobsSubmit(SubmitRequest(steps: [cube(image)])).job.id) }
+        for _ in 0..<3 { ids.append(try await lift.jobsSubmit(SubmitRequest(steps: [cube(image)])).accepted().job.id) }
         func order() async throws -> [String] { try await lift.queueStatus().jobs.map(\.job.id) }
         #expect(try await order() == ids)
         _ = try await lift.jobsMove(ids[2], to: .before(ids[0]))
@@ -84,11 +81,11 @@ extension Fixtures {
 
     @Test func cancelRetryAndDelete() async throws {
         let lift = try await Fixtures.lift()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).accepted().job.id
         #expect(try await lift.jobsCancel(id).value?.job.state == .cancelled)  // not running: no confirm needed
         await #expect(throws: LiftError.self) { try await lift.jobsCancel(id) }
-        #expect(await fieldErrors { _ = try await lift.jobsRetry(id, settings: ["size": .int(-1)]) } == ["settings.size"])
-        let retried = try await lift.jobsRetry(id, settings: ["size": .int(3)])
+        #expect(await fieldErrors { _ = try await lift.jobsRetry(id, settings: ["size": .int(-1)]).accepted() } == ["settings.size"])
+        let retried = try await lift.jobsRetry(id, settings: ["size": .int(3)]).accepted()
         #expect(retried.steps[0].settings["size"]?.number == 3 && retried.job.state != .cancelled)
         #expect(try await lift.jobsDelete(id).impact != nil)
         #expect(try await lift.jobsGet(id).job.id == id)  // unconfirmed: nothing changed
@@ -113,7 +110,7 @@ extension Fixtures {
         let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
         _ = try await lift.modelsInstall("test-cube", confirm: true, wait: true)  // fake install
         _ = try await lift.queuePause()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")])).accepted().job.id
         try await lift.store.db.write { db in
             try db.execute(sql: "UPDATE step SET state = 'succeeded', outputs = '[]' WHERE jobId = ? AND idx = 0", arguments: [id])
             try db.execute(sql: "UPDATE job SET currentStep = 1 WHERE id = ?", arguments: [id])
@@ -126,7 +123,7 @@ extension Fixtures {
 
     @Test func forceStartNeedsConfirm() async throws {
         let lift = try await Fixtures.lift()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).job.id
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [cube(try Fixtures.image())])).accepted().job.id
         #expect(try await lift.jobsForceStart(id).impact != nil)
         #expect(try await lift.jobsGet(id).job.forceStart == false)
         #expect(try await lift.jobsForceStart(id, confirm: true).value?.job.forceStart == true)
@@ -136,8 +133,8 @@ extension Fixtures {
         let workdir = try Fixtures.tempDir()
         let first = try await Fixtures.lift(workdir: workdir)
         let steps = [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")]
-        let a = try await first.jobsSubmit(SubmitRequest(steps: steps)).job.id
-        let b = try await first.jobsSubmit(SubmitRequest(steps: steps)).job.id
+        let a = try await first.jobsSubmit(SubmitRequest(steps: steps)).accepted().job.id
+        let b = try await first.jobsSubmit(SubmitRequest(steps: steps)).accepted().job.id
         await first.close()
         // Simulate a crash mid-run: step 0 finished, step 1 running.
         try await first.store.db.write { db in
@@ -170,7 +167,7 @@ extension Fixtures {
             }
         }
         let lift = try await Fixtures.lift(workdir: workdir)
-        _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image()])]))
+        _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image()])])).accepted()
         await lift.housekeep()  // Duration.seconds(minutes * 60)
         let s = await lift.settingsGet()
         #expect(s.memoryBudgetGB == 48 && s.maxSlots == 1 && s.idleUnloadMinutes == 10)
@@ -192,11 +189,105 @@ extension Fixtures {
         let lift = try await Fixtures.lift(bundle: try bundle())
         let views = try Fixtures.tempDir()
         for name in ["front.png", "back.png", "transforms.json", ".DS_Store"] { try Data([1]).write(to: views.appending(path: name)) }
-        let v = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": views.path])]))
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": views.path])])).accepted()
         let copied = try #require(v.steps[0].inputs["views"])
         #expect(try FileManager.default.contentsOfDirectory(atPath: copied).sorted() == ["back.png", "front.png", "transforms.json"])
         let parent = lift.config.workdir.deletingLastPathComponent().path
-        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": parent])])) }
+        #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": parent])])).accepted() }
                 == ["steps[0].inputs.views"])
+    }
+}
+
+
+/// Test Cube "installed" through the fake runner, with a venv python that just sleeps: its worker stays
+/// `loading` (and holds its reservation) until it's killed.
+func fakeInstalledCube(_ lift: Lift) async throws {
+    _ = try await lift.modelsInstall("test-cube", confirm: true, wait: true)
+    let python = lift.config.workdir.appending(path: "models/test-cube/venv/bin/python")
+    try FileManager.default.createDirectory(at: python.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "#!/bin/sh\nexec /bin/sleep 30\n".write(to: python, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: python.path)
+}
+
+@Suite struct MemoryTests_Engine {
+    func cube() throws -> StepRequest { StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image()]) }
+
+    /// M18: the default budget is min(48, 75% of this Mac's RAM), set once at first open.
+    @Test(arguments: [(16, 12.0), (32, 25.0), (128, 48.0)])
+    func defaultBudgetComesFromThisMac(gib: Int, expected: Double) async throws {
+        let lift = try await Fixtures.lift(physical: gib << 30)
+        #expect(await lift.settingsGet().memoryBudgetGB == expected)
+    }
+
+    @Test func aChosenBudgetIsKept() async throws {
+        let workdir = try Fixtures.tempDir()
+        let first = try await Fixtures.lift(workdir: workdir, physical: 16 << 30)
+        _ = try await first.settingsSet("memory_budget_gb", .float(14))
+        await first.close()
+        #expect(await (try Fixtures.lift(workdir: workdir, physical: 16 << 30)).settingsGet().memoryBudgetGB == 14)
+    }
+
+    /// Spec §8: too big is a warning, never a refusal; nothing changes until it's accepted.
+    @Test func tooBigForTheBudgetWarnsThenRunsWhenAccepted() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        try await fakeInstalledCube(lift)
+        _ = try await lift.settingsSet("memory_budget_gb", .float(0.1))  // the cube needs 0.5 GB
+        let warned = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()]))
+        let w = try #require(warned.warning)
+        #expect(w.step == 0 && w.neededGB == 0.5 && w.budgetGB == 0.1)
+        #expect(w.message.contains("0.5 GB") && w.message.contains("budget"))
+        #expect(try await lift.jobsList().isEmpty)  // nothing was queued
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()]), acceptMemoryWarning: true).accepted()
+        #expect(v.job.memoryAccepted)
+        // Over the budget and the queue is otherwise empty: it must start, never wait forever.
+        #expect(try await eventually(5) { try await lift.jobsGet(v.job.id).job.state == .loading })
+        _ = try await lift.jobsCancel(v.job.id, confirm: true)
+    }
+
+    @Test func tooBigForThisMacWarns() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path], physical: 256 << 20)  // a 256 MB Mac
+        try await fakeInstalledCube(lift)
+        let w = try #require(try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).warning)
+        #expect(w.message.contains("this Mac has") && w.physicalGB < 0.5)
+    }
+
+    @Test func aNormalJobIsUnaffected() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        try await fakeInstalledCube(lift)
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted()
+        #expect(!v.job.memoryAccepted)
+        _ = try await lift.jobsCancel(v.job.id, confirm: true)
+    }
+
+    @Test func retryWarnsToo() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        try await fakeInstalledCube(lift)
+        _ = try await lift.queuePause()
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
+        _ = try await lift.jobsCancel(id)
+        _ = try await lift.settingsSet("memory_budget_gb", .float(0.1))
+        #expect(try await lift.jobsRetry(id).warning != nil)
+        #expect(try await lift.jobsGet(id).job.state == .cancelled)  // unchanged
+        #expect(try await lift.jobsRetry(id, acceptMemoryWarning: true).accepted().job.memoryAccepted)
+    }
+
+    /// M18: a starting worker's estimate is reserved at once, so a second tick can't start another
+    /// before the first worker has allocated anything.
+    @Test func aStartingWorkerIsReservedImmediately() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        try await fakeInstalledCube(lift)
+        _ = try await lift.settingsSet("memory_budget_gb", .float(0.8))  // room for one 0.5 GB cube
+        _ = try await lift.resourcesSet(maxSlots: 2)
+        _ = try await lift.queuePause()
+        let a = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
+        let b = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
+        _ = try await lift.queueResume()
+        await lift.tick()
+        await lift.tick()
+        #expect(try await lift.jobsGet(a).job.state == .loading)
+        #expect(try await lift.jobsGet(b).job.waitReason == .memory(needed: 500_000_000, free: 300_000_000))
+        #expect(try await lift.resourcesGet().reservedBytes == 500_000_000)
+        _ = try await lift.jobsCancel(a, confirm: true)
+        _ = try await lift.jobsCancel(b)
     }
 }

@@ -16,6 +16,8 @@ public struct LiftConfig: Sendable {
     public var housekeepingInterval: Duration
     public var heartbeatSeconds: Double
     public var systemFree: @Sendable () -> Int
+    /// This Mac's physical RAM in bytes (the memory warning and the default budget).
+    public var physicalMemory: Int
     /// Plan 2 replaces this with the Keychain.
     public var hfToken: @Sendable () -> String?
     /// The shared Hugging Face cache `hf download` writes to and verification reads.
@@ -28,7 +30,7 @@ public struct LiftConfig: Sendable {
     public init(workdir: URL, workerRuntime: URL, bundledRecipes: URL, runner: any CommandRunner = SubprocessRunner(),
                 toolSearchDirs: [String]? = nil, homebrewPrefix: String = "/opt/homebrew", rosettaPrefix: String = "/usr/local",
                 housekeepingInterval: Duration = .seconds(15), heartbeatSeconds: Double = 2,
-                systemFree: @escaping @Sendable () -> Int = Memory.systemFree,
+                systemFree: @escaping @Sendable () -> Int = Memory.systemFree, physicalMemory: Int = Memory.physical,
                 hfToken: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["HF_TOKEN"] },
                 hfHub: URL = HFHubAPI.defaultCache, weightsMetadata: (any WeightsMetadata)? = nil,
                 weightsRecheckInterval: Duration = .seconds(30)) {
@@ -42,6 +44,7 @@ public struct LiftConfig: Sendable {
         self.housekeepingInterval = housekeepingInterval
         self.heartbeatSeconds = heartbeatSeconds
         self.systemFree = systemFree
+        self.physicalMemory = physicalMemory
         self.hfToken = hfToken
         self.hfHub = hfHub
         self.weightsMetadata = weightsMetadata ?? HFHubAPI(token: hfToken)
@@ -146,6 +149,12 @@ public actor Lift {
                               homebrewPrefix: config.homebrewPrefix, rosettaPrefix: config.rosettaPrefix)
         tools = ToolPaths()
         settings = try store.db.read { try Settings.load($0) }
+        if try store.db.read({ try SettingRecord.fetchOne($0, key: "memory_budget_gb") }) == nil {
+            // First open (spec §8): min(48, 75% of this Mac's RAM), whole GB; the user can change it.
+            settings.memoryBudgetGB = max(1, min(48, (0.75 * Double(config.physicalMemory) / 1e9).rounded(.down)))
+            let s = settings
+            try store.db.write { try s.save($0) }
+        }
         try store.db.write { try Self.recoverInterrupted($0) }
         bundleSync = try BundledRecipes(bundle: config.bundledRecipes, recipes: config.workdir.appending(path: "recipes")).sync()
     }
@@ -262,19 +271,21 @@ public actor Lift {
                     requestVerify(r)
                 }
                 candidates.append(Candidate(jobId: job.id, recipe: step.recipe, priority: job.priority, position: job.position,
-                                            createdAt: job.createdAt, forceStart: job.forceStart, model: model, need: needs[i]))
+                                            createdAt: job.createdAt, forceStart: job.forceStart, model: model, need: needs[i],
+                                            memoryAccepted: job.memoryAccepted))
             }
             let input = SchedulerInput(
                 candidates: candidates,
                 workers: workers.values.map { WorkerSnapshot(recipe: $0.recipe.id, freeCapacity: $0.available ? 1 : 0, reserved: $0.reserved) },
                 runningSteps: workers.values.filter { $0.job != nil }.count,
-                maxSlots: settings.maxSlots, budget: settings.memoryBudgetBytes, systemFree: config.systemFree(), paused: settings.queuePaused)
+                maxSlots: settings.maxSlots, budget: settings.memoryBudgetBytes, systemFree: config.systemFree(),
+                physical: config.physicalMemory, paused: settings.queuePaused)
             let byId = Dictionary(uniqueKeysWithValues: pending.map { ($0.0.id, $0) })
             for decision in Scheduler.decide(input) {
                 switch decision {
                 case .wait(let id, let reason):
                     guard let (job, step) = byId[id], job.state != .waiting || job.waitReason != reason else { continue }
-                    try store.db.write { db in try self.setState(db, job: job, step: step, .waiting, reason: reason) }
+                    _ = try store.db.write { db in try self.setState(db, job: job, step: step, .waiting, reason: reason) }
                 case .start(let id):
                     if let (job, step) = byId[id] { try startStep(job: job, step: step) }
                 }
@@ -317,7 +328,7 @@ public actor Lift {
         if step.idx > 0, let first = recipe.task(step.task)?.inputs.first, step.inputs[first.name]?.hasPrefix(stepsDir) != false {
             let previous = try store.db.read { try StepRecord.fetchOne($0, key: ["jobId": job.id, "idx": step.idx - 1]) }
             guard let output = previous?.outputs.first else {
-                try store.db.write { db in try self.setState(db, job: job, step: step, .failed, error: "the previous step produced no output to pass on") }
+                _ = try store.db.write { db in try self.setState(db, job: job, step: step, .failed, error: "the previous step produced no output to pass on") }
                 return
             }
             step.inputs[first.name] = output

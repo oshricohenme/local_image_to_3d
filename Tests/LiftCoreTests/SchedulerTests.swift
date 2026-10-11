@@ -64,6 +64,25 @@ import Testing
         #expect(run([c("a", force: true, load: 100)], running: 1) == [.wait("a", .noFreeSlot)])
     }
 
+    /// Spec §8: an accepted too-big job starts when the machine is otherwise idle, skipping the memory checks.
+    @Test func anAcceptedTooBigJobStartsWhenNothingElseRuns() {
+        var big = c("big", load: 60)
+        big.memoryAccepted = true
+        #expect(run([big]) == [.start("big")])  // budget 48, free 64, needs 62: idle machine
+        #expect(run([big], running: 1, slots: 2) == [.wait("big", .memory(needed: 62 * gb, free: 48 * gb))])
+        #expect(run([c("first", position: 0, load: 1), big], slots: 2) == [.start("first"), .wait("big", .memory(needed: 62 * gb, free: 45 * gb))])
+        #expect(run([c("big", load: 60)]) == [.wait("big", .memory(needed: 62 * gb, free: 48 * gb))])  // not accepted: waits
+        var small = c("small", load: 10)
+        small.memoryAccepted = true
+        #expect(run([small], running: 1, slots: 2, budget: 48, free: 5) == [.wait("small", .memory(needed: 12 * gb, free: 5 * gb))])  // fits the budget: normal rules
+    }
+
+    @Test func anAcceptedJobTooBigForThisMacAlsoStartsWhenIdle() {
+        var big = c("big", load: 10)
+        big.memoryAccepted = true
+        #expect(Scheduler.decide(SchedulerInput(candidates: [big], budget: 48 * gb, systemFree: 4 * gb, physical: 8 * gb)) == [.start("big")])
+    }
+
     @Test func modelStatesAndPause() {
         #expect(run([c("i", model: .installing), c("n", model: .notInstalled), c("u", model: .unsupported), c("w", model: .weightsUnverified)], slots: 4)
                 == [.wait("i", .modelInstalling), .wait("n", .modelNotInstalled), .wait("u", .modelUnsupported), .wait("w", .weightsUnverified)])

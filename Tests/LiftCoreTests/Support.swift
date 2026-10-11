@@ -49,3 +49,11 @@ func fieldErrors(_ body: () async throws -> Void) async -> [String] {
     do { try await body() } catch let LiftError.invalidInput(errors) { return errors.map(\.field) } catch { return ["unexpected \(error)"] }
     return []
 }
+
+extension Admission {
+    /// The accepted value; a memory warning fails the test.
+    func accepted() throws -> T {
+        guard case .accepted(let v) = self else { throw LiftError.invalidState("unexpected memory warning: \(warning!.message)") }
+        return v
+    }
+}
