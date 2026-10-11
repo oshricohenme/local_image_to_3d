@@ -25,7 +25,8 @@ class Channel:
         self._lock = threading.Lock()
 
     def send(self, **msg) -> None:
-        line = json.dumps(msg, ensure_ascii=False, default=str)
+        # ASCII only: U+2028, U+2029 and U+0085 are line breaks to Swift and would split a message.
+        line = json.dumps(msg, ensure_ascii=True, default=str)
         with self._lock:
             self._f.write(line + "\n")
             self._f.flush()

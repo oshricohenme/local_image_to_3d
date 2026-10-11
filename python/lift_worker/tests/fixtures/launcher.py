@@ -16,6 +16,8 @@ def load(ctx):
 def run(state, job):
     s = job.settings
     print(f"start {job.id}")
+    if s.get("separators"):
+        print("a\u2028b\u2029c\u0085d")  # Unicode line separators inside one line
     if "scale" in s:
         print(f"scale is {type(s['scale']).__name__}")
     os.write(1, b"native noise in job\n")

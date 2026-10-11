@@ -138,3 +138,13 @@ def test_float_settings_arrive_as_float(worker):
     w.until(is_ev("ready"))
     w.run("j1", scale=2)  # JSON 2 for a float setting
     assert {"ev": "log", "job": "j1", "line": "scale is float"} in w.until(is_ev("done", "j1"))
+
+
+def test_unicode_line_separators_stay_inside_one_protocol_line(worker):
+    w = worker()
+    w.until(is_ev("ready"))
+    w.run("j1", separators=True)
+    evs = w.until(is_ev("done", "j1"))
+    assert {"ev": "log", "job": "j1", "line": "a\u2028b\u2029c\u0085d"} in evs
+    # Swift's line splitting treats U+2028/U+2029/U+0085 as line breaks: they must be escaped on the wire.
+    assert not any(ch in line for line in w.raw_stdout for ch in "\u2028\u2029\u0085")

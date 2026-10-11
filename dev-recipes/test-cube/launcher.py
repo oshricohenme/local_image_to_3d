@@ -30,7 +30,8 @@ def run(state, job):
     if s.get("crash"):
         os._exit(3)
     if s.get("fail"):
-        raise RuntimeError("failed on purpose (fail=true)")
+        name = os.path.basename(next(iter(job.inputs.values()), ""))
+        raise RuntimeError(f"failed on purpose (fail=true) for {name}")
     if job.task == "fake_rig":
         out = os.path.join(job.out_dir, "rigged.glb")
         shutil.copyfile(job.inputs["mesh"], out)

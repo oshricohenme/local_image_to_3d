@@ -76,6 +76,16 @@ actor CubeFixture {
         #expect(try await run(lift, [try cube()]).job.state == .succeeded)
     }
 
+    @Test func unicodeLineSeparatorsInAMessageDoNotHangTheJob() async throws {
+        let lift = try await CubeFixture.shared.get()
+        let name = "a\u{2028}b\u{2029}c\u{85}d.png"
+        let step = StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image(named: name)], settings: ["fail": .bool(true)])
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [step])).job.id
+        let v = try await lift.jobsWait(id, timeout: .seconds(20))
+        #expect(v.job.state == .failed)  // not stuck in running because the error line got split
+        #expect(v.job.error?.contains("for \(name)") == true)
+    }
+
     @Test func crashFailsTheStepAndTheNextJobStillRuns() async throws {
         let lift = try await CubeFixture.shared.get()
         let crashed = try await run(lift, [try cube(["crash": .bool(true)])])
