@@ -186,7 +186,7 @@ public struct Installer: Sendable {
             }
             try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
             if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
-            let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, maxConcurrent: 1, heartbeat: 2)],
+            let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, heartbeat: 2)],
                                      environment: workerEnvironment(recipe), workingDirectory: repo)
             lines("$ \(smoke.display)")
             try await runner.check(smoke, onLine: lines)
@@ -202,12 +202,11 @@ public struct Installer: Sendable {
     }
 
     /// The JSON argument for `python -m lift_worker`.
-    public func workerConfig(_ recipe: Recipe, maxConcurrent: Int, heartbeat: Double) -> String {
+    public func workerConfig(_ recipe: Recipe, heartbeat: Double) -> String {
         struct Config: Encodable {
             var launcher: String
             var repo_dir: String
             var recipe_dir: String
-            var max_concurrent: Int
             var stages: [Recipe.StagePattern]
             var heartbeat_seconds: Double
             var setting_types: [String: [String: String]]
@@ -215,7 +214,7 @@ public struct Installer: Sendable {
         let config = Config(launcher: installedRecipeDir(recipe.id).appending(path: "launcher.py").path,
                             repo_dir: dir(recipe.id).appending(path: "repo").path,
                             recipe_dir: installedRecipeDir(recipe.id).path,
-                            max_concurrent: maxConcurrent, stages: recipe.stages, heartbeat_seconds: heartbeat,
+                            stages: recipe.stages, heartbeat_seconds: heartbeat,
                             setting_types: Dictionary(uniqueKeysWithValues: recipe.tasks.map { task in
                                 (task.id, Dictionary(uniqueKeysWithValues: task.settings.map { ($0.key, $0.type.rawValue) }))
                             }))

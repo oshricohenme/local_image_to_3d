@@ -194,7 +194,7 @@ extension Lift {
     /// Model changes need its workers gone; a busy one is an error (cancel its jobs first).
     func stopWorkers(of id: String) throws {
         let mine = workers.values.filter { $0.recipe.id == id }
-        if mine.contains(where: { !$0.assigned.isEmpty }) { throw LiftError.invalidState("\(id) has running jobs; cancel them first") }
+        if mine.contains(where: { $0.job != nil }) { throw LiftError.invalidState("\(id) has running jobs; cancel them first") }
         for w in mine { stop(w) }
     }
 

@@ -33,8 +33,8 @@ func isDone(_ e: WorkerEvent) -> Bool { if case .done = e { true } else { false 
 func isExited(_ e: WorkerEvent) -> Bool { if case .exited = e { true } else { false } }
 
 @Suite struct WorkerProcessTests {
-    func launch(_ dir: URL, maxConcurrent: Int = 1) async throws -> WorkerProcess {
-        let config = #"{"launcher":"\#(Fixtures.fixtureLauncher.path)","repo_dir":"\#(dir.path)","recipe_dir":"\#(dir.path)","max_concurrent":\#(maxConcurrent),"stages":[],"heartbeat_seconds":0.2}"#
+    func launch(_ dir: URL) async throws -> WorkerProcess {
+        let config = #"{"launcher":"\#(Fixtures.fixtureLauncher.path)","repo_dir":"\#(dir.path)","recipe_dir":"\#(dir.path)","stages":[],"heartbeat_seconds":0.2}"#
         return WorkerProcess(executable: try await Fixtures.python(), arguments: ["-u", "-m", "lift_worker", config],
                              environment: ["PYTHONPATH": Fixtures.workerRuntime.path], workingDirectory: dir.path)
     }

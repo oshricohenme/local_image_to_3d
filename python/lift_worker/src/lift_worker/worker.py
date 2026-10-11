@@ -60,13 +60,7 @@ class Job:
         self.settings: dict = coerce_settings(msg.get("settings", {}), (types or {}).get(self.task, {}))
         self.out_dir: str = msg["out_dir"]
         self.parser = StageParser(patterns)
-        self._cancel = threading.Event()
         self._channel = None
-
-    @property
-    def cancelled(self) -> bool:
-        """Launchers may poll this; upstream code is never interrupted."""
-        return self._cancel.is_set()
 
     def stage(self, name: str, fraction: float | None = None) -> None:
         """Launchers may report a stage directly."""
@@ -77,8 +71,9 @@ class Worker:
     def __init__(self, cfg: dict, channel):
         self.cfg = cfg
         self.ch = channel
-        self.pool = ThreadPoolExecutor(max_workers=max(1, int(cfg.get("max_concurrent", 1))),
-                                       thread_name_prefix="lift-job")
+        # One job per worker process (spec §8): the app cancels a job by killing the process. The job runs
+        # on its own thread so the main thread keeps reading stdin (shutdown, EOF).
+        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lift-job")
         self.jobs: dict[str, Job] = {}
         self.lock = threading.Lock()
         self.local = threading.local()
@@ -142,10 +137,6 @@ class Worker:
                 with self.lock:
                     self.jobs[job.id] = job
                 self.pool.submit(self._run, job)
-            elif op == "cancel":
-                job = self.jobs.get(msg.get("job"))
-                if job:
-                    job._cancel.set()
             elif op == "shutdown":
                 break
         os._exit(0)

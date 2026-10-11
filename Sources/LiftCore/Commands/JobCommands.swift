@@ -188,9 +188,9 @@ extension Lift {
 
     // MARK: changing jobs
 
-    /// Queued, waiting or interrupted jobs are cancelled at once. A loading or running job needs `confirm`:
-    /// with concurrency 1 its worker is stopped; otherwise an attempt not yet sent is dropped, and a sent one is
-    /// told to cancel and its result discarded.
+    /// Queued, waiting or interrupted jobs are cancelled at once. A loading or running job needs `confirm`, and
+    /// its worker is killed with its whole process group at once (spec §8); the next job gets a fresh worker.
+    /// A job cancelled while its worker is still loading never runs: that worker was loading only for it.
     public func jobsCancel(_ id: String, confirm: Bool = false) throws -> Gated<JobView> {
         let v = try view(id)
         guard !v.job.state.isTerminal else { throw LiftError.invalidState("job \(id) already \(v.job.state.rawValue)") }
@@ -198,16 +198,7 @@ extension Lift {
         if v.job.state.isActive {
             guard confirm else { return .confirmationRequired("Job \"\(v.job.title)\" is \(v.job.state.rawValue); cancelling stops its work and discards any result.") }
             try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
-            if let run = currentRun.removeValue(forKey: id), let w = workers.values.first(where: { $0.assigned[run] != nil }) {
-                if w.capacity == 1 {
-                    w.stopping = true
-                    w.process.kill()
-                } else if w.assigned[run]?.sent == true {
-                    w.process.send(.cancel(job: run))  // the thread stays busy until upstream returns; its result is discarded
-                } else {
-                    drop(w, run: run)
-                }
-            }
+            if let w = workers.values.first(where: { $0.job?.jobId == id }) { kill(w) }
         } else {
             try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
         }
@@ -352,7 +343,7 @@ extension Lift {
             return a.job.createdAt < b.job.createdAt
         }
         return QueueStatus(paused: settings.queuePaused, maxSlots: settings.maxSlots,
-                           running: workers.values.reduce(0) { $0 + $1.assigned.count }, jobs: order)
+                           running: workers.values.filter { $0.job != nil }.count, jobs: order)
     }
 
     public func queuePause() throws -> QueueStatus {

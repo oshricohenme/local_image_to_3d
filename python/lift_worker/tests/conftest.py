@@ -18,7 +18,7 @@ class WorkerProc:
 
     def __init__(self, tmp_path, env=None, **cfg):
         config = {"launcher": str(FIXTURE), "repo_dir": str(tmp_path), "recipe_dir": str(tmp_path),
-                  "max_concurrent": 1, "stages": [], "heartbeat_seconds": 60, **cfg}
+                  "stages": [], "heartbeat_seconds": 60, **cfg}
         self.tmp = tmp_path
         self.p = subprocess.Popen(
             [sys.executable, "-m", "lift_worker", json.dumps(config)],

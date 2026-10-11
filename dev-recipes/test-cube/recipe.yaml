@@ -31,6 +31,7 @@ tasks:
       - { key: delay, label: Delay (seconds), type: float, default: 0.0, min: 0, max: 600, group: advanced }
       - { key: fail, label: Fail on purpose, type: bool, default: false, group: advanced }
       - { key: crash, label: Crash the worker, type: bool, default: false, group: advanced }
+      - { key: grandchild, label: Start a child process, type: bool, default: false, group: advanced }
   - id: fake_rig
     modality: 3d
     label: Mesh → rigged mesh (copy)

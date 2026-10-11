@@ -6,7 +6,6 @@ import Testing
     @Test func encodesOps() {
         let run = WorkerOp.run(job: "j", step: 1, task: "image_to_3d", inputs: ["image": "/in/a.png"], settings: ["size": .float(2)], outDir: "/out")
         #expect(run.line == #"{"inputs":{"image":"/in/a.png"},"job":"j","op":"run","out_dir":"/out","settings":{"size":2},"step":1,"task":"image_to_3d"}"# + "\n")
-        #expect(WorkerOp.cancel(job: "j").line == #"{"job":"j","op":"cancel"}"# + "\n")
         #expect(WorkerOp.shutdown.line == #"{"op":"shutdown"}"# + "\n")
     }
 

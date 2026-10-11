@@ -111,12 +111,11 @@ public struct Recipe: Codable, Sendable, Equatable {
         public var memoryGB: Double
         public var memoryKeys: [String]
         public var memoryOverrides: [MemoryOverride]
-        public var maxConcurrentPerProcess: Int
         public var diskGB: Double
 
         enum CodingKeys: String, CodingKey {
             case memoryGB = "memory_gb", memoryKeys = "memory_keys", memoryOverrides = "memory_overrides"
-            case maxConcurrentPerProcess = "max_concurrent_per_process", diskGB = "disk_gb"
+            case diskGB = "disk_gb"
         }
 
         public init(from decoder: any Decoder) throws {
@@ -124,7 +123,6 @@ public struct Recipe: Codable, Sendable, Equatable {
             memoryGB = try c.decode(Double.self, forKey: .memoryGB)
             memoryKeys = try c.decodeIfPresent([String].self, forKey: .memoryKeys) ?? []
             memoryOverrides = try c.decodeIfPresent([MemoryOverride].self, forKey: .memoryOverrides) ?? []
-            maxConcurrentPerProcess = try c.decodeIfPresent(Int.self, forKey: .maxConcurrentPerProcess) ?? 1
             diskGB = try c.decodeIfPresent(Double.self, forKey: .diskGB) ?? 5
         }
     }

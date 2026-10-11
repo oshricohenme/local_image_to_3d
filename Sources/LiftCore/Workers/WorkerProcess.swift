@@ -23,6 +23,8 @@ public final class WorkerProcess: Sendable {
         var overrides: [Environment.Key: String?] = [:]
         for (k, v) in environment { overrides[Environment.Key(rawValue: k)!] = v }
         let env = Environment.inherit.updating(overrides)
+        var options = PlatformOptions()
+        options.processGroupID = 0  // its own process group (pgid = pid), so kill() takes grandchildren too
         let pid = self.pid
         task = Task {
             var code: Int32
@@ -32,6 +34,7 @@ public final class WorkerProcess: Sendable {
                     arguments: Arguments(arguments),
                     environment: env,
                     workingDirectory: workingDirectory.map { FilePath($0) },
+                    platformOptions: options,
                     input: .inputWriter,
                     output: .sequence,
                     error: .sequence
@@ -70,9 +73,15 @@ public final class WorkerProcess: Sendable {
         ops.yield(op.line)
     }
 
-    /// Stops the process now with SIGKILL, even if it is stuck in native code.
+    /// Stops the process and everything it started (its process group) now with SIGKILL, even if it is stuck
+    /// in native code.
     public func kill() {
         let p = pid.value.withLock { $0 }
-        if p > 0 { Darwin.kill(p, SIGKILL) } else { task.cancel() }
+        if p > 0 {
+            Darwin.kill(-p, SIGKILL)
+            Darwin.kill(p, SIGKILL)
+        } else {
+            task.cancel()
+        }
     }
 }

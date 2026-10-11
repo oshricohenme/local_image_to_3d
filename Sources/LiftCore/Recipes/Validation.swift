@@ -19,7 +19,6 @@ extension Recipe {
             out.append("weights: \(w.repo) must be owner/name")
         }
         // Bounds keep every number convertible to bytes without trapping.
-        if !(1...64).contains(resources.maxConcurrentPerProcess) { out.append("resources.max_concurrent_per_process must be 1…64") }
         func gbOK(_ v: Double) -> Bool { v.isFinite && v > 0 && v <= 4096 }
         if !gbOK(resources.memoryGB) { out.append("resources.memory_gb must be > 0 and ≤ 4096") }
         for (i, o) in resources.memoryOverrides.enumerated() where !gbOK(o.memoryGB) {

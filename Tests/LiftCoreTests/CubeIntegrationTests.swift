@@ -100,7 +100,7 @@ actor CubeFixture {
         #expect(try await eventually { try await lift.jobsGet(id).job.state == .running })
         #expect(try await lift.jobsCancel(id).impact != nil)
         #expect(try await lift.jobsCancel(id, confirm: true).value?.job.state == .cancelled)
-        #expect(try await eventually(5) { await lift.workersList().allSatisfy { !$0.jobs.contains(id) } })
+        #expect(try await eventually(5) { await lift.workersList().allSatisfy { $0.job != id } })
         #expect(try await run(lift, [try cube()]).job.state == .succeeded)
     }
 
@@ -119,6 +119,26 @@ actor CubeFixture {
         let error = v.job.error ?? ""
         #expect(error.contains("worker exited with code 1"))
         #expect(error.contains("lift_shim: unknown patch 'no_such_patch'"))  // the stderr tail, not just the exit code
+    }
+
+    /// Spec §8: cancel of a running job is an immediate SIGKILL of its worker's whole process group.
+    @Test func cancelKillsTheWorkerAndItsChildrenImmediately() async throws {
+        let lift = try await CubeFixture.shared.get()
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube(["delay": .float(60), "grandchild": .bool(true)])])).job.id
+        let log = lift.config.workdir.appending(path: "jobs/\(id)/log.txt")
+        var grandchild: Int32 = 0
+        #expect(try await eventually {
+            let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+            grandchild = text.split(separator: "\n").first { $0.hasPrefix("grandchild pid ") }.flatMap { Int32($0.dropFirst(15)) } ?? 0
+            return grandchild > 0
+        })
+        let worker = try #require(await lift.workersList().first { $0.job == id })
+        let t0 = ContinuousClock.now
+        #expect(try await lift.jobsCancel(id, confirm: true).value?.job.state == .cancelled)
+        #expect(try await eventually(3) { kill(worker.pid, 0) != 0 && kill(grandchild, 0) != 0 })
+        #expect(ContinuousClock.now - t0 < .seconds(2))
+        let next = try await run(lift, [try cube()])
+        #expect(next.job.state == .succeeded && next.steps[0].workerId != worker.id)  // a fresh worker
     }
 
     @Test func learnsMemoryEstimates() async throws {

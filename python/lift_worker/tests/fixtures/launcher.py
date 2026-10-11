@@ -29,11 +29,7 @@ def run(state, job):
         t = threading.Thread(target=lambda: print("from upstream thread"))
         t.start()
         t.join()
-    end = time.monotonic() + float(s.get("sleep", 0))
-    while time.monotonic() < end:
-        if job.cancelled:
-            raise RuntimeError("cancelled by request")
-        time.sleep(0.02)
+    time.sleep(float(s.get("sleep", 0)))
     if s.get("exit"):
         sys.exit(3)
     if s.get("raise"):

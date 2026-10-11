@@ -6,8 +6,8 @@ public struct WorkerView: Codable, Sendable, Equatable {
     public var recipe: String
     public var pid: Int32
     public var ready: Bool
-    public var jobs: [String]
-    public var maxConcurrent: Int
+    /// The job it's running (one job per worker), if any.
+    public var job: String?
     public var footprintBytes: Int
     public var reservedBytes: Int
 }
@@ -35,8 +35,8 @@ extension Lift {
 
     public func workersList() -> [WorkerView] {
         workers.values.sorted { $0.id < $1.id }.map {
-            WorkerView(id: $0.id, recipe: $0.recipe.id, pid: $0.pid, ready: $0.ready, jobs: $0.jobs,
-                       maxConcurrent: $0.capacity, footprintBytes: $0.lastFootprint, reservedBytes: $0.reserved)
+            WorkerView(id: $0.id, recipe: $0.recipe.id, pid: $0.pid, ready: $0.ready, job: $0.job?.jobId,
+                       footprintBytes: $0.lastFootprint, reservedBytes: $0.reserved)
         }
     }
 
@@ -55,14 +55,14 @@ extension Lift {
         return workersList().first { $0.id == w.id }!
     }
 
-    /// Stops a worker. A busy one needs `confirm`; its running steps fail.
+    /// Stops a worker. A busy one needs `confirm`; its running step fails.
     public func workersUnload(_ id: String, confirm: Bool = false) throws -> Gated<[WorkerView]> {
         guard let w = workers[id] else { throw LiftError.notFound("worker \(id)") }
-        if w.assigned.isEmpty {
+        if w.job == nil {
             stop(w)
         } else {
-            guard confirm else { return .confirmationRequired("Worker \(id) is running \(w.assigned.count) job(s); unloading fails them.") }
-            w.process.kill()  // not `stopping`: its exit fails the running steps
+            guard confirm else { return .confirmationRequired("Worker \(id) is running job \(w.job!.jobId); unloading fails it.") }
+            w.process.kill()  // not `stopping`: its exit fails the running step
         }
         return .done(workersList())
     }

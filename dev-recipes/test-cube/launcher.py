@@ -1,6 +1,7 @@
-"""Test Cube launcher: writes a cube GLB with trimesh. Settings: size, delay, fail, crash."""
+"""Test Cube launcher: writes a cube GLB with trimesh. Settings: size, delay, fail, crash, grandchild."""
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -13,20 +14,14 @@ def load(ctx):
     return {}
 
 
-def _wait(job, seconds, honor_cancel=True):
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        if job.cancelled and honor_cancel:
-            raise RuntimeError("cancelled")
-        time.sleep(0.05)
-
-
 def run(state, job):
     s = job.settings
     print(f"shim env: {os.environ.get('TEST_CUBE_SHIM')}")  # set only if lift_shim's autoload ran
+    if s.get("grandchild"):  # a process upstream code might start; cancel must take it down too
+        print(f"grandchild pid {subprocess.Popen(['/bin/sleep', '30']).pid}")
     print("[Stage] Generating")
     for i in range(1, 5):
-        _wait(job, float(s.get("delay", 0)) / 4, honor_cancel=not s.get("ignore_cancel"))
+        time.sleep(float(s.get("delay", 0)) / 4)  # not interruptible, like upstream code: cancel kills the worker
         print(f"Generating: {i * 25}%|", file=sys.stderr)
     if s.get("crash"):
         os._exit(3)

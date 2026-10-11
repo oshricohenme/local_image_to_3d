@@ -1,7 +1,7 @@
 """Entry: python -m lift_worker [--check] '<config json>'.
 
-Config keys: launcher (path to launcher.py), repo_dir, recipe_dir, max_concurrent,
-stages ([{pattern}]), heartbeat_seconds, setting_types ({task: {key: type}}).
+Config keys: launcher (path to launcher.py), repo_dir, recipe_dir, stages ([{pattern}]),
+heartbeat_seconds, setting_types ({task: {key: type}}). One job at a time.
 """
 from __future__ import annotations
 

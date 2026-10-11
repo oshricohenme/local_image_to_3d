@@ -46,19 +46,6 @@ def test_thread_started_by_upstream_tagged_to_only_job(worker):
     assert {"ev": "log", "job": "j1", "line": "from upstream thread"} in evs
 
 
-def test_concurrent_jobs_tagged_separately(worker):
-    w = worker(max_concurrent=2)
-    w.until(is_ev("ready"))
-    t = time.monotonic()
-    w.run("a", sleep=0.6)
-    w.run("b", sleep=0.6)
-    done = set()
-    evs = w.until(lambda e: e["ev"] == "done" and (done.add(e["job"]) or done == {"a", "b"}))
-    assert time.monotonic() - t < 1.1  # overlapped, not sequential
-    assert {"ev": "log", "job": "a", "line": "start a"} in evs
-    assert {"ev": "log", "job": "b", "line": "start b"} in evs
-
-
 def test_stages_parsed_from_output(worker):
     w = worker(stages=[TAG, TQDM])
     w.until(is_ev("ready"))
@@ -82,15 +69,6 @@ def test_exception_reported(worker):
     w.until(is_ev("ready"))
     w.run("j1", **{"raise": True})
     assert w.until(is_ev("error", "j1"))[-1]["message"] == "ValueError: boom"
-
-
-def test_cancel_sets_flag(worker):
-    w = worker()
-    w.until(is_ev("ready"))
-    w.run("j1", sleep=30)
-    w.until(lambda e: e.get("line") == "start j1")
-    w.send(op="cancel", job="j1")
-    assert "cancelled by request" in w.until(is_ev("error", "j1"), timeout=3)[-1]["message"]
 
 
 def test_heartbeat(worker):

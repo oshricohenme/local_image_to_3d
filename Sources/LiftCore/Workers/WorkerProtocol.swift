@@ -3,7 +3,6 @@ import Foundation
 /// App → worker messages (protocol v1, spec §8).
 public enum WorkerOp: Sendable, Equatable {
     case run(job: String, step: Int, task: String, inputs: [String: String], settings: [String: SettingValue], outDir: String)
-    case cancel(job: String)
     case shutdown
 
     /// One JSON line, newline included.
@@ -13,8 +12,6 @@ public enum WorkerOp: Sendable, Equatable {
         case .run(let job, let step, let task, let inputs, let settings, let outDir):
             object = ["op": .init("run"), "job": .init(job), "step": .init(step), "task": .init(task),
                       "inputs": .init(inputs), "settings": .init(settings), "out_dir": .init(outDir)]
-        case .cancel(let job):
-            object = ["op": .init("cancel"), "job": .init(job)]
         case .shutdown:
             object = ["op": .init("shutdown")]
         }

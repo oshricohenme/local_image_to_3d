@@ -51,7 +51,7 @@ extension Fixtures {
         #expect(input.hasPrefix(lift.config.workdir.appending(path: "jobs/\(v.job.id)/inputs").path))
         #expect(FileManager.default.fileExists(atPath: input))
         // Defaults filled. Stored as JSON, so 1.0 reads back as 1; the worker makes float settings floats again.
-        #expect(v.steps[0].settings.mapValues(\.description) == ["size": "1", "delay": "0", "fail": "false", "crash": "false"])
+        #expect(v.steps[0].settings.mapValues(\.description) == ["size": "1", "delay": "0", "fail": "false", "crash": "false", "grandchild": "false"])
         let now = try await lift.jobsGet(v.job.id)
         #expect(now.job.state == .waiting && now.job.waitReason == .modelNotInstalled)
     }

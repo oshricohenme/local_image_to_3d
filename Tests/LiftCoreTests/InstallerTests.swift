@@ -34,7 +34,7 @@ import Testing
             "uv pip install torch torchvision",
             "/bin/uv pip install \(entry.shared.path)/lift_shim",
             "\(m)/venv/bin/python -c import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])",
-            "\(m)/venv/bin/python -m lift_worker --check \(inst.workerConfig(entry.recipe, maxConcurrent: 1, heartbeat: 2))",
+            "\(m)/venv/bin/python -m lift_worker --check \(inst.workerConfig(entry.recipe, heartbeat: 2))",
         ])
         let step = runner.commands[4]
         #expect(step.environment["VIRTUAL_ENV"] == "\(m)/venv" && step.environment["PATH"] == "\(m)/venv/bin:/bin" && step.workingDirectory == m)
@@ -77,7 +77,7 @@ import Testing
 
     @Test func notEnoughDiskIsRefused() async throws {
         let runner = FakeRunner()
-        let yaml = pixalYAML.replacingOccurrences(of: "max_concurrent_per_process: 1", with: "max_concurrent_per_process: 1\n  disk_gb: 1000000000")
+        let yaml = pixalYAML.replacingOccurrences(of: "memory_keys: [low_vram, resolution]", with: "memory_keys: [low_vram, resolution]\n  disk_gb: 99999")
         await #expect(throws: LiftError.self) { try await self.installer(runner).install(try self.source(yaml), pin: nil, onLine: { _ in }) }
         #expect(runner.commands.isEmpty)
     }

@@ -49,11 +49,9 @@ public struct LiftConfig: Sendable {
     }
 }
 
-/// One attempt at a step, placed on a worker. `run` (`<jobId>#<attempt>`) is the protocol `job` field, so a
-/// cancelled attempt that is still running can't be mistaken for its retry.
+/// The step a worker is running (or will run once it's ready).
 struct Assignment {
     var jobId: String
-    var run: String
     var step: Int
     var task: String
     var keyValues: String
@@ -68,13 +66,12 @@ final class WorkerHandle {
     let id: String
     let recipe: Recipe
     let process: WorkerProcess
-    let capacity: Int
     var pid: Int32 = 0
     var ready = false
     /// Shut down or killed on purpose: its exit is not a crash.
     var stopping = false
-    /// By run id.
-    var assigned: [String: Assignment] = [:]
+    /// One job per worker process (spec §8), so a job can always be killed with its worker.
+    var job: Assignment?
     /// Model load cost: the estimate until ready, then the footprint measured at ready.
     var baseline: Int
     var lastFootprint = 0
@@ -86,13 +83,11 @@ final class WorkerHandle {
         self.id = id
         self.recipe = recipe
         self.process = process
-        self.capacity = recipe.resources.maxConcurrentPerProcess
         self.baseline = baseline
     }
 
-    var freeCapacity: Int { stopping ? 0 : capacity - assigned.count }
-    var jobs: [String] { assigned.values.map(\.jobId).sorted() }
-    var reserved: Int { max(lastFootprint, baseline + assigned.values.reduce(0) { $0 + $1.claim }) }
+    var available: Bool { !stopping && job == nil }
+    var reserved: Int { max(lastFootprint, baseline + (job?.claim ?? 0)) }
 }
 
 /// LiftCore's engine: store, catalog, installs, workers and the scheduler loop. Commands (Commands/*.swift)
@@ -120,8 +115,6 @@ public actor Lift {
     /// Recipes with a tick scheduled for when their recheck interval ends.
     var recheckScheduled: Set<String> = []
     var workers: [String: WorkerHandle] = [:]
-    /// Job id → the run id of its live attempt. Results from any other run are discarded.
-    var currentRun: [String: String] = [:]
     var logs: [String: LogFile] = [:]
     var housekeeping: Task<Void, Never>?
     var closing = false
@@ -273,8 +266,8 @@ public actor Lift {
             }
             let input = SchedulerInput(
                 candidates: candidates,
-                workers: workers.values.map { WorkerSnapshot(recipe: $0.recipe.id, freeCapacity: $0.freeCapacity, reserved: $0.reserved) },
-                runningSteps: workers.values.reduce(0) { $0 + $1.assigned.count },
+                workers: workers.values.map { WorkerSnapshot(recipe: $0.recipe.id, freeCapacity: $0.available ? 1 : 0, reserved: $0.reserved) },
+                runningSteps: workers.values.filter { $0.job != nil }.count,
                 maxSlots: settings.maxSlots, budget: settings.memoryBudgetBytes, systemFree: config.systemFree(), paused: settings.queuePaused)
             let byId = Dictionary(uniqueKeysWithValues: pending.map { ($0.0.id, $0) })
             for decision in Scheduler.decide(input) {
@@ -319,12 +312,10 @@ public actor Lift {
     func startStep(job: JobRecord, step: StepRecord) throws {
         guard let recipe = installed[step.recipe] else { return }
         let need = try store.db.read { try Estimates.need($0, recipe: recipe, task: step.task, settings: step.settings) }
-        let worker = workers.values.first { $0.recipe.id == recipe.id && $0.freeCapacity > 0 } ?? spawn(recipe, baseline: need.load)
+        let worker = workers.values.first { $0.recipe.id == recipe.id && $0.available } ?? spawn(recipe, baseline: need.load)
         worker.idleSince = nil
-        let run = "\(job.id)#\(UUID().uuidString.prefix(8).lowercased())"
-        worker.assigned[run] = Assignment(jobId: job.id, run: run, step: step.idx, task: step.task,
-                                          keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
-        currentRun[job.id] = run
+        worker.job = Assignment(jobId: job.id, step: step.idx, task: step.task,
+                                keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
         var step = step
         // A chained step's first input comes from the previous step's first output (refilled on every start, so retries see new outputs).
         let stepsDir = jobsDir.appending(path: "\(job.id)/steps").path
@@ -337,14 +328,14 @@ public actor Lift {
         step.stage = nil
         step.fraction = nil
         try store.db.write { db in try self.setState(db, job: job, step: step, worker.ready ? .running : .loading) }
-        if worker.ready { try send(worker, run: run) }
+        if worker.ready { try send(worker) }
     }
 
     // MARK: weights
 
     /// A step would start a new worker for a recipe with weights that haven't passed a check since its last start.
     func needsVerifiedStart(_ r: Recipe) -> Bool {
-        !r.weights.isEmpty && !verifiedForStart.contains(r.id) && !workers.values.contains { $0.recipe.id == r.id && $0.freeCapacity > 0 }
+        !r.weights.isEmpty && !verifiedForStart.contains(r.id) && !workers.values.contains { $0.recipe.id == r.id && $0.available }
     }
 
     /// Starts a background weights check, at most once per `weightsRecheckInterval` per recipe.
@@ -384,7 +375,7 @@ public actor Lift {
         let id = "w-" + UUID().uuidString.prefix(8).lowercased()
         let process = WorkerProcess(
             executable: installer.venvPython(recipe.id),
-            arguments: ["-u", "-m", "lift_worker", installer.workerConfig(recipe, maxConcurrent: recipe.resources.maxConcurrentPerProcess, heartbeat: config.heartbeatSeconds)],
+            arguments: ["-u", "-m", "lift_worker", installer.workerConfig(recipe, heartbeat: config.heartbeatSeconds)],
             environment: installer.workerEnvironment(recipe),
             workingDirectory: installer.dir(recipe.id).appending(path: "repo").path)
         let handle = WorkerHandle(id: id, recipe: recipe, process: process, baseline: baseline)
@@ -395,27 +386,22 @@ public actor Lift {
         return handle
     }
 
-    func send(_ w: WorkerHandle, run: String) throws {
-        guard var a = w.assigned[run], !a.sent else { return }
+    func send(_ w: WorkerHandle) throws {
+        guard var a = w.job, !a.sent else { return }
         let step = try store.db.read { try StepRecord.fetchOne($0, key: ["jobId": a.jobId, "idx": a.step]) }
         guard let step else { return }
         let outDir = jobsDir.appending(path: "\(a.jobId)/steps/\(step.idx)")
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         a.sent = true
         a.startFootprint = w.lastFootprint
-        w.assigned[run] = a
-        w.process.send(.run(job: run, step: step.idx, task: step.task, inputs: step.inputs, settings: step.settings, outDir: outDir.path))
+        w.job = a
+        w.process.send(.run(job: a.jobId, step: step.idx, task: step.task, inputs: step.inputs, settings: step.settings, outDir: outDir.path))
     }
 
-    /// Drops an attempt that was never sent (cancelled while its worker was loading).
-    func drop(_ w: WorkerHandle, run: String) {
-        w.assigned[run] = nil
-        if w.assigned.isEmpty { w.idleSince = .now }
-    }
-
-    /// The job a protocol `job` field (a run id) belongs to.
-    func jobId(_ w: WorkerHandle, run: String) -> String {
-        w.assigned[run]?.jobId ?? String(run.prefix { $0 != "#" })
+    /// Cancel/kill: SIGKILL to the worker's whole process group, at once (spec §8). Its exit is expected.
+    func kill(_ w: WorkerHandle) {
+        w.stopping = true
+        w.process.kill()
     }
 
     // MARK: worker events
@@ -437,44 +423,44 @@ public actor Lift {
                 w.baseline = w.lastFootprint
                 try store.db.write { db in
                     try db.execute(sql: "UPDATE worker SET loadSeconds = ? WHERE id = ?", arguments: [loadSeconds, w.id])
-                    if let a = w.assigned.values.first {
+                    if let a = w.job {
                         try Estimates.record(db, recipe: w.recipe.id, task: a.task, keyValues: a.keyValues, kind: .load, bytes: w.baseline)
                     }
                 }
-                for (run, a) in w.assigned where !a.sent {
+                if let a = w.job, !a.sent {
                     let stillWanted = try store.db.write { db -> Bool in
-                        guard self.currentRun[a.jobId] == run, let j = try JobRecord.fetchOne(db, key: a.jobId),
+                        guard let j = try JobRecord.fetchOne(db, key: a.jobId),
                               let s = try StepRecord.fetchOne(db, key: ["jobId": a.jobId, "idx": a.step]), s.state == .loading else { return false }
                         try self.setState(db, job: j, step: s, .running)
                         return true
                     }
-                    if stillWanted { try send(w, run: run) } else { drop(w, run: run) }
+                    if stillWanted { try send(w) } else { w.job = nil; w.idleSince = .now }
                 }
-            case .log(let run, let line):
-                appendLog(jobId(w, run: run), line)
-            case .stage(let run, let name, let fraction):
-                guard let a = w.assigned[run], currentRun[a.jobId] == run else { return }
+            case .log(let job, let line):
+                appendLog(job, line)
+            case .stage(let job, let name, let fraction):
+                guard let a = w.job, a.jobId == job else { return }
                 try store.db.write { db in
                     try db.execute(sql: "UPDATE step SET stage = ?, fraction = ? WHERE jobId = ? AND idx = ? AND state = 'running'",
                                    arguments: [name, fraction, a.jobId, a.step])
                 }
-            case .done(let run, let outputs):
-                try finish(w, run: run, outputs: outputs, error: nil)
-            case .error(let run?, let message, let traceback):
-                if let traceback { appendLog(jobId(w, run: run), traceback) }
-                try finish(w, run: run, outputs: [], error: message)
+            case .done(let job, let outputs):
+                try finish(w, job: job, outputs: outputs, error: nil)
+            case .error(let job?, let message, let traceback):
+                if let traceback { appendLog(job, traceback) }
+                try finish(w, job: job, outputs: [], error: message)
             case .error(nil, let message, let traceback):
                 w.loadError = message
                 for line in (traceback ?? "").split(separator: "\n") { w.tail.append(String(line)) }
             case .heartbeat(let mps):
                 w.lastFootprint = footprint(w, mps: mps)
-                for (run, var a) in w.assigned where a.sent {
+                if var a = w.job, a.sent {
                     a.peak = max(a.peak, w.lastFootprint)
-                    w.assigned[run] = a
+                    w.job = a
                 }
             case .stderr(let line):
                 w.tail.append(line)
-                if w.assigned.count == 1, let a = w.assigned.values.first { appendLog(a.jobId, line) }
+                if let a = w.job { appendLog(a.jobId, line) }
             case .malformed(let line):
                 w.tail.append("[malformed protocol line] " + line)
             case .exited(let code):
@@ -490,15 +476,10 @@ public actor Lift {
         logs[job]?.write(line)
     }
 
-    func finish(_ w: WorkerHandle, run: String, outputs: [String], error: String?) throws {
-        guard var a = w.assigned.removeValue(forKey: run) else { return }
-        if w.assigned.isEmpty { w.idleSince = .now }
-        let id = a.jobId
-        guard currentRun[id] == run else {  // a cancelled attempt: its result is discarded
-            tick()
-            return
-        }
-        currentRun[id] = nil
+    func finish(_ w: WorkerHandle, job id: String, outputs: [String], error: String?) throws {
+        guard var a = w.job, a.jobId == id else { return }
+        w.job = nil
+        w.idleSince = .now
         w.lastFootprint = footprint(w)
         a.peak = max(a.peak, w.lastFootprint)
         let jobBytes = max(0, a.peak - a.startFootprint)
@@ -536,9 +517,8 @@ public actor Lift {
         }
         guard !closing else { return }
         let message = ([w.loadError ?? "worker \(reason)"] + w.tail.lines.suffix(20)).joined(separator: "\n")
-        for (run, a) in w.assigned where currentRun[a.jobId] == run {
+        if let a = w.job {
             let id = a.jobId
-            currentRun[id] = nil
             try store.db.write { db in
                 if let job = try JobRecord.fetchOne(db, key: id), let step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]), step.state.isActive {
                     try self.setState(db, job: job, step: step, .failed, error: message)
@@ -553,7 +533,7 @@ public actor Lift {
 
     func housekeep() {
         let limit = Duration.seconds(settings.idleUnloadMinutes * 60)
-        for w in workers.values where w.assigned.isEmpty && !w.stopping {
+        for w in workers.values where w.available {
             if let idle = w.idleSince, ContinuousClock.now - idle >= limit { stop(w) }
         }
     }
