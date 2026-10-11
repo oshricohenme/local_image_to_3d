@@ -479,6 +479,20 @@ Without it they return `confirmation_required` with a description of the impact 
 - **Transports:** Streamable HTTP at `/mcp`; the stdio bridge `lift-mcp` (inside the app bundle) forwards to it.
 - **HTTP:** `/v1/*` mirrors the table above. File inputs use multipart upload or `*_path` / `*_base64`.
   `POST /v1/jobs` returns `202` with `Location`. `/openapi.json` and `/docs` (Redoc) are served too.
+- **HTTP status codes (Plan 2):**
+  - A queued job (`jobs_submit`, `jobs_retry`) returns `202`.
+  - A memory warning returns `200 {memory_warning:{message, needed_gb, physical_gb, budget_gb, step}, hint}`
+    and queues nothing.
+  - A confirm gate returns `409 confirmation_required` with `impact` (MCP returns the same body as an
+    error result).
+  - Errors share one body: 422 lists every bad field; there are also 401, 403, 404 and 409; a 500 carries
+    the failed command and the end of its output.
+  - Requests from this Mac also need a local Host/Origin header.
+- **MCP tools** are derived from `openapi.yaml` at runtime, so the two front ends can't drift; a test
+  pins all 39 names. `jobs_wait` defaults to 30 s. Progress and resource notifications arrive on the
+  session's notification stream (swift-sdk 0.12.1).
+- **Server settings:** `port` and `lan_mode` live in `<workdir>/server.json`. The secret store
+  (Keychain) and `secrets_set_hf_token` live in LiftServer.
 - **Port:** 7777 by default. If it's taken, the next free port is used, and the actual port is shown in
   the UI, `server_status` and the MCP config snippet.
 - **Auth:** loopback requests need no token. With LAN mode on, the server binds `0.0.0.0` and any
