@@ -34,6 +34,15 @@ struct GenerateView: View {
                     Button("Browse or add recipes") { app.section = .models }
                 }
             } else {
+                if !app.models.contains(where: \.isInstalled) {
+                    Label { Text("Install a model to get started. Models shows each one, who made it and what it needs.") } icon: {
+                        Image(systemName: "shippingbox")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(alignment: .trailing) { Button("Go to Models") { app.section = .models }.padding(.trailing, 12) }
+                }
                 chipRow(chips)
                 HStack(alignment: .top, spacing: 16) {
                     inputs.frame(minWidth: 320, maxWidth: .infinity)

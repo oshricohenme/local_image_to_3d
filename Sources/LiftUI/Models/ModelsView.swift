@@ -28,6 +28,8 @@ struct ModelsView: View {
     @State private var pin = ""
     @State private var readme: Readme?
     @State private var loadingReadme = false
+    /// Weight sizes Hugging Face reported, by model id.
+    @State private var weightBytes: [String: Int] = [:]
 
     var body: some View {
         HSplitView {
@@ -52,7 +54,7 @@ struct ModelsView: View {
         }
         .navigationTitle("Models")
         .task(id: app.models.count) { listings = await app.lift?.recipesList() ?? [] }
-        .task(id: selected) { await loadDetail(); await loadReadme() }
+        .task(id: selected) { await loadDetail(); await loadReadme(); await loadSize() }
         .onChange(of: app.models) { Task { await loadDetail() } }
         .onChange(of: app.developer) { if !app.developer && !tabs.contains(tab) { tab = .about } }
         .alert("Change pin", isPresented: $pinning) {
@@ -88,6 +90,11 @@ struct ModelsView: View {
         readme = try? await lift.modelsReadme(id)
     }
 
+    func loadSize() async {
+        guard let m = detail, weightBytes[m.id] == nil, !m.recipe.weights.isEmpty else { return }
+        if let bytes = await app.hf.size(of: m.recipe.weights) { weightBytes[m.id] = bytes }
+    }
+
     func problemText(_ l: RecipeListing) -> String {
         switch l.state {
         case .needsNewerLift: "needs a newer version of Lift"
@@ -107,6 +114,14 @@ struct ModelsView: View {
                         Text(m.name).font(.title2).bold()
                         Text("by " + m.recipe.attribution.authors.joined(separator: ", ") + " · " + m.recipe.attribution.license.spdx).foregroundStyle(.secondary)
                         if let d = m.recipe.description { Text(d).font(.callout) }
+                        let card = ModelCard(m, weightsBytes: weightBytes[m.id])
+                        if let size = card.size { Text(size).font(.callout).foregroundStyle(.secondary) }
+                        if !card.gated.isEmpty {
+                            Label("Needs a free Hugging Face account", systemImage: "person.badge.key.fill").font(.callout.bold())
+                        }
+                        ForEach(card.restrictions, id: \.self) { r in
+                            Label(r, systemImage: "exclamationmark.triangle.fill").font(.callout.bold()).foregroundStyle(.orange)
+                        }
                     }
                     Spacer()
                     actions(m)

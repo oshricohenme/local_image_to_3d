@@ -8,7 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     let app: AppModel
     @State private var port = ""
-    @State private var hfToken = ""
+    @State private var hfAccess: HFAccess?
     @State private var showToken = false
     @State private var token: String?
     @State private var prereqs: Prereqs?
@@ -200,17 +200,12 @@ struct SettingsView: View {
 
     @ViewBuilder var accounts: some View {
         Section("Hugging Face") {
-            LabeledContent("Token (only for gated weights)") {
-                HStack {
-                    SecureField("hf_…", text: $hfToken).labelsHidden()
-                    Button("Save") {
-                        let t = hfToken
-                        app.run { _ = try await app.liveServer.secretsSetHFToken(t); hfToken = "" }
-                    }
-                    Button("Remove") { app.run { _ = try await app.liveServer.secretsSetHFToken(nil) } }
-                }
-            }
+            Text("Some models' authors ask you to accept their terms on Hugging Face first. A free account and a Read key are enough.")
+                .foregroundStyle(.secondary)
+            if let hfAccess { HFAccessView(app: app, access: hfAccess) }
+            Button("Remove Key") { app.run { _ = try await app.liveServer.secretsSetHFToken(nil); hfAccess = HFAccess(models: app.models) } }
         }
+        .task(id: app.models.map(\.id)) { hfAccess = HFAccess(models: app.models) }
     }
 
     @ViewBuilder var toolchain: some View {
