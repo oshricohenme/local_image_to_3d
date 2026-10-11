@@ -412,9 +412,12 @@ public actor Lift {
         w.process.send(.run(job: a.jobId, step: step.idx, task: step.task, inputs: step.inputs, settings: step.settings, outDir: outDir.path))
     }
 
-    /// Cancel/kill: SIGKILL to the worker's whole process group, at once (spec §8). Its exit is expected.
+    /// Cancel/kill: SIGKILL to the worker's whole process group, at once (spec §8). Its exit is expected, and
+    /// nothing it still sends counts: results are only taken from the worker a step is on (`step.workerId`),
+    /// so a line already in its pipe can't land on a retry that started elsewhere.
     func kill(_ w: WorkerHandle) {
         w.stopping = true
+        w.job = nil
         w.process.kill()
     }
 
@@ -455,8 +458,8 @@ public actor Lift {
             case .stage(let job, let name, let fraction):
                 guard let a = w.job, a.jobId == job else { return }
                 try store.db.write { db in
-                    try db.execute(sql: "UPDATE step SET stage = ?, fraction = ? WHERE jobId = ? AND idx = ? AND state = 'running'",
-                                   arguments: [name, fraction, a.jobId, a.step])
+                    try db.execute(sql: "UPDATE step SET stage = ?, fraction = ? WHERE jobId = ? AND idx = ? AND state = 'running' AND workerId = ?",
+                                   arguments: [name, fraction, a.jobId, a.step, w.id])
                 }
             case .done(let job, let outputs):
                 try finish(w, job: job, outputs: outputs, error: nil)
@@ -500,7 +503,7 @@ public actor Lift {
         try store.db.write { db in
             guard var job = try JobRecord.fetchOne(db, key: id),
                   var step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]),
-                  step.state == .running else { return }  // cancelled meanwhile: the result is discarded
+                  step.state == .running, step.workerId == w.id else { return }  // cancelled, or retried elsewhere: discarded
             if let error {
                 try self.setState(db, job: job, step: step, .failed, error: error)
                 return
@@ -534,7 +537,7 @@ public actor Lift {
         if let a = w.job {
             let id = a.jobId
             try store.db.write { db in
-                if let job = try JobRecord.fetchOne(db, key: id), let step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]), step.state.isActive {
+                if let job = try JobRecord.fetchOne(db, key: id), let step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]), step.state.isActive, step.workerId == w.id {
                     try self.setState(db, job: job, step: step, .failed, error: message)
                 }
             }

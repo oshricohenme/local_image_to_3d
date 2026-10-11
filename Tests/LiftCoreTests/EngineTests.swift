@@ -291,3 +291,36 @@ func fakeInstalledCube(_ lift: Lift) async throws {
         _ = try await lift.jobsCancel(b)
     }
 }
+
+extension Lift {
+    /// Cancel (kills the worker) and retry (a fresh worker), then deliver the killed worker's `done` as if it
+    /// was read from its pipe before its exit, all in one actor turn.
+    func cancelRetryThenStaleDone(_ id: String) throws -> String {
+        let old = workers.values.first { $0.job?.jobId == id }!
+        _ = try jobsCancel(id, confirm: true)
+        _ = try jobsRetry(id).accepted()
+        old.job = Assignment(jobId: id, step: 0, task: "image_to_3d", keyValues: "{}", claim: 0, sent: true)
+        _ = try store.db.write { try $0.execute(sql: "UPDATE step SET state = 'running' WHERE jobId = ?", arguments: [id]) }
+        try finish(old, job: id, outputs: ["/stale/cube.glb"], error: nil)
+        return old.id
+    }
+}
+
+@Suite struct StaleResultTests {
+    /// Defence kept from the concurrency days: a result from any worker but the step's current one is discarded.
+    @Test func aKilledWorkersLateResultIsNotTheRetrysResult() async throws {
+        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
+        try await fakeInstalledCube(lift)  // workers sleep in `loading`
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "test-cube", task: "image_to_3d",
+                                                                              inputs: ["image": try Fixtures.image()])])).accepted().job.id
+        #expect(try await eventually { try await lift.jobsGet(id).job.state == .loading })
+        let old = try await lift.cancelRetryThenStaleDone(id)
+        let v = try await lift.jobsGet(id)
+        #expect(v.steps[0].workerId != old)
+        #expect(v.job.state != .succeeded && v.steps[0].outputs.isEmpty)
+        // And the killed worker's exit, handled after the retry started, doesn't fail the retry.
+        #expect(try await eventually { await lift.workersList().allSatisfy { $0.id != old } })
+        #expect(try await lift.jobsGet(id).job.state == .loading)
+        _ = try await lift.jobsCancel(id, confirm: true)
+    }
+}
