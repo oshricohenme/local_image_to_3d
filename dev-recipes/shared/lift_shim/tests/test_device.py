@@ -81,3 +81,29 @@ def test_new_thread_redirected():
     t.start()
     t.join()
     assert result == {"dev": TARGET}
+
+
+def _device_or_error():
+    try:
+        return {"dev": torch.zeros(1).cuda().device.type}
+    except Exception as e:  # noqa: BLE001 - surface any failure to the assert
+        return {"err": repr(e)}
+
+
+def test_thread_subclass_overriding_run_redirected():
+    class Worker(threading.Thread):
+        def run(self):
+            self.result = _device_or_error()
+
+    t = Worker()
+    t.start()
+    t.join()
+    assert t.result == {"dev": TARGET}
+
+
+def test_timer_redirected():
+    result = {}
+    t = threading.Timer(0, lambda: result.update(_device_or_error()))
+    t.start()
+    t.join()
+    assert result == {"dev": TARGET}

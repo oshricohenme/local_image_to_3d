@@ -49,13 +49,14 @@ def _activate_current_thread() -> None:
 
 
 def _patch_threads() -> None:
-    original_run = threading.Thread.run
+    # _bootstrap_inner, not run: subclasses (and threading.Timer) override run() without calling super
+    original = threading.Thread._bootstrap_inner
 
-    def run(self, *a, **kw):
+    def _bootstrap_inner(self):
         _activate_current_thread()
-        return original_run(self, *a, **kw)
+        return original(self)
 
-    threading.Thread.run = run
+    threading.Thread._bootstrap_inner = _bootstrap_inner
 
 
 def _patch_cuda_module() -> None:
