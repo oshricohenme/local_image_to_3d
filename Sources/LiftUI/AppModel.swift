@@ -361,7 +361,9 @@ public final class AppModel {
     /// "Keep running in the menu bar". macOS also sets this when it places the menu-bar icon at launch,
     /// before setup has opened Lift, so it's remembered locally until then instead of erroring.
     public func setMenuBar(_ on: Bool) {
-        guard settings.menuBar != on || lift == nil else { return }
+        // Only a real change is written: SwiftUI's menu-bar extra re-sets this binding on every redraw,
+        // so writing an equal value would trigger another redraw, forever (froze the first launch).
+        guard settings.menuBar != on else { return }
         settings.menuBar = on
         if lift == nil { pendingMenuBar = on; return }
         run { _ = try await self.engine.settingsSet("menu_bar", .bool(on)) }

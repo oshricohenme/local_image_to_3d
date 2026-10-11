@@ -16,6 +16,17 @@ import Testing
         #expect(app.settings.menuBar == false)  // remembered locally, applied once Lift opens
     }
 
+    /// Regression (froze the app on first launch): SwiftUI's menu-bar extra re-sets `isInserted` on every
+    /// redraw; writing the same value again must not count as a change, or the redraw loops forever.
+    @Test func setMenuBarToTheSameValueIsNotAChange() throws {
+        let app = try UIFixtures.newApp()
+        final class Flag: @unchecked Sendable { var changed = false }
+        let flag = Flag()
+        withObservationTracking { _ = app.settings.menuBar } onChange: { flag.changed = true }
+        app.setMenuBar(app.settings.menuBar)
+        #expect(!flag.changed)
+    }
+
     @Test func anActionBeforeSetupGetsAPlainMessage() async throws {
         let app = try UIFixtures.newApp()
         app.run { _ = try await app.engine.queuePause() }
