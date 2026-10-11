@@ -42,6 +42,11 @@ public final class SetupModel {
         cleanupAfterExport = app.settings.cleanupAfterExport
     }
 
+    /// The folder picked in Folders: Lift's files go in a "Lift" folder inside it, never loose among the user's.
+    public func choose(_ folder: URL) {
+        workdir = folder.appending(path: "Lift")
+    }
+
     public var missingTools: Bool {
         guard let p = prereqs else { return true }
         return p.tools.brew == nil || p.tools.git == nil || p.tools.uv == nil || p.metalToolchain == false

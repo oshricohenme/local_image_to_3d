@@ -37,6 +37,13 @@ import Testing
         await again.close()
     }
 
+    @Test func aChosenFolderGetsALiftFolderInside() async throws {
+        let setup = SetupModel(app: try UIFixtures.newApp())
+        let documents = try UIFixtures.tempDir()
+        setup.choose(documents)  // e.g. ~/Documents: Lift's files go in their own folder, never loose among the user's
+        #expect(setup.workdir == documents.appending(path: "Lift"))
+    }
+
     @Test func aSetupQuitHalfwayResumesWhereItStopped() async throws {
         let prefs = MemoryPrefs()
         let app = try UIFixtures.newApp(prefs)

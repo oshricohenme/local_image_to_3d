@@ -19,7 +19,7 @@ struct InterruptedSheet: View {
             }
             .frame(minHeight: 160)
             HStack {
-                Button("Decide Later") { app.interrupted = [] }
+                Button("Decide Later") { app.showInterrupted = false }
                 Spacer()
                 Button("Discard", role: .destructive) { app.resolveInterrupted(.discard) }
                 Button("Re-queue All") { app.resolveInterrupted(.requeue) }.buttonStyle(.borderedProminent)

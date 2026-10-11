@@ -29,6 +29,9 @@ struct QueueView: View {
         }
         .navigationTitle("Queue")
         .toolbar {
+            if !app.interrupted.isEmpty {
+                Button("Interrupted · \(app.interrupted.count)") { app.showInterrupted = true }
+            }
             Button(app.queue?.paused == true ? "Resume Queue" : "Pause Queue") {
                 app.run { _ = app.queue?.paused == true ? try await app.engine.queueResume() : try await app.engine.queuePause() }
             }

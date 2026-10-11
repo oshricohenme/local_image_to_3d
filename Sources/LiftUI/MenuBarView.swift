@@ -41,7 +41,7 @@ public struct MenuBarView: View {
                     }
                 }
             }
-            if let last = app.lastFinished, let path = last.outputs.first {
+            if let last = app.lastFinished, let path = HistoryModel.viewable(last) {
                 Text("Just finished").font(.caption.bold()).foregroundStyle(.secondary)
                 HStack {
                     Text(last.job.title)

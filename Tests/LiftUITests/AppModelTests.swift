@@ -86,6 +86,8 @@ import Testing
         let app = try UIFixtures.newApp(prefs)
         #expect(await app.open(workdir))
         defer { Task { await app.close() } }
+        #expect(app.interrupted.map(\.job.id) == [id] && app.showInterrupted)
+        app.showInterrupted = false  // Decide Later: the sheet goes, the jobs stay for the Queue's button
         #expect(app.interrupted.map(\.job.id) == [id])
         app.resolveInterrupted(.requeue)
         #expect(app.interrupted.isEmpty)
@@ -106,6 +108,35 @@ import Testing
         #expect(AppModel.events(previous: [base.job.id: waiting], current: [waiting], left: []).isEmpty)  // once
         #expect(AppModel.events(previous: [base.job.id: waiting], current: [], left: [done]) == [.finished(done)])
         #expect(AppModel.events(previous: [base.job.id: base], current: [], left: [cancelled]).isEmpty)
+    }
+
+    @Test func aJobIsReportedFinishedOnlyOnceItsExportIsDone() async throws {
+        let app = try await UIFixtures.app()
+        defer { Task { await app.close() } }
+        var exporting = try await app.engine.jobsSubmit(UIFixtures.cube(try UIFixtures.file("a.png").path)).accepted()
+        exporting.job.state = .succeeded
+        exporting.job.exportPending = true
+        #expect(AppModel.events(previous: [:], current: [], left: [exporting]).isEmpty)
+        var exported = exporting
+        exported.job.exportPending = false
+        exported.job.cleanedUp = true  // jobs/<id>/ is gone: Reveal must point at the export
+        exported.job.exports = [try JSONDecoder().decode(ExportResult.self, from: Data(#"{"format":"glb","path":"/exports/a.glb"}"#.utf8))]
+        #expect(AppModel.events(previous: [:], current: [], left: [exported]) == [.finished(exported)])
+        let c = Notifier.content(.finished(exported))
+        #expect(c.userInfo["path"] as? String == "/exports/a.glb" && c.body == "a.glb")
+    }
+
+    @Test func aBatchThatFailsPartwayKeepsOnlyWhatWasntQueued() async throws {
+        let app = try await UIFixtures.app()
+        defer { Task { await app.close() } }
+        let g = app.generate
+        g.recipe = "test-cube"
+        let files = [try UIFixtures.file("a.png"), try UIFixtures.file("b.png"), try UIFixtures.file("c.png")]
+        g.add(files)
+        try FileManager.default.removeItem(at: files[1])  // moved away after it was added
+        app.submitGenerate()
+        #expect(try await eventually { !g.errors.isEmpty })
+        #expect(try await app.engine.jobsList().count == 1 && g.files == Array(files[1...]))
     }
 
     @Test func launchAtLoginFollowsTheSetting() async throws {

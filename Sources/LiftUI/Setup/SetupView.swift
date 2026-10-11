@@ -39,7 +39,7 @@ struct SetupView: View {
         .frame(minWidth: 680, minHeight: 480)
         .task { await model.load(app) }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { model.workdir = url }
+            if case .success(let url) = result { model.choose(url) }
         }
     }
 

@@ -65,7 +65,7 @@ public struct RootView: View {
             case .settings: SettingsView(app: app)
             }
         }
-        .sheet(isPresented: Binding(get: { !app.interrupted.isEmpty }, set: { if !$0 { app.interrupted = [] } })) {
+        .sheet(isPresented: Binding(get: { app.showInterrupted && !app.interrupted.isEmpty }, set: { app.showInterrupted = $0 })) {
             InterruptedSheet(app: app)
         }
         .sheet(isPresented: Binding(get: { app.aboutBeforeInstall != nil }, set: { if !$0 { app.aboutBeforeInstall = nil } })) {

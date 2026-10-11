@@ -84,8 +84,10 @@ public final class AppModel {
     public private(set) var resources: ResourcesView?
     public private(set) var models: [ModelView] = []
     public private(set) var settings = Settings()
-    /// Jobs found interrupted at launch, until resolved or put off (spec §7).
+    /// Jobs found interrupted at launch, until resolved (spec §7). Decide Later only hides the sheet;
+    /// the Queue's Interrupted button brings it back.
     public var interrupted: [JobView] = []
+    public var showInterrupted = false
     /// The most recent job that finished while the app was watching (menu bar "Just finished").
     public private(set) var lastFinished: JobView?
     public var confirmation: Confirmation?
@@ -197,6 +199,7 @@ public final class AppModel {
                 alert = "The HTTP/MCP server didn't start: \(Format.error(error))"
             }
             interrupted = try await lift.jobsListInterrupted()
+            showInterrupted = !interrupted.isEmpty
             await refresh()
             if ready { phase = .ready }
             refresher = Task { [weak self] in
@@ -256,7 +259,8 @@ public final class AppModel {
         }
     }
 
-    /// Finished jobs leave the queue: each one that left is fetched once, then reported with any new memory waits.
+    /// Finished jobs leave the queue: each one that left is fetched, then reported with any new memory waits.
+    /// One still exporting stays watched until its export is done (its files may then live only in the export folder).
     func report(_ jobs: [JobView], lift: Lift) async {
         let ids = Set(jobs.map(\.job.id))
         var left: [JobView] = []
@@ -267,7 +271,7 @@ public final class AppModel {
             if case .finished(let v) = event { lastFinished = v }
             onEvent?(event)
         }
-        seen = Dictionary(uniqueKeysWithValues: jobs.map { ($0.job.id, $0) })
+        seen = Dictionary(uniqueKeysWithValues: (jobs + left.filter(\.job.exportPending)).map { ($0.job.id, $0) })
     }
 
     /// What to notify: jobs that left the queue succeeded or failed (not cancelled), and jobs that just
@@ -277,7 +281,7 @@ public final class AppModel {
             if case .memory = v?.job.waitReason { true } else { false }
         }
         let waits = current.filter { memoryWait($0) && !memoryWait(previous[$0.job.id]) }.map(JobEvent.waitingForMemory)
-        let done = left.filter { $0.job.state == .succeeded || $0.job.state == .failed }.map(JobEvent.finished)
+        let done = left.filter { ($0.job.state == .succeeded || $0.job.state == .failed) && !$0.job.exportPending }.map(JobEvent.finished)
         return waits + done
     }
 
@@ -317,7 +321,8 @@ public final class AppModel {
         }
     }
 
-    /// Queues the Generate form: one job per input file. Bad input (per field) stays in the form. A memory
+    /// Queues the Generate form: one job per input file, each file leaving the form once it's queued, so a
+    /// failure partway keeps only what wasn't. Bad input (per field) stays in the form. A memory
     /// warning (spec §8) asks once: Run anyway queues this file and the rest; Cancel queues nothing more.
     public func submitGenerate() {
         submit(generate.requests[...], accept: false)
@@ -335,6 +340,8 @@ public final class AppModel {
                         }
                         return
                     }
+                    let first = request.steps.first?.inputs.values.map { $0 } ?? []
+                    self.generate.files.removeAll { first.contains($0.path) }
                 } catch LiftError.invalidInput(let errors) {
                     self.generate.errors = errors
                     return
@@ -374,6 +381,7 @@ public final class AppModel {
     public func resolveInterrupted(_ action: InterruptedAction) {
         let ids = interrupted.map(\.job.id)
         interrupted = []
+        showInterrupted = false
         run { _ = try await self.lift?.jobsResolveInterrupted(ids: ids, action: action) }
     }
 
@@ -398,6 +406,7 @@ public final class AppModel {
             await self.close()
             do {
                 try FileManager.default.moveItem(at: from, to: destination)
+                self.defaults.set(destination.path, forKey: Self.workdirKey)  // the data is there now, even if it fails to open
                 await self.open(destination)
             } catch {
                 self.alert = Format.error(error)

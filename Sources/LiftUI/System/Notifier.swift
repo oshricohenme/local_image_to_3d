@@ -30,8 +30,10 @@ public final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         switch event {
         case .finished(let v):
             c.title = v.job.state == .succeeded ? "Finished: \(v.job.title)" : "Failed: \(v.job.title)"
-            c.body = v.job.state == .succeeded ? v.outputs.map { URL(filePath: $0).lastPathComponent }.joined(separator: ", ") : (v.job.error ?? "")
-            if let path = v.outputs.first { c.userInfo = ["path": path] }
+            let exported = v.job.exports.compactMap(\.path)
+            let files = exported.isEmpty ? v.outputs : exported
+            c.body = v.job.state == .succeeded ? files.map { URL(filePath: $0).lastPathComponent }.joined(separator: ", ") : (v.job.error ?? "")
+            if let path = HistoryModel.viewable(v) { c.userInfo = ["path": path] }
         case .waitingForMemory(let v):
             c.title = "Waiting for memory: \(v.job.title)"
             c.body = Format.waitReason(v.job.waitReason)
