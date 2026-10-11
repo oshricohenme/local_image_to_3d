@@ -27,6 +27,9 @@ final class FakeRunner: CommandRunner {
             return s.rules.first { command.display.contains($0.match) }
         }
         for line in rule?.lines ?? [] { onLine(line) }
+        if (rule?.code ?? 0) == 0, command.arguments.contains("clone"), let dest = command.arguments.last {
+            try FileManager.default.createDirectory(atPath: dest + "/.git", withIntermediateDirectories: true)  // like git would
+        }
         return rule?.code ?? 0
     }
 }

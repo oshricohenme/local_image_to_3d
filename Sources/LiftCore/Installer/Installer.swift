@@ -145,7 +145,8 @@ public struct Installer: Sendable {
         let git = tools.git!, uv = tools.uv!
         let fm = FileManager.default
         let root = dir(recipe.id)
-        for name in ["repo", "venv", "recipe", "state.json", "shim.json", "install.log"] {
+        // repo/ is converged in place below (spec §6: Lift owns its working copy); the rest is rebuilt.
+        for name in ["venv", "recipe", "state.json", "shim.json", "install.log"] {
             try? fm.removeItem(at: root.appending(path: name))
         }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -161,16 +162,6 @@ public struct Installer: Sendable {
         let repo = root.appending(path: "repo").path
 
         var steps: [ShellCommand] = []
-        if !recipe.brew.isEmpty, let brew = tools.brew {
-            // First, so install steps that build native code can link against them.
-            steps.append(ShellCommand(brew, ["install"] + recipe.brew, environment: toolEnvironment))
-        }
-        if let url = recipe.repo, let commit {
-            steps.append(ShellCommand(git, ["clone", "--filter=blob:none", url, repo], environment: toolEnvironment))
-            steps.append(ShellCommand(git, ["-C", repo, "checkout", "--quiet", commit], environment: toolEnvironment))
-        } else {
-            try fm.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        }
         steps.append(ShellCommand(uv, ["venv", "--python", recipe.python, venv], environment: toolEnvironment, workingDirectory: root.path))
         let shell = recipe.install + recipe.substitutes.flatMap { registry[$0]?.install ?? [] }
         steps += shell.map { ShellCommand("/bin/sh", ["-c", $0], environment: env, workingDirectory: root.path) }
@@ -180,10 +171,16 @@ public struct Installer: Sendable {
         }
 
         do {
-            for step in steps {
-                lines("$ \(step.display)")
-                try await runner.check(step, onLine: lines)
+            if !recipe.brew.isEmpty, let brew = tools.brew {
+                // First, so install steps that build native code can link against them.
+                try await logged(ShellCommand(brew, ["install"] + recipe.brew, environment: toolEnvironment), lines)
             }
+            if let url = recipe.repo, let commit {
+                try await ensureRepo(url: url, commit: commit, at: URL(filePath: repo), git: git, lines: lines)
+            } else {
+                try fm.createDirectory(atPath: repo, withIntermediateDirectories: true)
+            }
+            for step in steps { try await logged(step, lines) }
             try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
             if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
             let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, heartbeat: 2)],
@@ -199,6 +196,44 @@ public struct Installer: Sendable {
             lines("install failed: \(error)")
             throw error
         }
+    }
+
+    func logged(_ command: ShellCommand, _ lines: @escaping @Sendable (String) -> Void) async throws {
+        lines("$ \(command.display)")
+        try await runner.check(command, onLine: lines)
+    }
+
+    /// Brings `repo` to exactly `commit` whatever state it's in (spec §6, Lift owns its working copy).
+    /// A healthy clone of the same remote is fetched, force-checked-out, cleaned of untracked files and has its
+    /// submodules updated; ignored files (checkpoints upstream code downloaded) stay. Anything else (missing,
+    /// not a repo, corrupt, another remote, a half-finished install) is cloned fresh into a staging folder and
+    /// swapped in.
+    func ensureRepo(url: String, commit: String, at repo: URL, git: String, lines: @escaping @Sendable (String) -> Void) async throws {
+        let fm = FileManager.default
+        func g(_ dir: URL, _ args: [String]) -> ShellCommand { ShellCommand(git, ["-C", dir.path] + args, environment: toolEnvironment) }
+        var reuse = false
+        if fm.fileExists(atPath: repo.appending(path: ".git").path) {
+            let remote = try? await runner.output(g(repo, ["remote", "get-url", "origin"]))
+            let healthy = (try? await runner.run(g(repo, ["status", "--porcelain"]), onLine: { _ in })) == 0
+            reuse = healthy && remote?.trimmingCharacters(in: .whitespacesAndNewlines) == url
+        }
+        if reuse {
+            try await logged(g(repo, ["fetch", "--quiet", "--force", "origin"]), lines)
+            if (try? await runner.run(g(repo, ["cat-file", "-e", "\(commit)^{commit}"]), onLine: { _ in })) != 0 {
+                try await logged(g(repo, ["fetch", "--quiet", "origin", commit]), lines)  // a pin off every branch
+            }
+            try await logged(g(repo, ["checkout", "--quiet", "--force", commit]), lines)
+            try await logged(g(repo, ["clean", "-ffd", "--quiet"]), lines)
+            try await logged(g(repo, ["submodule", "update", "--init", "--recursive", "--force", "--quiet"]), lines)
+            return
+        }
+        let staging = repo.deletingLastPathComponent().appending(path: ".repo-staging")
+        try? fm.removeItem(at: staging)  // Lift's own leftover
+        try await logged(ShellCommand(git, ["clone", "--filter=blob:none", url, staging.path], environment: toolEnvironment), lines)
+        try await logged(g(staging, ["checkout", "--quiet", commit]), lines)
+        try await logged(g(staging, ["submodule", "update", "--init", "--recursive", "--quiet"]), lines)
+        if fm.fileExists(atPath: repo.path) { try fm.removeItem(at: repo) }  // Lift's own working copy
+        try fm.moveItem(at: staging, to: repo)
     }
 
     /// The JSON argument for `python -m lift_worker`.

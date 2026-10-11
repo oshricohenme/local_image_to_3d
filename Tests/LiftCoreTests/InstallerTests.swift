@@ -28,17 +28,18 @@ import Testing
         try await inst.install(entry, pin: nil, onLine: { _ in })
         #expect(runner.displays == [
             "/brew/bin/brew install libusb",
-            "/bin/git clone --filter=blob:none https://github.com/TencentARC/Pixal3D \(m)/repo",
-            "/bin/git -C \(m)/repo checkout --quiet f7cf38429b0bd264f1995f0f8743a88b1c728b94",
+            "/bin/git clone --filter=blob:none https://github.com/TencentARC/Pixal3D \(m)/.repo-staging",
+            "/bin/git -C \(m)/.repo-staging checkout --quiet f7cf38429b0bd264f1995f0f8743a88b1c728b94",
+            "/bin/git -C \(m)/.repo-staging submodule update --init --recursive --quiet",
             "/bin/uv venv --python 3.11 \(m)/venv",
             "uv pip install torch torchvision",
             "/bin/uv pip install \(entry.shared.path)/lift_shim",
             "\(m)/venv/bin/python -c import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])",
             "\(m)/venv/bin/python -m lift_worker --check \(inst.workerConfig(entry.recipe, heartbeat: 2))",
         ])
-        let step = runner.commands[4]
+        let step = runner.commands[5]
         #expect(step.environment["VIRTUAL_ENV"] == "\(m)/venv" && step.environment["PATH"] == "\(m)/venv/bin:/bin" && step.workingDirectory == m)
-        let smoke = runner.commands[7].environment
+        let smoke = runner.commands[8].environment
         #expect(smoke["LIFT_SHIM"] == #"{"aliases":{},"env":{"ATTN_BACKEND":"sdpa"},"patches":["transformers_fa2_to_sdpa"],"standins":["flash_attn"]}"#)
         #expect(smoke["PYTHONPATH"] == "/lift/runtime" && smoke["HF_HUB_CACHE"] == "/hf/hub" && smoke["HF_TOKEN"] == "hf_x")
         #expect(smoke["DYLD_FALLBACK_LIBRARY_PATH"] == "/brew/lib:/usr/lib")  // native brew only, never /usr/local
