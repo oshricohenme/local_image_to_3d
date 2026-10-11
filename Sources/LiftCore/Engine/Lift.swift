@@ -49,8 +49,11 @@ public struct LiftConfig: Sendable {
     }
 }
 
-/// One step placed on a worker.
+/// One attempt at a step, placed on a worker. `run` (`<jobId>#<attempt>`) is the protocol `job` field, so a
+/// cancelled attempt that is still running can't be mistaken for its retry.
 struct Assignment {
+    var jobId: String
+    var run: String
     var step: Int
     var task: String
     var keyValues: String
@@ -70,6 +73,7 @@ final class WorkerHandle {
     var ready = false
     /// Shut down or killed on purpose: its exit is not a crash.
     var stopping = false
+    /// By run id.
     var assigned: [String: Assignment] = [:]
     /// Model load cost: the estimate until ready, then the footprint measured at ready.
     var baseline: Int
@@ -87,6 +91,7 @@ final class WorkerHandle {
     }
 
     var freeCapacity: Int { stopping ? 0 : capacity - assigned.count }
+    var jobs: [String] { assigned.values.map(\.jobId).sorted() }
     var reserved: Int { max(lastFootprint, baseline + assigned.values.reduce(0) { $0 + $1.claim }) }
 }
 
@@ -115,6 +120,8 @@ public actor Lift {
     /// Recipes with a tick scheduled for when their recheck interval ends.
     var recheckScheduled: Set<String> = []
     var workers: [String: WorkerHandle] = [:]
+    /// Job id → the run id of its live attempt. Results from any other run are discarded.
+    var currentRun: [String: String] = [:]
     var logs: [String: LogFile] = [:]
     var housekeeping: Task<Void, Never>?
     var closing = false
@@ -314,7 +321,10 @@ public actor Lift {
         let need = try store.db.read { try Estimates.need($0, recipe: recipe, task: step.task, settings: step.settings) }
         let worker = workers.values.first { $0.recipe.id == recipe.id && $0.freeCapacity > 0 } ?? spawn(recipe, baseline: need.load)
         worker.idleSince = nil
-        worker.assigned[job.id] = Assignment(step: step.idx, task: step.task, keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
+        let run = "\(job.id)#\(UUID().uuidString.prefix(8).lowercased())"
+        worker.assigned[run] = Assignment(jobId: job.id, run: run, step: step.idx, task: step.task,
+                                          keyValues: Estimates.keyValues(recipe, settings: step.settings), claim: need.job)
+        currentRun[job.id] = run
         var step = step
         // A chained step's first input comes from the previous step's first output (refilled on every start, so retries see new outputs).
         let stepsDir = jobsDir.appending(path: "\(job.id)/steps").path
@@ -327,7 +337,7 @@ public actor Lift {
         step.stage = nil
         step.fraction = nil
         try store.db.write { db in try self.setState(db, job: job, step: step, worker.ready ? .running : .loading) }
-        if worker.ready { try send(worker, job: job.id) }
+        if worker.ready { try send(worker, run: run) }
     }
 
     // MARK: weights
@@ -385,16 +395,27 @@ public actor Lift {
         return handle
     }
 
-    func send(_ w: WorkerHandle, job id: String) throws {
-        guard var a = w.assigned[id], !a.sent else { return }
-        let step = try store.db.read { try StepRecord.fetchOne($0, key: ["jobId": id, "idx": a.step]) }
+    func send(_ w: WorkerHandle, run: String) throws {
+        guard var a = w.assigned[run], !a.sent else { return }
+        let step = try store.db.read { try StepRecord.fetchOne($0, key: ["jobId": a.jobId, "idx": a.step]) }
         guard let step else { return }
-        let outDir = jobsDir.appending(path: "\(id)/steps/\(step.idx)")
+        let outDir = jobsDir.appending(path: "\(a.jobId)/steps/\(step.idx)")
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         a.sent = true
         a.startFootprint = w.lastFootprint
-        w.assigned[id] = a
-        w.process.send(.run(job: id, step: step.idx, task: step.task, inputs: step.inputs, settings: step.settings, outDir: outDir.path))
+        w.assigned[run] = a
+        w.process.send(.run(job: run, step: step.idx, task: step.task, inputs: step.inputs, settings: step.settings, outDir: outDir.path))
+    }
+
+    /// Drops an attempt that was never sent (cancelled while its worker was loading).
+    func drop(_ w: WorkerHandle, run: String) {
+        w.assigned[run] = nil
+        if w.assigned.isEmpty { w.idleSince = .now }
+    }
+
+    /// The job a protocol `job` field (a run id) belongs to.
+    func jobId(_ w: WorkerHandle, run: String) -> String {
+        w.assigned[run]?.jobId ?? String(run.prefix { $0 != "#" })
     }
 
     // MARK: worker events
@@ -420,39 +441,40 @@ public actor Lift {
                         try Estimates.record(db, recipe: w.recipe.id, task: a.task, keyValues: a.keyValues, kind: .load, bytes: w.baseline)
                     }
                 }
-                for (job, a) in w.assigned where !a.sent {
-                    try store.db.write { db in
-                        if let j = try JobRecord.fetchOne(db, key: job), let s = try StepRecord.fetchOne(db, key: ["jobId": job, "idx": a.step]), s.state == .loading {
-                            try self.setState(db, job: j, step: s, .running)
-                        }
+                for (run, a) in w.assigned where !a.sent {
+                    let stillWanted = try store.db.write { db -> Bool in
+                        guard self.currentRun[a.jobId] == run, let j = try JobRecord.fetchOne(db, key: a.jobId),
+                              let s = try StepRecord.fetchOne(db, key: ["jobId": a.jobId, "idx": a.step]), s.state == .loading else { return false }
+                        try self.setState(db, job: j, step: s, .running)
+                        return true
                     }
-                    try send(w, job: job)
+                    if stillWanted { try send(w, run: run) } else { drop(w, run: run) }
                 }
-            case .log(let job, let line):
-                appendLog(job, line)
-            case .stage(let job, let name, let fraction):
-                guard let a = w.assigned[job] else { return }
+            case .log(let run, let line):
+                appendLog(jobId(w, run: run), line)
+            case .stage(let run, let name, let fraction):
+                guard let a = w.assigned[run], currentRun[a.jobId] == run else { return }
                 try store.db.write { db in
                     try db.execute(sql: "UPDATE step SET stage = ?, fraction = ? WHERE jobId = ? AND idx = ? AND state = 'running'",
-                                   arguments: [name, fraction, job, a.step])
+                                   arguments: [name, fraction, a.jobId, a.step])
                 }
-            case .done(let job, let outputs):
-                try finish(w, job: job, outputs: outputs, error: nil)
-            case .error(let job?, let message, let traceback):
-                if let traceback { appendLog(job, traceback) }
-                try finish(w, job: job, outputs: [], error: message)
+            case .done(let run, let outputs):
+                try finish(w, run: run, outputs: outputs, error: nil)
+            case .error(let run?, let message, let traceback):
+                if let traceback { appendLog(jobId(w, run: run), traceback) }
+                try finish(w, run: run, outputs: [], error: message)
             case .error(nil, let message, let traceback):
                 w.loadError = message
                 for line in (traceback ?? "").split(separator: "\n") { w.tail.append(String(line)) }
             case .heartbeat(let mps):
                 w.lastFootprint = footprint(w, mps: mps)
-                for (job, var a) in w.assigned where a.sent {
+                for (run, var a) in w.assigned where a.sent {
                     a.peak = max(a.peak, w.lastFootprint)
-                    w.assigned[job] = a
+                    w.assigned[run] = a
                 }
             case .stderr(let line):
                 w.tail.append(line)
-                if w.assigned.count == 1, let job = w.assigned.keys.first { appendLog(job, line) }
+                if w.assigned.count == 1, let a = w.assigned.values.first { appendLog(a.jobId, line) }
             case .malformed(let line):
                 w.tail.append("[malformed protocol line] " + line)
             case .exited(let code):
@@ -468,9 +490,15 @@ public actor Lift {
         logs[job]?.write(line)
     }
 
-    func finish(_ w: WorkerHandle, job id: String, outputs: [String], error: String?) throws {
-        guard var a = w.assigned.removeValue(forKey: id) else { return }
+    func finish(_ w: WorkerHandle, run: String, outputs: [String], error: String?) throws {
+        guard var a = w.assigned.removeValue(forKey: run) else { return }
         if w.assigned.isEmpty { w.idleSince = .now }
+        let id = a.jobId
+        guard currentRun[id] == run else {  // a cancelled attempt: its result is discarded
+            tick()
+            return
+        }
+        currentRun[id] = nil
         w.lastFootprint = footprint(w)
         a.peak = max(a.peak, w.lastFootprint)
         let jobBytes = max(0, a.peak - a.startFootprint)
@@ -508,7 +536,9 @@ public actor Lift {
         }
         guard !closing else { return }
         let message = ([w.loadError ?? "worker \(reason)"] + w.tail.lines.suffix(20)).joined(separator: "\n")
-        for (id, a) in w.assigned {
+        for (run, a) in w.assigned where currentRun[a.jobId] == run {
+            let id = a.jobId
+            currentRun[id] = nil
             try store.db.write { db in
                 if let job = try JobRecord.fetchOne(db, key: id), let step = try StepRecord.fetchOne(db, key: ["jobId": id, "idx": a.step]), step.state.isActive {
                     try self.setState(db, job: job, step: step, .failed, error: message)

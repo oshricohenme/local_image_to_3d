@@ -9,13 +9,14 @@ import trimesh
 
 def load(ctx):
     print("[Stage] Loading")
+    time.sleep(float(os.environ.get("TEST_CUBE_LOAD_DELAY", "0")))  # tests set it through shim env
     return {}
 
 
-def _wait(job, seconds):
+def _wait(job, seconds, honor_cancel=True):
     end = time.monotonic() + seconds
     while time.monotonic() < end:
-        if job.cancelled:
+        if job.cancelled and honor_cancel:
             raise RuntimeError("cancelled")
         time.sleep(0.05)
 
@@ -25,7 +26,7 @@ def run(state, job):
     print(f"shim env: {os.environ.get('TEST_CUBE_SHIM')}")  # set only if lift_shim's autoload ran
     print("[Stage] Generating")
     for i in range(1, 5):
-        _wait(job, float(s.get("delay", 0)) / 4)
+        _wait(job, float(s.get("delay", 0)) / 4, honor_cancel=not s.get("ignore_cancel"))
         print(f"Generating: {i * 25}%|", file=sys.stderr)
     if s.get("crash"):
         os._exit(3)

@@ -173,8 +173,9 @@ extension Lift {
 
     // MARK: changing jobs
 
-    /// Queued, waiting or interrupted jobs are cancelled at once. A running job needs `confirm`:
-    /// with concurrency 1 its worker is stopped; otherwise the job is marked cancelled and its result discarded.
+    /// Queued, waiting or interrupted jobs are cancelled at once. A loading or running job needs `confirm`:
+    /// with concurrency 1 its worker is stopped; otherwise an attempt not yet sent is dropped, and a sent one is
+    /// told to cancel and its result discarded.
     public func jobsCancel(_ id: String, confirm: Bool = false) throws -> Gated<JobView> {
         let v = try view(id)
         guard !v.job.state.isTerminal else { throw LiftError.invalidState("job \(id) already \(v.job.state.rawValue)") }
@@ -182,12 +183,14 @@ extension Lift {
         if v.job.state.isActive {
             guard confirm else { return .confirmationRequired("Job \"\(v.job.title)\" is \(v.job.state.rawValue); cancelling stops its work and discards any result.") }
             try store.db.write { db in try self.setState(db, job: v.job, step: step, .cancelled) }
-            if let w = workers.values.first(where: { $0.assigned[id] != nil }) {
+            if let run = currentRun.removeValue(forKey: id), let w = workers.values.first(where: { $0.assigned[run] != nil }) {
                 if w.capacity == 1 {
                     w.stopping = true
                     w.process.kill()
+                } else if w.assigned[run]?.sent == true {
+                    w.process.send(.cancel(job: run))  // the thread stays busy until upstream returns; its result is discarded
                 } else {
-                    w.process.send(.cancel(job: id))
+                    drop(w, run: run)
                 }
             }
         } else {

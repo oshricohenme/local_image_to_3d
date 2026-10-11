@@ -35,7 +35,7 @@ extension Lift {
 
     public func workersList() -> [WorkerView] {
         workers.values.sorted { $0.id < $1.id }.map {
-            WorkerView(id: $0.id, recipe: $0.recipe.id, pid: $0.pid, ready: $0.ready, jobs: $0.assigned.keys.sorted(),
+            WorkerView(id: $0.id, recipe: $0.recipe.id, pid: $0.pid, ready: $0.ready, jobs: $0.jobs,
                        maxConcurrent: $0.capacity, footprintBytes: $0.lastFootprint, reservedBytes: $0.reserved)
         }
     }
