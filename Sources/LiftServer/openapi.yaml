@@ -878,6 +878,7 @@ components:
             brew: { type: string }
             git: { type: string }
             uv: { type: string }
+            rosetta_brew: { type: string, description: An Intel/Rosetta Homebrew that was found; it's reported and never used. }
         metal_toolchain: { type: boolean }
     ServerStatus:
       type: object
