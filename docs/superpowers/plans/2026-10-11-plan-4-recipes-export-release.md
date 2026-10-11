@@ -40,7 +40,10 @@ under `.build/arm64-apple-macosx/debug/LiftServerTests.build` fixes it.
 
 ## Still open
 
-- Plan 3 owns the export UI (Generate export section, wizard export folder and cleanup default, Settings → Storage, History re-export) and the About/credits/README views, binding to the names above.
+- Done in the app (6390b90, ea3eb8f, 4e3c696, 03443c2, f078fb7): Generate export section and credit line, Models → About
+  (authors, paper, licenses, components, disclaimer, README at the pin), History credits/exports/Export Again…,
+  the wizard's export folder and cleanup default, Settings → Storage export rows.
+- Not done: a credit line on running jobs in Queue.
 
 ## Decisions to fold into the spec
 
@@ -59,4 +62,4 @@ under `.build/arm64-apple-macosx/debug/LiftServerTests.build` fixes it.
 - MoGe code license: GitHub reports `NOASSERTION`; the recipe links the LICENSE at the pin.
 - DINOv3 restrictions are summarised from Meta's license page (no military/weapons use; "Built with DINOv3" when redistributing); a human should confirm.
 - SwiftPM resolved GLTFKit2 here from its local cache; a clean CI runner downloads the 36.7 MB xcframework.
-- UniRig was never installed for real (needs native Homebrew); `release.yml` assumes Plan 3's `Lift.xcodeproj` / scheme `Lift`.
+- UniRig was never installed for real (needs native Homebrew); `release.yml` builds `App/Lift.xcodeproj` / scheme `Lift` via xcodegen; not run on a real runner.
