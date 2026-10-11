@@ -7,7 +7,7 @@ import Testing
 /// What launch decides (spec §11, the user's rule): setup appears only when something it sets up is missing,
 /// with only those steps. Nothing missing goes straight to the main window, whatever `setupDone` says.
 @MainActor @Suite struct LaunchTests {
-    static let noUV: AppModel.PrereqsCheck = { _ in Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git"), metalToolchain: nil) }
+    static let noUV: AppModel.PrereqsCheck = { _ in Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git", gitLfs: "/opt/homebrew/bin/git-lfs"), metalToolchain: nil) }
 
     func existingWorkdir(_ prefs: MemoryPrefs) throws -> URL {
         let dir = try UIFixtures.tempDir().appending(path: "lift")
@@ -35,7 +35,7 @@ import Testing
         let setup = SetupModel(app: app)
         #expect(setup.steps == [.mac] && setup.step == .mac)
         #expect(setup.railTitle == "Lift needs to fix one thing" && setup.heading == "A helper tool is missing")
-        #expect(setup.toolRows.map(\.state) == [.ready, .ready, .needed])
+        #expect(setup.toolRows.map(\.state) == [.ready, .ready, .ready, .needed])
         await setup.next(app)
         #expect(app.phase == .setup)  // Continue waits until the tool is there
         setup.prereqs = readyTools  // what Set Up My Mac returns once it's installed
@@ -167,11 +167,11 @@ import Testing
     @Test func theMacStepGoesFromMissingToInstallingToReady() async throws {
         let setup = SetupModel(app: try UIFixtures.newApp())
         setup.prereqs = Prereqs(tools: ToolPaths(git: "/usr/bin/git"), metalToolchain: false)
-        #expect(setup.toolRows.map(\.state) == [.needed, .ready, .needed, .needed])
-        #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "uv", "Apple's graphics compiler"])
+        #expect(setup.toolRows.map(\.state) == [.needed, .ready, .needed, .needed, .needed])
+        #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "git-lfs", "uv", "Apple's graphics compiler"])
         #expect(setup.offerSetUp && setup.askPasswordNote && !setup.macReady)
         setup.installingTools = true
-        #expect(setup.toolRows.map(\.state) == [.installing, .ready, .installing, .installing] && !setup.offerSetUp)
+        #expect(setup.toolRows.map(\.state) == [.installing, .ready, .installing, .installing, .installing] && !setup.offerSetUp)
         setup.installingTools = false
         setup.toolsFailure = "Homebrew's download stopped. Check your internet connection."
         #expect(setup.toolRows[0].state == .failed("Homebrew's download stopped. Check your internet connection."))
@@ -185,7 +185,7 @@ import Testing
     @Test func aMacThatHasEverythingShowsNoButtonAndNoMetalRowUnlessNeeded() async throws {
         let setup = SetupModel(app: try UIFixtures.newApp())
         setup.prereqs = readyTools
-        #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "uv"])
+        #expect(setup.toolRows.map(\.name) == ["Homebrew", "git", "git-lfs", "uv"])
         #expect(setup.macReady && !setup.offerSetUp && !setup.askPasswordNote)
         #expect(setup.macStatus == "Your Mac already has everything Lift needs ✓")
     }

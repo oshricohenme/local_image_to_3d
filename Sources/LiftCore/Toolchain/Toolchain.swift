@@ -5,13 +5,16 @@ public struct ToolPaths: Codable, Sendable, Equatable {
     /// Native arm64 Homebrew, only when `brew --version` and `brew config` both check out.
     public var brew: String?
     public var git: String?
+    /// Some models keep files in Git LFS (UniRig); Lift's own git runs it, whatever the user's git config says.
+    public var gitLfs: String?
     public var uv: String?
     /// An Intel/Rosetta Homebrew (`/usr/local/bin/brew`). Reported, never used: its libraries are x86_64.
     public var rosettaBrew: String?
 
-    public init(brew: String? = nil, git: String? = nil, uv: String? = nil, rosettaBrew: String? = nil) {
+    public init(brew: String? = nil, git: String? = nil, gitLfs: String? = nil, uv: String? = nil, rosettaBrew: String? = nil) {
         self.brew = brew
         self.git = git
+        self.gitLfs = gitLfs
         self.uv = uv
         self.rosettaBrew = rosettaBrew
     }
@@ -27,8 +30,8 @@ public struct Prereqs: Codable, Sendable, Equatable {
         self.metalToolchain = metalToolchain
     }
 
-    /// Native brew, git or uv not working, or the Metal Toolchain checked and absent.
-    public var missing: Bool { tools.brew == nil || tools.git == nil || tools.uv == nil || metalToolchain == false }
+    /// Native brew, git, git-lfs or uv not working, or the Metal Toolchain checked and absent.
+    public var missing: Bool { tools.brew == nil || tools.git == nil || tools.gitLfs == nil || tools.uv == nil || metalToolchain == false }
 }
 
 /// Finds and installs native Homebrew / git / uv / the Metal Toolchain (spec §6).
@@ -81,10 +84,12 @@ public struct Toolchain: Sendable {
         var git = find("git")
         if git == "/usr/bin/git", !(await works("/usr/bin/xcode-select", ["-p"])) { git = nil }
         if let g = git, !(await works(g)) { git = nil }
+        var gitLfs = find("git-lfs")
+        if let l = gitLfs, !(await works(l, ["version"])) { gitLfs = nil }
         var uv = find("uv")
         if let u = uv, !(await works(u)) { uv = nil }
         let rosetta = "\(rosettaPrefix)/bin/brew"
-        return ToolPaths(brew: await nativeBrew(), git: git, uv: uv,
+        return ToolPaths(brew: await nativeBrew(), git: git, gitLfs: gitLfs, uv: uv,
                          rosettaBrew: FileManager.default.isExecutableFile(atPath: rosetta) ? rosetta : nil)
     }
 
@@ -92,7 +97,15 @@ public struct Toolchain: Sendable {
     public var environment: [String: String] {
         // GIT_TERMINAL_PROMPT=0: a GUI app has no terminal; a repo needing credentials fails instead of hanging.
         // No user or system git config: an LFS filter there (with git-lfs off this PATH) broke UniRig's checkout.
-        ["PATH": searchDirs.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
+        // Lift's own LFS filter instead, through git's GIT_CONFIG_* variables, when setup has git-lfs.
+        var env = ["PATH": searchDirs.joined(separator: ":"), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
+        if let lfs = find("git-lfs") {
+            let config = [("filter.lfs.process", "\(lfs) filter-process"), ("filter.lfs.smudge", "\(lfs) smudge -- %f"),
+                          ("filter.lfs.clean", "\(lfs) clean -- %f"), ("filter.lfs.required", "true")]
+            env["GIT_CONFIG_COUNT"] = "\(config.count)"
+            for (i, (key, value)) in config.enumerated() { env["GIT_CONFIG_KEY_\(i)"] = key; env["GIT_CONFIG_VALUE_\(i)"] = value }
+        }
+        return env
     }
 
     public func metalToolchainInstalled() async -> Bool {

@@ -316,7 +316,7 @@ everything else is still built.
   added to the worker's `DYLD_FALLBACK_LIBRARY_PATH`.
 - If `brew` is missing, a setup screen offers **Install Homebrew**. That runs the official install script
   with a live log; macOS asks for your admin password.
-- If `git` or `uv` is missing, the app runs `brew install git uv` with a live log.
+- If `git`, `git-lfs` or `uv` is missing, the app runs `brew install` for the missing ones with a live log.
 - The Metal Toolchain is checked only when a recipe needs it, and then offered as a one-click install.
 
 **Install a model:** prerequisite checks (toolchain, free disk, gated weights → HF token present) → the
@@ -327,7 +327,8 @@ streamed live. Any failure leaves the model `install_failed` with the log kept; 
 counts as installed. `install_failed` carries a `reason` in plain words (the step, then the cause picked
 out of its output), which the app shows on the card and the model page. Lift's tools run without the
 user's or the system's git config (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`): a git-lfs
-filter there broke UniRig's checkout, and Lift doesn't need LFS files.
+filter there, with git-lfs off Lift's PATH, broke UniRig's checkout. git-lfs is a setup tool like git and
+uv (UniRig keeps files in LFS); Lift's own git runs its filter through `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`.
 
 **Weights: you start the download; Lift verifies it.**
 - Lift never downloads weights on its own. Each recipe's `weights:` list (repo and optional revision) is

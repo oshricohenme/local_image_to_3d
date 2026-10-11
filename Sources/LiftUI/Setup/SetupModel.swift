@@ -172,6 +172,7 @@ public final class SetupModel {
         guard let p = prereqs else { return [] }
         var rows = [("Homebrew", "installs Mac tools for Lift", p.tools.brew != nil),
                     ("git", "downloads each model's code", p.tools.git != nil),
+                    ("git-lfs", "downloads the large files some models keep with their code", p.tools.gitLfs != nil),
                     ("uv", "sets up the Python each model needs", p.tools.uv != nil)]
         if let metal = p.metalToolchain { rows.append(("Apple's graphics compiler", "some models need it", metal)) }
         return rows.map { name, detail, ok in

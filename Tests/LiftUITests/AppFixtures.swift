@@ -45,7 +45,7 @@ extension UIFixtures {
 }
 
 /// Every tool present: what a Mac that's ready looks like.
-let readyTools = Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git", uv: "/opt/homebrew/bin/uv"), metalToolchain: nil)
+let readyTools = Prereqs(tools: ToolPaths(brew: "/opt/homebrew/bin/brew", git: "/usr/bin/git", gitLfs: "/opt/homebrew/bin/git-lfs", uv: "/opt/homebrew/bin/uv"), metalToolchain: nil)
 
 /// Hugging Face without the network: `users` maps keys to account names, `access` gated repos to whether they're open.
 struct FakeHF: HFAccount {

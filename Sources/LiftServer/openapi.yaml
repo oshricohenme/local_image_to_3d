@@ -1048,6 +1048,7 @@ components:
           properties:
             brew: { type: string }
             git: { type: string }
+            git_lfs: { type: string, description: Some models keep files in Git LFS; Lift's own git uses it. }
             uv: { type: string }
             rosetta_brew: { type: string, description: An Intel/Rosetta Homebrew that was found; it's reported and never used. }
         metal_toolchain: { type: boolean }

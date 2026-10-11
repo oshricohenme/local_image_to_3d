@@ -192,7 +192,7 @@ import Testing
         let resources = ResourcesView(maxSlots: 1, budgetBytes: 1, reservedBytes: 1, systemFreeBytes: 1, workers: [Self.worker],
                                       estimates: [EstimateView(recipe: "r", task: "t", keyValues: "{}", loadBytes: 1, jobBytes: 1)])
         try Self.verify(resources, "Resources")
-        let prereqs = Prereqs(tools: ToolPaths(brew: "/b", git: "/g", uv: "/u", rosettaBrew: "/usr/local/bin/brew"), metalToolchain: true)
+        let prereqs = Prereqs(tools: ToolPaths(brew: "/b", git: "/g", gitLfs: "/l", uv: "/u", rosettaBrew: "/usr/local/bin/brew"), metalToolchain: true)
         try Self.verify(prereqs, "Prereqs")
     }
 

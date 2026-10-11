@@ -125,7 +125,7 @@ extension Lift {
     }
 
     /// Installs what's missing: native Homebrew (one administrator dialog, spec §6), then
-    /// `brew install git uv` with it, and the Metal Toolchain when `metal` is set. Output streams to `onLine`.
+    /// `brew install git git-lfs uv` (whichever are missing) with it, and the Metal Toolchain when `metal` is set. Output streams to `onLine`.
     public func systemInstallPrereqs(metal: Bool = false, confirm: Bool = false,
                                      onLine: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Gated<Prereqs> {
         let now = await systemPrereqs(checkMetal: metal)
@@ -135,7 +135,7 @@ extension Lift {
             if let rosetta = now.tools.rosettaBrew { step += "; the Intel Homebrew at \(rosetta) is left as it is" }
             plan.append(step)
         }
-        let formulae = [("git", now.tools.git), ("uv", now.tools.uv)].filter { $0.1 == nil }.map(\.0)
+        let formulae = [("git", now.tools.git), ("git-lfs", now.tools.gitLfs), ("uv", now.tools.uv)].filter { $0.1 == nil }.map(\.0)
         if !formulae.isEmpty { plan.append("brew install \(formulae.joined(separator: " "))") }
         if metal && now.metalToolchain == false { plan.append("xcodebuild -downloadComponent MetalToolchain") }
         guard !plan.isEmpty else { return .done(now) }

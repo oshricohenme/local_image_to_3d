@@ -27,6 +27,22 @@ import Testing
         #expect(t.environment["PATH"] == "\(first.path):\(second.path)" && t.environment["GIT_TERMINAL_PROMPT"] == "0")
         // The user's own git config never applies: an LFS filter there, with git-lfs off Lift's PATH, broke UniRig's clone.
         #expect(t.environment["GIT_CONFIG_GLOBAL"] == "/dev/null" && t.environment["GIT_CONFIG_NOSYSTEM"] == "1")
+        #expect(t.environment["GIT_CONFIG_COUNT"] == nil)  // no git-lfs: no LFS filter
+    }
+
+    /// git-lfs is a setup tool (UniRig keeps files in LFS): found like git and uv, missing until it is, and
+    /// Lift's own git runs its filter (the user's git config never applies).
+    @Test func gitLFSIsFoundAndLiftsGitUsesIt() async throws {
+        let bin = try Fixtures.fakeBin(["git", "git-lfs", "uv"])
+        let t = Toolchain(runner: FakeRunner(), searchDirs: [bin.path], homebrewPrefix: "/nonexistent-brew", rosettaPrefix: "/nonexistent-rosetta")
+        let lfs = bin.path + "/git-lfs"
+        #expect(await t.detect() == ToolPaths(git: bin.path + "/git", gitLfs: lfs, uv: bin.path + "/uv"))
+        let env = t.environment
+        let config = (0..<4).map { [env["GIT_CONFIG_KEY_\($0)"] ?? "", env["GIT_CONFIG_VALUE_\($0)"] ?? ""] }
+        #expect(env["GIT_CONFIG_COUNT"] == "4" && config == [["filter.lfs.process", "\(lfs) filter-process"], ["filter.lfs.smudge", "\(lfs) smudge -- %f"],
+                                                         ["filter.lfs.clean", "\(lfs) clean -- %f"], ["filter.lfs.required", "true"]])
+        #expect(Prereqs(tools: ToolPaths(brew: "/b", git: "/g", uv: "/u"), metalToolchain: nil).missing)
+        #expect(!Prereqs(tools: ToolPaths(brew: "/b", git: "/g", gitLfs: "/l", uv: "/u"), metalToolchain: nil).missing)
     }
 
     @Test func nonExecutableIsIgnored() throws {

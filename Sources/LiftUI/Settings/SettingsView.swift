@@ -228,9 +228,10 @@ struct SettingsView: View {
                 LabeledContent("Homebrew (native)", value: p.tools.brew ?? "missing")
                 if let rosetta = p.tools.rosettaBrew { LabeledContent("Intel Homebrew (not used)", value: rosetta) }
                 LabeledContent("git", value: p.tools.git ?? "missing")
+                LabeledContent("git-lfs", value: p.tools.gitLfs ?? "missing")
                 LabeledContent("uv", value: p.tools.uv ?? "missing")
                 if let metal = p.metalToolchain { LabeledContent("Metal Toolchain (needed by some models)", value: metal ? "installed" : "missing") }
-                if p.tools.brew == nil || p.tools.git == nil || p.tools.uv == nil || p.metalToolchain == false {
+                if p.missing {
                     Button("Install Missing Tools…") { installTools() }
                 }
             }
