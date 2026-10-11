@@ -14,7 +14,7 @@ ENV_DEFAULTS = {
     "SPARSE_ATTN_BACKEND": "sdpa",
 }
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # reentrant: `import torch` below fires autoload's hook, which calls install()
 _result: str | None = None
 
 
@@ -36,6 +36,8 @@ def install(config: dict | None = None) -> str:
         from .patches import install_patches
         install_patches(config.get("patches", []))
         import torch
+        if _result is not None:  # the torch post-import hook already installed (re-entered under _lock)
+            return _result
         if torch.cuda.is_available():
             _result = "cuda"
             return _result

@@ -74,3 +74,21 @@ def test_after_import_runs_once_module_has_executed(tmp_path, monkeypatch):
     after_import("hookedmod", lambda m: seen.append("now"))  # already imported → immediate
     assert seen == [1, "now"]
     sys.modules.pop("hookedmod")
+
+
+def test_after_import_survives_find_spec_probe(tmp_path, monkeypatch):
+    # Regression: importlib.util.find_spec(name) before the import (transformers probes torch this way)
+    # consumed the callbacks onto a spec that never executed, so they never ran.
+    from lift_shim.modules import after_import
+    (tmp_path / "probedmod.py").write_text("VALUE = 2\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    seen = []
+    after_import("probedmod", lambda m: seen.append(m.VALUE))
+    assert importlib.util.find_spec("probedmod") is not None
+    assert seen == []
+    import probedmod  # noqa: F401
+    assert seen == [2]
+    sys.modules.pop("probedmod")
+    import probedmod  # noqa: F401,F811 - re-import must not fire again
+    assert seen == [2]
+    sys.modules.pop("probedmod")

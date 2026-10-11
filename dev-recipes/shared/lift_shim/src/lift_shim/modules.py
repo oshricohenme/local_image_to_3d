@@ -10,6 +10,7 @@ import importlib.abc
 import importlib.machinery
 import importlib.util
 import sys
+import threading
 
 _STANDINS = {"flash_attn": "lift_shim.standins.flash_attn", "spconv": "lift_shim.standins.spconv"}
 
@@ -56,23 +57,31 @@ _finder = _Finder()
 
 
 class _PostImport(importlib.abc.MetaPathFinder):
-    """Wraps a module's own loader so callbacks run right after the module finishes executing."""
+    """Wraps a module's own loader so callbacks run right after the module finishes executing.
+
+    Callbacks stay pending until a spec actually executes: a bare importlib.util.find_spec(name)
+    probe (transformers does this for torch) builds a spec that is never run."""
 
     def __init__(self):
         self.pending: dict[str, list] = {}
+        self._resolving = threading.local()
 
     def find_spec(self, name, path=None, target=None):
-        callbacks = self.pending.pop(name, None)
-        if callbacks is None:
+        resolving = self._resolving.__dict__.setdefault("names", set())
+        if name not in self.pending or name in resolving:
             return None
-        spec = importlib.util.find_spec(name)  # re-enters this finder, but name is no longer pending
+        resolving.add(name)
+        try:
+            spec = importlib.util.find_spec(name)  # re-enters this finder; the guard makes it pass
+        finally:
+            resolving.discard(name)
         if spec is None or spec.loader is None:
             return spec
         original_exec = spec.loader.exec_module
 
         def exec_module(module):
             original_exec(module)
-            for fn in callbacks:
+            for fn in self.pending.pop(name, []):  # exactly once, on whichever spec really executes
                 fn(module)
 
         spec.loader.exec_module = exec_module

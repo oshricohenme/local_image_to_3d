@@ -82,3 +82,28 @@ def test_autoload_unknown_patch_fails():
     r = run(json.dumps({"patches": ["nope"]}))
     assert r.returncode != 0
     assert "unknown patch" in r.stderr
+
+
+def test_install_before_torch_with_autoload_does_not_deadlock():
+    # Regression: install() held a non-reentrant lock across `import torch`, whose autoload
+    # post-import hook calls install() again → hang.
+    code = "import lift_shim.autoload, lift_shim; print(lift_shim.install())"
+    env = {**os.environ, "LIFT_SHIM": "{}"}
+    r = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == TARGET, r.stderr[-2000:]
+
+
+def _autoload_probe(prelude):
+    code = f"import lift_shim.autoload\n{prelude}\nimport torch; print(torch.zeros(1).cuda().device.type)"
+    env = {**os.environ, "LIFT_SHIM": "{}"}
+    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120)
+
+
+def test_autoload_survives_find_spec_torch_before_import():
+    r = _autoload_probe("import importlib.util; importlib.util.find_spec('torch')")
+    assert r.stdout.strip() == TARGET, r.stderr[-2000:]
+
+
+def test_autoload_survives_transformers_before_torch():
+    r = _autoload_probe("import transformers")
+    assert r.stdout.strip() == TARGET, r.stderr[-2000:]
