@@ -34,7 +34,7 @@ struct SettingsView: View {
         .onAppear { port = app.serverStatus.map { String($0.configuredPort) } ?? "" }
         .task {
             token = await app.server?.lanToken()
-            prereqs = await app.lift?.systemPrereqs()
+            prereqs = await app.lift?.systemPrereqs(checkMetal: app.needsMetalToolchain)
         }
         .fileImporter(isPresented: $choosingWorkdir, allowedContentTypes: [.folder]) { result in
             if case .success(let parent) = result, let current = app.workdir {
@@ -220,7 +220,8 @@ struct SettingsView: View {
                 if let rosetta = p.tools.rosettaBrew { LabeledContent("Intel Homebrew (not used)", value: rosetta) }
                 LabeledContent("git", value: p.tools.git ?? "missing")
                 LabeledContent("uv", value: p.tools.uv ?? "missing")
-                if p.tools.brew == nil || p.tools.git == nil || p.tools.uv == nil {
+                if let metal = p.metalToolchain { LabeledContent("Metal Toolchain (needed by some models)", value: metal ? "installed" : "missing") }
+                if p.tools.brew == nil || p.tools.git == nil || p.tools.uv == nil || p.metalToolchain == false {
                     Button("Install Missing Tools…") { installTools() }
                 }
             }
@@ -236,6 +237,7 @@ struct SettingsView: View {
     func installTools() {
         toolLog = []
         let onLine: @Sendable (String) -> Void = { line in Task { @MainActor in toolLog.append(line) } }
-        app.gated { confirm in try await app.engine.systemInstallPrereqs(confirm: confirm, onLine: onLine) } then: { prereqs = $0 }
+        let metal = app.needsMetalToolchain
+        app.gated { confirm in try await app.engine.systemInstallPrereqs(metal: metal, confirm: confirm, onLine: onLine) } then: { prereqs = $0 }
     }
 }

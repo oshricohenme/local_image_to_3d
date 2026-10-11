@@ -43,8 +43,8 @@ public final class SetupModel {
     }
 
     public var missingTools: Bool {
-        guard let t = prereqs?.tools else { return true }
-        return t.brew == nil || t.git == nil || t.uv == nil
+        guard let p = prereqs else { return true }
+        return p.tools.brew == nil || p.tools.git == nil || p.tools.uv == nil || p.metalToolchain == false
     }
 
     /// Gated weights the bundled recipes use: their pages, where the user accepts the authors' terms.
@@ -91,13 +91,14 @@ public final class SetupModel {
     }
 
     public func checkTools(_ app: AppModel) async {
-        prereqs = await app.lift?.systemPrereqs()
+        prereqs = await app.lift?.systemPrereqs(checkMetal: app.needsMetalToolchain)
     }
 
     /// Installs missing tools (native Homebrew via one administrator dialog, then git and uv) with a live log.
     public func installTools(_ app: AppModel) {
         log = []
         let onLine: @Sendable (String) -> Void = { line in Task { @MainActor [weak self] in self?.log.append(line) } }
-        app.gated { confirm in try await app.engine.systemInstallPrereqs(confirm: confirm, onLine: onLine) } then: { [weak self] in self?.prereqs = $0 }
+        let metal = app.needsMetalToolchain
+        app.gated { confirm in try await app.engine.systemInstallPrereqs(metal: metal, confirm: confirm, onLine: onLine) } then: { [weak self] in self?.prereqs = $0 }
     }
 }

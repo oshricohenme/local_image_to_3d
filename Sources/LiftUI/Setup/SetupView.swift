@@ -71,6 +71,9 @@ struct SetupView: View {
                 tool("Homebrew", p.tools.brew)
                 tool("git", p.tools.git)
                 tool("uv", p.tools.uv)
+                if let metal = p.metalToolchain {
+                    tool("Metal Toolchain (Apple's graphics compiler, needed by some models)", metal ? "ready" : nil)
+                }
                 if let rosetta = p.tools.rosettaBrew {
                     Text("An older Intel copy of Homebrew is at \(rosetta). Lift leaves it as it is and installs its own.")
                         .font(.caption).foregroundStyle(.secondary)

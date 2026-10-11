@@ -149,6 +149,10 @@ public final class AppModel {
     /// Developer mode (Settings → Developer): shows the Test Cube and the recipes' raw details (spec §1).
     public var developer: Bool { settings.devRecipes }
 
+    /// The Metal Toolchain is checked and offered only when a recipe needs it (spec §6).
+    public var needsMetalToolchain: Bool { Self.needsMetalToolchain(models) }
+    nonisolated static func needsMetalToolchain(_ models: [ModelView]) -> Bool { models.contains { $0.recipe.metalToolchain } }
+
     /// At launch: open the saved workdir, or show the first-launch wizard (spec §11) until it's finished.
     /// A wizard stopped after its first step reopens the workdir and resumes.
     public func start() async {
