@@ -1,0 +1,57 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # Xcode 26 / Swift 6.2+ image. If macos-26 isn't available to this repo, set the repository
+    # variable MACOS_RUNNER to macos-latest (Settings → Secrets and variables → Actions → Variables).
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-26' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Swift tests (unit + Test Cube integration; no real models)
+        run: |
+          mkdir -p test-results
+          swift test --skip-build --xunit-output test-results/swift.xml
+
+      - name: lift_shim tests
+        working-directory: dev-recipes/shared/lift_shim
+        run: uv run --python 3.11 pytest -q --junitxml=../../../test-results/lift_shim.xml
+
+      - name: lift_worker tests
+        working-directory: python/lift_worker
+        run: uv run --python 3.11 pytest -q --junitxml=../../test-results/lift_worker.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
