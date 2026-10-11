@@ -68,6 +68,9 @@ public struct RootView: View {
         .sheet(isPresented: Binding(get: { !app.interrupted.isEmpty }, set: { if !$0 { app.interrupted = [] } })) {
             InterruptedSheet(app: app)
         }
+        .sheet(isPresented: Binding(get: { app.aboutBeforeInstall != nil }, set: { if !$0 { app.aboutBeforeInstall = nil } })) {
+            if let m = app.aboutBeforeInstall { AboutModelSheet(app: app, model: m) }
+        }
     }
 
     var serverBadge: some View {
@@ -81,5 +84,30 @@ public struct RootView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
+    }
+}
+
+/// Before a model's first install (spec §4a): who made it, the license and any restrictions, the disclaimer,
+/// links to the project and its README, then Continue (on to the install's own confirmation).
+struct AboutModelSheet: View {
+    let app: AppModel
+    let model: ModelView
+
+    var body: some View {
+        let a = model.recipe.attribution
+        VStack(alignment: .leading, spacing: 14) {
+            Text("About this model").font(.title2).bold()
+            Text("\(a.project) isn't made by Lift. Here is who made it and how you may use it.").foregroundStyle(.secondary)
+            ScrollView { AboutView(attribution: a, readme: nil, loadingReadme: false) }
+            HStack {
+                Link("Open Project Page", destination: a.homepage)
+                Link("Read README", destination: a.repo ?? a.homepage)
+                Spacer()
+                Button("Cancel", role: .cancel) { app.aboutBeforeInstall = nil }
+                Button("Continue") { app.continueInstall() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 600, height: 500)
     }
 }

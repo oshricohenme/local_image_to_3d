@@ -140,7 +140,7 @@ struct ModelsView: View {
         HStack {
             switch m.status {
             case .notInstalled, .installFailed:
-                Button("Install") { app.gated { confirm in try await app.engine.modelsInstall(m.id, confirm: confirm) } }
+                Button("Install") { app.install(m) }
                     .buttonStyle(.borderedProminent)
             case .installing:
                 ProgressView().controlSize(.small)

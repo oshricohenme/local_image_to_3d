@@ -89,6 +89,8 @@ public final class AppModel {
     /// The most recent job that finished while the app was watching (menu bar "Just finished").
     public private(set) var lastFinished: JobView?
     public var confirmation: Confirmation?
+    /// The one-time "About this model" sheet before a model's first install (spec §4a).
+    public var aboutBeforeInstall: ModelView?
     public var alert: String?
     public var section = AppSection.generate
     public let generate = GenerateModel()
@@ -346,6 +348,23 @@ public final class AppModel {
                 self?.run { try await self?.retry(id, settings: settings, accept: true) }
             }
         }
+    }
+
+    /// Install, from Generate or Models. The first time for a model it shows "About this model" first;
+    /// Continue there goes on to the install's own confirmation.
+    public func install(_ model: ModelView) {
+        if defaults.bool(forKey: "aboutShown." + model.id) {
+            gated { confirm in try await self.engine.modelsInstall(model.id, confirm: confirm) }
+        } else {
+            aboutBeforeInstall = model
+        }
+    }
+
+    public func continueInstall() {
+        guard let model = aboutBeforeInstall else { return }
+        aboutBeforeInstall = nil
+        defaults.set(true, forKey: "aboutShown." + model.id)
+        install(model)
     }
 
     public func resolveInterrupted(_ action: InterruptedAction) {

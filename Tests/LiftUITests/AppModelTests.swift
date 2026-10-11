@@ -48,6 +48,20 @@ import Testing
         #expect(try await eventually { try await app.engine.jobsList().count == 2 && g.files.isEmpty })  // asked once for both
     }
 
+    @Test func aFirstInstallShowsWhoMadeTheModelFirst() async throws {
+        let app = try await UIFixtures.app()
+        defer { Task { await app.close() } }
+        let cube = try #require(app.models.first { $0.id == "test-cube" })
+        app.install(cube)
+        #expect(app.aboutBeforeInstall?.id == "test-cube" && app.confirmation == nil)
+        app.continueInstall()
+        #expect(try await eventually { app.confirmation != nil })  // then the install's own confirmation
+        #expect(app.aboutBeforeInstall == nil && app.confirmation?.message.contains("Test Cube") == true)
+        app.confirmation = nil  // cancelled: nothing installs in tests
+        app.install(cube)
+        #expect(try await eventually { app.confirmation != nil } && app.aboutBeforeInstall == nil)  // shown once per model
+    }
+
     @Test func gatedCommandsAskFirstAndRunOnConfirm() async throws {
         let app = try await UIFixtures.app()
         defer { Task { await app.close() } }

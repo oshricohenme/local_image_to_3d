@@ -176,9 +176,7 @@ struct GenerateView: View {
             }
             if let m = offered.first(where: { $0.id == model.recipe }) {
                 if !m.isInstalled && !m.isUnsupported {
-                    Button("Install \(m.name)…") {
-                        app.gated { confirm in try await app.engine.modelsInstall(m.id, confirm: confirm) }
-                    }
+                    Button("Install \(m.name)…") { app.install(m) }
                 }
                 HStack {
                     Text(recipeLine(m)).font(.caption).foregroundStyle(.secondary)
