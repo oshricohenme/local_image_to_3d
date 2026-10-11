@@ -108,8 +108,11 @@ public actor Lift {
     /// Installed recipes, read from each model's own copy.
     var installed: [String: Recipe] = [:]
     var installing: [String: Task<Void, Never>] = [:]
-    /// What an install or download is doing now: installing, downloading weights, verifying weights.
+    /// What an install or download is doing now: getting the code, setting up python, checking the install,
+    /// downloading weights, verifying weights, cancelling.
     var phases: [String: String] = [:]
+    /// Bytes downloaded so far while weights download.
+    var progress: [String: InstallProgress] = [:]
     /// The last bundled-recipes sync (first launch or app update).
     var bundleSync = BundledRecipes.Result(copied: false, keptLocal: [])
     var weightReports: [String: WeightsReport] = [:]

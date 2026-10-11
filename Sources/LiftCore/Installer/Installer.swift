@@ -137,10 +137,12 @@ public struct Installer: Sendable {
         return (registry, try ShimConfig.build(recipe, registry: registry))
     }
 
-    /// Runs the whole install. Every command and its output go to `install.log` and `onLine`.
+    /// Runs the whole install. Every command and its output go to `install.log` and `onLine`; `onPhase` gets
+    /// "getting the code", "setting up python" and "checking the install" as each begins.
     /// Throws `LiftError.prerequisite` before touching anything, or `.commandFailed` with the log kept
-    /// and state.json marked failed.
-    public func install(_ entry: CatalogEntry, pin: String?, onLine: @escaping @Sendable (String) -> Void) async throws {
+    /// and state.json marked failed. Cancelled, it stops before the next command and marks nothing failed.
+    public func install(_ entry: CatalogEntry, pin: String?, onLine: @escaping @Sendable (String) -> Void,
+                        onPhase: @Sendable (String) async -> Void = { _ in }) async throws {
         let (registry, shimConfig) = try preflight(entry)
         if entry.recipe.metalToolchain, try await runner.run(ShellCommand("/usr/bin/xcrun", ["metal", "--version"]), onLine: { _ in }) != 0 {
             throw LiftError.prerequisite("\(entry.recipe.name) needs Apple's Metal Toolchain; install it from Setup (system_install_prereqs with metal)")
@@ -176,6 +178,7 @@ public struct Installer: Sendable {
         }
 
         do {
+            await onPhase("getting the code")
             if !recipe.brew.isEmpty, let brew = tools.brew {
                 // First, so install steps that build native code can link against them.
                 try await logged(ShellCommand(brew, ["install"] + recipe.brew, environment: toolEnvironment), lines)
@@ -185,16 +188,21 @@ public struct Installer: Sendable {
             } else {
                 try fm.createDirectory(atPath: repo, withIntermediateDirectories: true)
             }
+            await onPhase("setting up python")
             for step in steps { try await logged(step, lines) }
             try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
             if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
             let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, heartbeat: 2)],
                                      environment: workerEnvironment(recipe), workingDirectory: repo)
-            lines("$ \(smoke.display)")
-            try await runner.check(smoke, onLine: lines)
+            await onPhase("checking the install")
+            try await logged(smoke, lines)
             try writeState(InstallState(installed: true, commit: commit, digest: Self.digest(entry.directory), at: Date()), id: recipe.id)
             lines("installed \(recipe.id)")
         } catch {
+            if error is CancellationError || Task.isCancelled {
+                lines("install cancelled")
+                throw error
+            }
             // Any failure, not only a failing command, leaves a failed state with its reason (M10).
             if case LiftError.commandFailed(let command, let code, _) = error {
                 try? writeState(InstallState(installed: false, commit: commit, digest: "", failedCommand: command, exitCode: code, reason: "\(error)", at: Date()), id: recipe.id)
@@ -207,6 +215,7 @@ public struct Installer: Sendable {
     }
 
     func logged(_ command: ShellCommand, _ lines: @escaping @Sendable (String) -> Void) async throws {
+        try Task.checkCancellation()
         lines("$ \(command.display)")
         try await runner.check(command, onLine: lines)
     }

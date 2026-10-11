@@ -137,7 +137,7 @@ import Testing
             throw LiftError.invalidState("test-cube recipe didn't load")
         }
         return ModelView(id: "test-cube", name: "Test Cube", source: "bundled", status: .installed(commit: "c"), recipe: recipe, pin: "p",
-                         diskBytes: 1, weights: weights)
+                         diskBytes: 1, weights: weights, progress: InstallProgress(downloadedBytes: 1, totalBytes: 2))
     }
 
     static var worker: WorkerView {

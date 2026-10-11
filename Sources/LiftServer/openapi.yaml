@@ -353,6 +353,18 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ModelView' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/install/cancel:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_cancel_install
+      summary: Stop the model's install or weights download. Downloaded files stay and resume next time; a cancelled install isn't marked failed.
+      responses:
+        '200':
+          description: The model (installing {phase cancelling} until it has stopped).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/models/{id}/reinstall:
     parameters: [{ $ref: '#/components/parameters/ModelId' }]
     post:
@@ -782,7 +794,7 @@ components:
         status:
           type: object
           additionalProperties: true
-          description: 'One key: not_installed, installing {phase}, installed {commit}, update_available {installed_commit, recipe_commit}, install_failed {command, exit_code}, unsupported {reason}, weights_missing {_0: problems} or weights_corrupt {_0: problems}.'
+          description: 'One key: not_installed, installing {phase: getting the code, setting up python, checking the install, downloading weights, verifying weights or cancelling}, installed {commit}, update_available {installed_commit, recipe_commit}, install_failed {command, exit_code}, unsupported {reason}, weights_missing {_0: problems} or weights_corrupt {_0: problems}.'
         recipe:
           type: object
           additionalProperties: true
@@ -790,6 +802,14 @@ components:
         pin: { type: string }
         disk_bytes: { type: integer }
         weights: { $ref: '#/components/schemas/WeightsReport' }
+        progress: { $ref: '#/components/schemas/InstallProgress' }
+    InstallProgress:
+      type: object
+      description: While weights download, the bytes in the Hugging Face cache so far out of the recipe's weights total (from the Hub's file sizes). Absent in other phases, or offline.
+      required: [downloaded_bytes, total_bytes]
+      properties:
+        downloaded_bytes: { type: integer }
+        total_bytes: { type: integer }
     ModelList:
       type: object
       required: [models]

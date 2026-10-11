@@ -13,6 +13,8 @@ public struct ModelView: Codable, Sendable, Equatable {
     public var diskBytes: Int?
     /// The last weights check this session (nil until one ran).
     public var weights: WeightsReport?
+    /// While weights download: bytes so far out of the total (nil in other phases, or while the total is unknown).
+    public var progress: InstallProgress? = nil
 }
 
 /// One recipe found in `bundled-local` / `bundled`, and whether it can be used.
@@ -40,7 +42,7 @@ extension Lift {
         guard let recipe = installed[id] ?? entry?.recipe else { throw LiftError.notFound("model \(id)") }
         return ModelView(id: id, name: recipe.name, source: entry?.source, status: status(id), recipe: recipe,
                          pin: settings.pinOverrides[id] ?? entry?.recipe.commit ?? recipe.commit,
-                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil, weights: weightReports[id])
+                         diskBytes: disk ? Self.diskSize(installer.dir(id)) : nil, weights: weightReports[id], progress: progress[id])
     }
 
     static func diskSize(_ url: URL) -> Int {
@@ -81,13 +83,13 @@ extension Lift {
         let pin = settings.pinOverrides[id]
         phases[id] = "installing"
         let task = Task {
-            let ok = (try? await installer.install(entry, pin: pin, onLine: { _ in })) != nil
+            let ok = (try? await installer.install(entry, pin: pin, onLine: { _ in }, onPhase: { phase in await self.setPhase(id, phase) })) != nil
             await self.rescan()
-            if ok && downloadWeights && !r.weights.isEmpty {
+            if ok && downloadWeights && !r.weights.isEmpty && !Task.isCancelled {
                 await self.setPhase(id, "downloading weights")
-                try? await installer.downloadWeights(r, onLine: { _ in })
+                await self.downloading(r) { try? await installer.downloadWeights(r, onLine: { _ in }) }
             }
-            if ok {
+            if ok && !Task.isCancelled {
                 await self.setPhase(id, "verifying weights")
                 await self.verified(id, await verifier.report(r))
             }
@@ -107,12 +109,45 @@ extension Lift {
     }
 
     func setPhase(_ id: String, _ phase: String) {
+        guard installing[id] != nil || phases[id] != nil, phases[id] != "cancelling" else { return }
         phases[id] = phase
+    }
+
+    func setProgress(_ id: String, _ p: InstallProgress?) {
+        progress[id] = p
+    }
+
+    /// Runs `body` (the `hf download`s) while polling the cache every second, so models_get reports real bytes.
+    /// The total is the recipe's weights files as the Hugging Face API lists them; unknown offline (no progress).
+    func downloading(_ r: Recipe, _ body: @Sendable () async -> Void) async {
+        let verifier = self.verifier, hub = config.hfHub, repos = r.weights.map(\.repo)
+        let poll = Task {
+            guard let total = await verifier.totalBytes(r), total > 0 else { return }
+            while !Task.isCancelled {
+                let done = WeightsProgress.downloadedBytes(hub: hub, repos: repos)
+                await self.setProgress(r.id, InstallProgress(downloadedBytes: min(done, total), totalBytes: total))
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        await body()
+        poll.cancel()
+        progress[r.id] = nil
+    }
+
+    /// Stops an install or weights download. What's done so far stays (a partial download resumes next time);
+    /// a cancelled install never counts as installed, and isn't marked failed either.
+    public func modelsCancelInstall(_ id: String) throws -> ModelView {
+        guard let task = installing[id] else { throw LiftError.invalidState("\(id) isn't installing or downloading") }
+        task.cancel()
+        phases[id] = "cancelling"
+        tick()
+        return try modelView(id)
     }
 
     func installFinished(_ id: String) {
         installing[id] = nil
         phases[id] = nil
+        progress[id] = nil
         rescan()
         tick()
     }
@@ -126,9 +161,11 @@ extension Lift {
         let installer = self.installer, verifier = self.verifier
         phases[id] = "downloading weights"
         let task = Task {
-            try? await installer.downloadWeights(r, onLine: { _ in })
-            await self.setPhase(id, "verifying weights")
-            await self.verified(id, await verifier.report(r))
+            await self.downloading(r) { try? await installer.downloadWeights(r, onLine: { _ in }) }
+            if !Task.isCancelled {
+                await self.setPhase(id, "verifying weights")
+                await self.verified(id, await verifier.report(r))
+            }
             await self.installFinished(id)
         }
         installing[id] = task

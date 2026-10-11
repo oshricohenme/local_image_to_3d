@@ -193,6 +193,10 @@ struct API: APIProtocol {
         return .ok(.init(body: .json(try Wire.convert(model))))
     }
 
+    func modelsCancelInstall(_ input: Operations.ModelsCancelInstall.Input) async throws -> Operations.ModelsCancelInstall.Output {
+        .ok(.init(body: .json(try Wire.convert(try await lift.modelsCancelInstall(input.path.id)))))
+    }
+
     func modelsVerifyWeights(_ input: Operations.ModelsVerifyWeights.Input) async throws -> Operations.ModelsVerifyWeights.Output {
         .ok(.init(body: .json(try Wire.convert(try await lift.modelsVerifyWeights(input.path.id)))))
     }

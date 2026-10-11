@@ -148,7 +148,7 @@ import Testing
         "queue_status", "queue_pause", "queue_resume",
         "models_list", "models_get", "models_install", "models_reinstall", "models_set_pin", "models_check_upstream",
         "models_uninstall", "models_install_log", "models_readme", "models_download_weights", "models_verify_weights",
-        "recipes_list",
+        "models_cancel_install", "recipes_list",
         "workers_list", "workers_load", "workers_unload", "resources_get", "resources_set",
         "settings_get", "settings_set", "server_status", "server_set_lan", "server_rotate_token", "secrets_set_hf_token",
         "system_prereqs", "system_install_prereqs",

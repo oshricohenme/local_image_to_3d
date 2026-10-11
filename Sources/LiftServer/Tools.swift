@@ -145,6 +145,7 @@ enum Tools {
             .json(try gated(await c.lift.modelsDownloadWeights(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"))))
         },
         "models_verify_weights": { a, c in .json(try await c.lift.modelsVerifyWeights(a.required("id"))) },
+        "models_cancel_install": { a, c in .json(try await c.lift.modelsCancelInstall(a.required("id"))) },
         "recipes_list": { _, c in .json(await c.shared.recipes()) },
         "workers_list": { _, c in .json(WorkerListOut(workers: await c.lift.workersList())) },
         "workers_load": { a, c in .json(try await c.lift.workersLoad(a.required("recipe"))) },
