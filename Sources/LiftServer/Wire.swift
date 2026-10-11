@@ -46,11 +46,13 @@ struct OutputFile: Codable, Sendable, Equatable {
 struct JobOut: Encodable, Sendable {
     var job: JobRecord
     var steps: [StepRecord]
+    var attribution: Attribution?
     var outputs: [OutputFile]
 
     init(_ v: JobView) {
         job = v.job
         steps = v.steps
+        attribution = v.attribution
         outputs = v.outputs.map { OutputFile(job: v.job.id, path: $0) }
     }
 }

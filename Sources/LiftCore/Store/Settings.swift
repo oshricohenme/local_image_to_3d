@@ -10,15 +10,21 @@ public struct Settings: Codable, Sendable, Equatable {
     public var queuePaused = false
     /// Recipe id → commit set by `models_set_pin`.
     public var pinOverrides: [String: String] = [:]
+    /// The export folder chosen at first launch; jobs export there unless their `export.dir` says otherwise.
+    public var exportDir: String?
+    public var exportFormats: [ExportFormat] = [.glb]
+    public var cleanupAfterExport = false
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case maxSlots = "max_slots", memoryBudgetGB = "memory_budget_gb", idleUnloadMinutes = "idle_unload_minutes"
         case devRecipes = "dev_recipes", queuePaused = "queue_paused"
         case pinOverrides = "pin_overrides"
+        case exportDir = "export_dir", exportFormats = "export_formats", cleanupAfterExport = "cleanup_after_export"
     }
 
     /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, models_set_pin).
-    public static let userKeys: Set<String> = ["max_slots", "memory_budget_gb", "idle_unload_minutes", "dev_recipes"]
+    public static let userKeys: Set<String> = ["max_slots", "memory_budget_gb", "idle_unload_minutes", "dev_recipes",
+                                               "export_dir", "export_formats", "cleanup_after_export"]
 
     public init() {}
 
@@ -31,6 +37,9 @@ public struct Settings: Codable, Sendable, Equatable {
         devRecipes = try c.decodeIfPresent(Bool.self, forKey: .devRecipes) ?? d.devRecipes
         queuePaused = try c.decodeIfPresent(Bool.self, forKey: .queuePaused) ?? d.queuePaused
         pinOverrides = try c.decodeIfPresent([String: String].self, forKey: .pinOverrides) ?? d.pinOverrides
+        exportDir = try c.decodeIfPresent(String.self, forKey: .exportDir)
+        exportFormats = try c.decodeIfPresent([ExportFormat].self, forKey: .exportFormats) ?? d.exportFormats
+        cleanupAfterExport = try c.decodeIfPresent(Bool.self, forKey: .cleanupAfterExport) ?? d.cleanupAfterExport
     }
 
     /// Upper bounds keep every value convertible to bytes / a Duration without trapping:
@@ -93,6 +102,9 @@ public struct Settings: Codable, Sendable, Equatable {
             let json = try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed)
             try SettingRecord(key: key, value: String(decoding: json, as: UTF8.self)).save(db)
         }
+        for key in CodingKeys.allCases.map(\.rawValue) where object[key] == nil {  // a cleared optional (export_dir)
+            _ = try SettingRecord.deleteOne(db, key: key)
+        }
     }
 
     /// Returns a copy with one user key changed; type errors and range errors throw `invalidInput`.
@@ -104,6 +116,11 @@ public struct Settings: Codable, Sendable, Equatable {
         do {
             var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as! [String: Any]
             object[key] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed)
+            // A setting value is a scalar: export_formats is given as "glb,usdz", and "" clears export_dir.
+            if key == "export_formats", case .string(let list) = value {
+                object[key] = list.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            }
+            if key == "export_dir", case .string("") = value { object[key] = nil }
             updated = try JSONDecoder().decode(Settings.self, from: JSONSerialization.data(withJSONObject: object))
         } catch {
             throw .invalidInput([FieldError(key, "wrong type: \(value)")])

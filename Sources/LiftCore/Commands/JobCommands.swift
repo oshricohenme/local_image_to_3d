@@ -21,12 +21,15 @@ public struct SubmitRequest: Codable, Sendable, Equatable {
     public var title: String?
     public var priority: Priority
     public var source: JobSource
+    /// nil fields (or a nil `export`) take the export settings; `formats: []` means no export.
+    public var export: ExportSpec?
 
-    public init(steps: [StepRequest], title: String? = nil, priority: Priority = .normal, source: JobSource = .ui) {
+    public init(steps: [StepRequest], title: String? = nil, priority: Priority = .normal, source: JobSource = .ui, export: ExportSpec? = nil) {
         self.steps = steps
         self.title = title
         self.priority = priority
         self.source = source
+        self.export = export
     }
 }
 
@@ -48,8 +51,16 @@ public struct JobFilter: Codable, Sendable, Equatable {
 public struct JobView: Codable, Sendable, Equatable {
     public var job: JobRecord
     public var steps: [StepRecord]
+    /// Who made the model behind the job's result (the last step's recipe); every step's is in `job.credits`.
+    public var attribution: Attribution?
     /// The last step's outputs once the job succeeded.
     public var outputs: [String] { job.state == .succeeded ? steps.last?.outputs ?? [] : [] }
+
+    public init(job: JobRecord, steps: [StepRecord]) {
+        self.job = job
+        self.steps = steps
+        attribution = job.credits.last
+    }
 
     static func fetch(_ db: Database, _ id: String) throws -> JobView? {
         guard let job = try JobRecord.fetchOne(db, key: id) else { return nil }
@@ -94,6 +105,16 @@ extension Lift {
             do { step.inputs = try task.validated(inputs: s.inputs, chained: i > 0, prefix: "\(prefix).inputs", workdir: config.workdir) } catch { if case .invalidInput(let e) = error { errors += e } }
             checked.append((step, task))
         }
+        let wanted = ExportSpec(dir: request.export?.dir ?? settings.exportDir,
+                                formats: request.export?.formats ?? settings.exportFormats,
+                                cleanupAfterExport: request.export?.cleanupAfterExport ?? settings.cleanupAfterExport)
+        if wanted.dir == nil && request.export?.formats?.isEmpty == false {
+            errors.append(FieldError("export.dir", "no export folder: give export.dir or set export_dir"))
+        }
+        let export = wanted.dir == nil || wanted.formats?.isEmpty != false ? nil : wanted  // no folder chosen yet, or formats: []
+        let credits = checked.compactMap { recipe($0.0.recipe)?.attribution }.reduce(into: [Attribution]()) { all, a in
+            if !all.contains(a) { all.append(a) }
+        }
         if !errors.isEmpty { throw LiftError.invalidInput(errors) }
         let warning = try memoryWarning(checked.map { ($0.0.recipe, $0.0.task, $0.0.settings) }, firstIndex: 0)
         if let warning, !acceptMemoryWarning { return .memoryWarning(warning) }
@@ -111,7 +132,8 @@ extension Lift {
             let position = (try Double.fetchOne(db, sql: "SELECT MAX(position) FROM job") ?? 0) + 1
             let job = JobRecord(id: id, title: request.title ?? firstInput ?? request.steps[0].recipe, priority: request.priority,
                                 position: position, source: request.source, state: .queued, forceStart: false,
-                                memoryAccepted: warning != nil, currentStep: 0, createdAt: now, updatedAt: now)
+                                memoryAccepted: warning != nil, currentStep: 0, createdAt: now, updatedAt: now,
+                                export: export, credits: credits)
             try job.insert(db)
             for step in steps { try step.insert(db) }
             var e = EventRecord(id: nil, jobId: id, stepIdx: nil, at: now, kind: "state", detail: "queued")
@@ -190,7 +212,7 @@ extension Lift {
                 for try await v in ValueObservation.tracking({ try JobView.fetch($0, id) }).values(in: store.db) {
                     guard let v else { throw LiftError.notFound("job \(id)") }
                     onProgress(v)
-                    if v.job.state.isTerminal { return v }
+                    if v.job.state.isTerminal && !v.job.exportPending { return v }
                 }
                 return nil
             }
@@ -231,6 +253,7 @@ extension Lift {
     public func jobsRetry(_ id: String, settings: [String: SettingValue]? = nil, acceptMemoryWarning: Bool = false) throws -> Admission<JobView> {
         let v = try view(id)
         guard v.job.state.isTerminal || v.job.state == .interrupted else { throw LiftError.invalidState("job \(id) is \(v.job.state.rawValue); only finished jobs can be retried") }
+        guard !v.job.cleanedUp else { throw LiftError.invalidState("This job's files were deleted after it was exported, so it can't run again.") }
         let from = v.steps.firstIndex { $0.state != .succeeded } ?? 0
         var newSettings: [String: SettingValue]?
         if let settings {

@@ -687,6 +687,11 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
+        export: { $ref: '#/components/schemas/ExportSpec' }
+        exports: { type: array, items: { $ref: '#/components/schemas/ExportResult' }, description: One result per format from the latest export. }
+        export_pending: { type: boolean, description: Succeeded; its export hasn't finished yet (jobs_wait waits for it). }
+        cleaned_up: { type: boolean, description: The job's files were deleted after a verified export; the record stays. }
+        credits: { type: array, items: { $ref: '#/components/schemas/Attribution' }, description: Who made each model this job runs, in step order. }
     Step:
       type: object
       required: [job_id, idx, recipe, task, inputs, settings, state, outputs]
@@ -717,6 +722,7 @@ components:
       type: object
       required: [job, steps, outputs]
       properties:
+        attribution: { $ref: '#/components/schemas/Attribution', description: Who made the model behind the result (the last step's). }
         job: { $ref: '#/components/schemas/Job' }
         steps: { type: array, items: { $ref: '#/components/schemas/Step' } }
         outputs: { type: array, items: { $ref: '#/components/schemas/OutputFile' }, description: The last step's outputs once the job succeeded. }
@@ -857,6 +863,9 @@ components:
         idle_unload_minutes: { type: number }
         dev_recipes: { type: boolean }
         queue_paused: { type: boolean }
+        export_dir: { type: string, description: The export folder; "" clears it. }
+        export_formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' }, description: 'Default export formats; settings_set takes a comma list, e.g. "glb,usdz".' }
+        cleanup_after_export: { type: boolean, description: Default for deleting a job's files after a verified export. }
         recipe_sources:
           type: array
           items:
@@ -912,6 +921,58 @@ components:
       required: [hf_token_set]
       properties:
         hf_token_set: { type: boolean }
+    ExportFormat: { type: string, enum: [glb, usdz, obj, fbx] }
+    ExportSpec:
+      type: object
+      description: Missing fields take the export_dir, export_formats and cleanup_after_export settings; formats [] means no export.
+      properties:
+        dir: { type: string, description: A folder on this Mac. }
+        formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' } }
+        cleanup_after_export: { type: boolean, description: Delete the job's own files once every format is copied and verified. }
+    ExportResult:
+      type: object
+      required: [format]
+      properties:
+        format: { $ref: '#/components/schemas/ExportFormat' }
+        path: { type: string, description: The exported file (a folder for OBJ). }
+        error: { type: string }
+        credits: { type: string, description: The <title>.credits.txt next to it (USDZ, OBJ and FBX). }
+    License:
+      type: object
+      required: [spdx, url]
+      properties:
+        spdx: { type: string, description: 'SPDX id, or LicenseRef-… / NOASSERTION.' }
+        url: { type: string }
+    Attribution:
+      type: object
+      description: Who made a model, where it comes from and its licenses (spec §4a).
+      required: [project, authors, homepage, license, components, credit, disclaimer]
+      properties:
+        project: { type: string }
+        authors: { type: array, items: { type: string } }
+        homepage: { type: string }
+        repo: { type: string }
+        paper:
+          type: object
+          required: [title, url]
+          properties:
+            title: { type: string }
+            url: { type: string }
+            bibtex: { type: string }
+        license: { $ref: '#/components/schemas/License' }
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, role, url, license, restrictions]
+            properties:
+              name: { type: string }
+              role: { type: string }
+              url: { type: string }
+              license: { $ref: '#/components/schemas/License' }
+              restrictions: { type: array, items: { type: string }, description: 'Shown prominently, e.g. non-commercial.' }
+        credit: { type: string, description: '"<Project> by <authors> (<license>)".' }
+        disclaimer: { type: string, description: The fixed wording that Lift didn't create the model and isn't affiliated with its authors. }
     SubmitJob:
       type: object
       required: [steps]

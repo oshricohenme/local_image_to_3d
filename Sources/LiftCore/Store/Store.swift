@@ -97,6 +97,15 @@ public final class Store: Sendable {
         m.registerMigration("v2") { db in
             try db.alter(table: "job") { t in t.add(column: "memoryAccepted", .boolean).notNull().defaults(to: false) }
         }
+        m.registerMigration("export-and-credits") { db in
+            try db.alter(table: "job") { t in
+                t.add(column: "export", .text)
+                t.add(column: "exports", .text).notNull().defaults(to: "[]")
+                t.add(column: "exportPending", .boolean).notNull().defaults(to: false)
+                t.add(column: "cleanedUp", .boolean).notNull().defaults(to: false)
+                t.add(column: "credits", .text).notNull().defaults(to: "[]")
+            }
+        }
         return m
     }
 }

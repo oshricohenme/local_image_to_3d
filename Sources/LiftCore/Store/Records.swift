@@ -87,6 +87,16 @@ public struct JobRecord: Codable, Sendable, Equatable, FetchableRecord, Persista
     public var createdAt: Date
     public var updatedAt: Date
     public var finishedAt: Date?
+    /// Where and how the final output is exported (dir, formats and cleanup filled at submit); nil: no export.
+    public var export: ExportSpec? = nil
+    /// One result per format, from the latest export.
+    public var exports: [ExportResult] = []
+    /// The job succeeded and its export hasn't finished yet. `jobs_wait` waits for it; open resumes it.
+    public var exportPending = false
+    /// The job folder was deleted after a verified export (`cleanup_after_export`). The record stays.
+    public var cleanedUp = false
+    /// Who made what this job runs (spec §4a): each step's recipe attribution at submit, in step order, no repeats.
+    public var credits: [Attribution] = []
 }
 
 public struct StepRecord: Codable, Sendable, Equatable, FetchableRecord, PersistableRecord {

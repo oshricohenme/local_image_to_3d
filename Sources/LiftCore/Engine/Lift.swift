@@ -161,6 +161,10 @@ public actor Lift {
     func start() async {
         tools = await toolchain.detect()
         rescan()
+        // Exports cut short by a quit or crash run again (their steps already succeeded).
+        for job in (try? await store.db.read { try JobRecord.filter(Column("exportPending") == true).fetchAll($0) }) ?? [] {
+            if let spec = job.export { Task { try? await self.export(job.id, spec) } }
+        }
         let interval = config.housekeepingInterval
         housekeeping = Task { [weak self] in
             while !Task.isCancelled {
@@ -519,10 +523,13 @@ public actor Lift {
                 job.currentStep = step.idx + 1
                 try self.setState(db, job: job, step: nil, .queued)
             } else {
+                job.exportPending = job.export != nil  // in the same write, so jobs_wait never sees "done" before the export
                 try self.setState(db, job: job, step: step, .succeeded)
             }
         }
-        if try store.db.read({ try JobRecord.fetchOne($0, key: id)?.state.isTerminal }) == true { logs[id] = nil }
+        let after = try store.db.read { try JobRecord.fetchOne($0, key: id) }
+        if after?.state.isTerminal == true { logs[id] = nil }
+        if let after, after.exportPending, let spec = after.export { Task { try? await self.export(id, spec) } }
         tick()
     }
 
