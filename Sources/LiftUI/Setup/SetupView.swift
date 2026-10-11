@@ -8,6 +8,7 @@ struct SetupView: View {
     let app: AppModel
     @State private var model: SetupModel
     @State private var choosing = false
+    @State private var choosingExport = false
 
     init(app: AppModel) {
         self.app = app
@@ -52,6 +53,18 @@ struct SetupView: View {
                     Button("Choose…") { choosing = true }
                 }
             }
+            Text("Finished 3D models are saved to your export folder, named after each job.")
+            LabeledContent("Export folder") {
+                HStack {
+                    Text(model.exportDir.path).font(.system(.body, design: .monospaced))
+                    Button("Choose…") { choosingExport = true }
+                }
+            }
+            .fileImporter(isPresented: $choosingExport, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result { model.exportDir = url }
+            }
+            Toggle("Free up space after exporting (deletes Lift's own copy once the files are safely in the export folder)",
+                   isOn: $model.cleanupAfterExport)
         case .toolchain:
             Text("Lift uses three free helper tools to download and set up models: Homebrew, git and uv.")
             if let p = model.prereqs {

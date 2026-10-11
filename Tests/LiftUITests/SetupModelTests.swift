@@ -13,8 +13,13 @@ import Testing
         let setup = SetupModel(app: app)
         #expect(setup.step == .folders)
         setup.workdir = try UIFixtures.tempDir().appending(path: "lift")
+        #expect(setup.exportDir.lastPathComponent == "Lift Exports" && !setup.cleanupAfterExport)
+        setup.exportDir = try UIFixtures.tempDir().appending(path: "exports")
+        setup.cleanupAfterExport = true
         await setup.next(app)  // opens the folder: bundled recipes copied, tools checked, server up
         #expect(setup.step == .toolchain && app.phase == .setup && setup.prereqs != nil)
+        #expect(app.settings.exportDir == setup.exportDir.path && app.settings.cleanupAfterExport)
+        #expect(app.generate.exportDir == setup.exportDir.path)  // Generate starts from it
         #expect(FileManager.default.fileExists(atPath: setup.workdir.appending(path: "recipes/bundled/shared").path))
         await setup.next(app)
         #expect(setup.step == .recipes && setup.recipes.contains { $0.id == "test-cube" })

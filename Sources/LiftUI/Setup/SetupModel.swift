@@ -24,6 +24,9 @@ public final class SetupModel {
 
     public var step: Step
     public var workdir: URL
+    /// Where finished models are saved (spec §11), and whether Lift then deletes its own copy.
+    public var exportDir: URL
+    public var cleanupAfterExport = false
     public private(set) var prereqs: Prereqs?
     public private(set) var log: [String] = []
     public private(set) var recipes: [RecipeListing] = []
@@ -34,6 +37,9 @@ public final class SetupModel {
     public init(app: AppModel) {
         workdir = app.workdir ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "Lift")
         step = app.lift == nil ? .folders : Step(rawValue: app.setupStep) ?? .folders
+        exportDir = app.settings.exportDir.map { URL(filePath: $0) }
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appending(path: "Lift Exports")
+        cleanupAfterExport = app.settings.cleanupAfterExport
     }
 
     public var missingTools: Bool {
@@ -64,6 +70,11 @@ public final class SetupModel {
         switch step {
         case .folders:
             guard await app.open(workdir, ready: false) else { return }
+            do {
+                _ = try await app.engine.settingsSet("export_dir", .string(exportDir.path))
+                _ = try await app.engine.settingsSet("cleanup_after_export", .bool(cleanupAfterExport))
+                await app.refresh()
+            } catch { app.alert = Format.error(error); return }
         case .huggingFace:
             if !hfToken.isEmpty {
                 do { _ = try await app.liveServer.secretsSetHFToken(hfToken) } catch { app.alert = Format.error(error); return }
