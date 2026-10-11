@@ -1,34 +1,47 @@
 import Foundation
 import LiftCore
-import MarkdownUI
-import SwiftUI
 import Testing
 @testable import LiftUI
 
-/// Records the image URLs the README view asks for.
-@MainActor final class SeenURLs { var urls: [URL] = [] }
-
-struct CapturingImages: ImageProvider {
-    let seen: SeenURLs
-    func makeImage(url: URL?) -> some View {
-        if let url { MainActor.assumeIsolated { seen.urls.append(url) } }
-        return Color.clear.frame(width: 10, height: 10)
-    }
-}
-
-@MainActor @Suite struct ReadmeTests {
-    @Test func relativeImagesResolveToThePinnedRawURL() throws {
+@Suite struct ReadmeTests {
+    func readme(_ text: String) throws -> Readme {
         let fields: [String: Any] = [
-            "text": "# Demo\n\n![teaser](assets/teaser.png)\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![abs](https://example.com/x.png)",
+            "text": text,
             "baseURL": "https://raw.githubusercontent.com/TencentARC/Pixal3D/f7cf38429b0bd264f1995f0f8743a88b1c728b94/",
             "cached": false,
         ]
-        let readme = try JSONDecoder().decode(Readme.self, from: JSONSerialization.data(withJSONObject: fields))
-        let seen = SeenURLs()
-        let renderer = ImageRenderer(content: ReadmeView(readme: readme).markdownImageProvider(CapturingImages(seen: seen)).frame(width: 600))
-        _ = renderer.nsImage
-        #expect(seen.urls.map(\.absoluteString).contains(
-            "https://raw.githubusercontent.com/TencentARC/Pixal3D/f7cf38429b0bd264f1995f0f8743a88b1c728b94/assets/teaser.png"))
-        #expect(seen.urls.map(\.absoluteString).contains("https://example.com/x.png"))
+        return try JSONDecoder().decode(Readme.self, from: JSONSerialization.data(withJSONObject: fields))
+    }
+
+    /// READMEs mix Markdown with raw HTML (a centered logo, a row of images, badges): it renders as on GitHub.
+    @Test func theReadmesHTMLIsKeptAndItsMarkdownRendered() throws {
+        let page = ReadmeHTML.page(try readme("""
+        <p align="center"><img src="assets/logo.png" width="200"></p>
+
+        # Demo
+
+        | a | b |
+        |---|---|
+        | 1 | 2 |
+
+        ~~old~~ and https://example.com
+        """))
+        #expect(page.contains(#"<p align="center"><img src="assets/logo.png" width="200"></p>"#))
+        #expect(page.contains("<h1>Demo</h1>") && page.contains("<table>") && page.contains("<del>old</del>"))
+        #expect(page.contains(#"<a href="https://example.com">"#))
+    }
+
+    /// Relative images and links resolve at the pinned commit.
+    @Test func relativeURLsResolveAtThePin() throws {
+        let page = ReadmeHTML.page(try readme("![teaser](assets/teaser.png)"))
+        #expect(page.contains(#"<base href="https://raw.githubusercontent.com/TencentARC/Pixal3D/f7cf38429b0bd264f1995f0f8743a88b1c728b94/">"#))
+        #expect(page.contains(#"<img src="assets/teaser.png" alt="teaser" />"#))
+    }
+
+    /// Someone else's page: GitHub's tag filter turns script, iframe, style and the like into text.
+    @Test func scriptsAndFramesAreFilteredOut() throws {
+        let page = ReadmeHTML.page(try readme("<script>alert(1)</script>\n\n<iframe src=\"https://example.com\"></iframe>"))
+        #expect(!page.contains("<script>alert") && !page.contains("<iframe src"))
+        #expect(page.contains("&lt;script>alert(1)&lt;/script>"))
     }
 }

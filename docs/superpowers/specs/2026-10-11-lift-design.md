@@ -237,8 +237,9 @@ upstream example `transforms.json` with your file names), a folder that already 
 - A recipe without a complete attribution block fails validation and can't be installed.
 
 **README.**
-- Lift shows the project's own README, rendered as Markdown, with relative links and images resolved to
-  the repo at the pinned commit.
+- Lift shows the project's own README as GitHub does: GitHub-flavored Markdown (cmark-gfm) with the README's
+  own HTML kept and GitHub's tag filter applied, in a web view with the page's scripts off. Relative links and
+  images resolve to the repo at the pinned commit; links open in the browser.
 - Once installed, it's read from Lift's own clone. Before install, it's fetched from
   `raw.githubusercontent.com/<repo>/<pin>/README.md` (text only, cached in the workdir). Offline, Lift
   shows the cached copy or the attribution block alone.
