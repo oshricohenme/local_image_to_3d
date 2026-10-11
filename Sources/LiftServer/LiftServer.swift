@@ -72,6 +72,7 @@ public actor LiftServer {
     let configuration: Configuration
     var secrets: any SecretStore { configuration.secrets }
     var running: (group: ServiceGroup, task: Task<Void, any Error>, sessions: MCPSessions)?
+    var restarting: Task<Void, Never>?
     public private(set) var port = 0
     var host = "127.0.0.1"
     var lan = false
@@ -136,12 +137,23 @@ public actor LiftServer {
     }
 
     /// Closes MCP sessions (their streams would hold a graceful shutdown open) and stops listening.
+    /// A rebind in progress finishes first, so it can't bind again after this returns.
     public func stop() async {
+        await restarting?.value
+        await shutDown()
+    }
+
+    func shutDown() async {
         guard let running else { return }
         self.running = nil
         await running.sessions.closeAll()
         await running.group.triggerGracefulShutdown()
-        _ = try? await running.task.value
+        // A graceful shutdown waits for requests in flight, and a jobs_wait may last an hour: give them
+        // a moment, then cut them off (callers treat a dropped wait as "call again").
+        let task = running.task
+        let deadline = Task { try await Task.sleep(for: .seconds(2)); task.cancel() }
+        _ = try? await task.value
+        deadline.cancel()
     }
 
     // MARK: server_status / server_set_lan / server_rotate_token
@@ -170,7 +182,7 @@ public actor LiftServer {
         let delay = configuration.rebindDelay
         Task {
             try? await Task.sleep(for: delay)
-            try? await self.restart()
+            await self.restart()
         }
         var next = status()
         next.bind = enabled ? configuration.lanHost : "127.0.0.1"
@@ -220,9 +232,16 @@ public actor LiftServer {
         return await settings()
     }
 
-    func restart() async throws {
-        await stop()
-        try await start()
+    /// One rebind at a time: a second server_set_lan waits for the first, so two never race for the port.
+    func restart() async {
+        let previous = restarting
+        let next = Task {
+            await previous?.value
+            await shutDown()
+            _ = try? await start()
+        }
+        restarting = next
+        await next.value
     }
 
     func storeToken(_ token: String) throws {

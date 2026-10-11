@@ -208,6 +208,51 @@ import Testing
         await server.stop()
     }
 
+    func listening(_ port: Int) async -> Bool {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/openapi.json")!, timeoutInterval: 2)
+        request.httpMethod = "HEAD"
+        return (try? await URLSession.shared.data(for: request)) != nil
+    }
+
+    @Test func twoQuickLANTogglesLeaveOneListenerOnTheSamePort() async throws {
+        let lift = try await Fixtures.lift()
+        let server = Fixtures.server(lift)
+        let port = try await server.start().port
+        _ = try gated(await server.setLAN(true, confirm: true))
+        _ = try gated(await server.setLAN(false, confirm: true))  // inside rebindDelay: both rebinds overlap
+        try await Task.sleep(for: .seconds(1))
+        let status = await server.status()
+        #expect(status.port == port && !status.lanMode)
+        await server.stop()
+        #expect(try await eventually(5) { !(await listening(port)) })  // no orphan left on the port
+    }
+
+    @Test func aLongJobsWaitDoesNotHoldARebindOrStop() async throws {
+        let lift = try await Fixtures.lift()
+        let server = Fixtures.server(lift)
+        let port = try await server.start().port
+        _ = try await lift.queuePause()  // the job stays queued, so its wait runs to the timeout
+        let job: [String: Any] = ["steps": [["recipe": "test-cube", "task": "image_to_3d", "inputs": ["image_path": try Fixtures.image()]]],
+                                  "accept_memory_warning": true]
+        let http = HTTP(base: URL(string: "http://127.0.0.1:\(port)")!)
+        let id = try #require((try await http.call("POST", "/v1/jobs", json: job).json["job"] as? [String: Any])?["id"] as? String)
+        let wait = Task { try? await http.call("GET", "/v1/jobs/\(id)/wait?timeout_seconds=3600") }
+        try await Task.sleep(for: .milliseconds(300))
+        let start = ContinuousClock.now
+        _ = try gated(await server.setLAN(true, confirm: true))
+        #expect(try await eventually(15) {
+            guard await server.status().lanMode else { return false }
+            return await listening(port)
+        })
+        #expect(ContinuousClock.now - start < .seconds(15))
+        let stopped = Task { await server.stop() }
+        let stopStart = ContinuousClock.now
+        #expect(try await eventually(15) { !(await listening(port)) })
+        _ = await stopped.value
+        #expect(ContinuousClock.now - stopStart < .seconds(15))
+        wait.cancel()
+    }
+
     @Test func lanModeNeedsTheBearerTokenFromOtherMachines() async throws {
         let lift = try await Fixtures.lift()
         let server = Fixtures.server(lift)
