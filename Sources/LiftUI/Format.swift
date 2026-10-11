@@ -86,3 +86,23 @@ public extension IOType {
         }
     }
 }
+
+extension Format {
+    static func export(_ format: ExportFormat) -> String {
+        switch format {
+        case .glb: "GLB"
+        case .usdz: "USDZ"
+        case .obj: "OBJ"
+        case .fbx: "FBX"
+        }
+    }
+
+    static func exportHelp(_ format: ExportFormat) -> String {
+        switch format {
+        case .glb: "Works in almost every 3D app and on the web."
+        case .usdz: "Opens in Quick Look, Reality Composer and on iPhone and iPad."
+        case .obj: "For older 3D apps; saved as a folder with its textures."
+        case .fbx: "For game engines and animation tools. Needs UniRig installed (it brings Blender)."
+        }
+    }
+}

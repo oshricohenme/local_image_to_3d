@@ -54,6 +54,14 @@ public final class GenerateModel {
     }
     public var thenValues: [String: SettingValue] = [:]
     public var priority: Priority = .normal
+    /// Export (spec §7, §9): where the result goes and in which formats. Starts from the export settings
+    /// and follows them until the user changes it here. No formats means the job only keeps its own copy.
+    public var exportFormats: Set<ExportFormat> = [.glb] { didSet { exportEdited = exportEdited || !adopting } }
+    /// nil: the `export_dir` setting.
+    public var exportDir: String? { didSet { exportEdited = exportEdited || !adopting } }
+    public var cleanupAfterExport = false { didSet { exportEdited = exportEdited || !adopting } }
+    var exportEdited = false
+    private var adopting = false
     public var errors: [FieldError] = []
 
     public init() {}
@@ -105,8 +113,25 @@ public final class GenerateModel {
             inputs[first.name] = value
             var steps = [StepRequest(recipe: ref.recipe, task: ref.task, inputs: inputs, settings: values)]
             if let then { steps.append(StepRequest(recipe: then.recipe, task: then.task, settings: thenValues)) }
-            return SubmitRequest(steps: steps, priority: priority, source: .ui)
+            return SubmitRequest(steps: steps, priority: priority, source: .ui, export: export)
         }
+    }
+
+    /// What each request asks for. Untouched, it defers to the export settings entirely (so no export folder
+    /// yet simply means no export); once changed here, these formats, this folder (or the setting's) and cleanup.
+    public var export: ExportSpec {
+        guard exportEdited else { return ExportSpec() }
+        return ExportSpec(dir: exportDir, formats: ExportFormat.allCases.filter(exportFormats.contains), cleanupAfterExport: cleanupAfterExport)
+    }
+
+    /// The export settings, until the user changes the export options in this form.
+    public func adoptExportDefaults(_ settings: Settings) {
+        guard !exportEdited else { return }
+        adopting = true
+        defer { adopting = false }
+        exportFormats = Set(settings.exportFormats)
+        exportDir = settings.exportDir
+        cleanupAfterExport = settings.cleanupAfterExport
     }
 
     public func errors(forSetting key: String, step: Int) -> [String] {

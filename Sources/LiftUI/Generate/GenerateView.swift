@@ -8,6 +8,7 @@ struct GenerateView: View {
     let app: AppModel
     @Bindable var model: GenerateModel
     @State private var choosing = false
+    @State private var choosingExportFolder = false
 
     init(app: AppModel) {
         self.app = app
@@ -150,6 +151,7 @@ struct GenerateView: View {
             projectSection
             optionsSection
             thenSection
+            exportSection
             Section("Queue") {
                 Picker("Priority", selection: $model.priority) {
                     ForEach(Priority.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
@@ -193,9 +195,42 @@ struct GenerateView: View {
 
     /// Credit first (spec §4a): who made it and its license; the repo and pin only in developer mode.
     func recipeLine(_ m: ModelView) -> String {
-        var line = "by " + (m.recipe.publisher ?? "its authors") + " · " + (m.recipe.license ?? "license not stated")
+        let a = m.recipe.attribution
+        var line = "by " + a.authors.joined(separator: ", ") + " · " + a.license.spdx
         if app.developer, let repo = m.recipe.repo { line += " · " + repo + (m.pin.map { " @ " + String($0.prefix(7)) } ?? "") }
         return line
+    }
+
+    /// Where the result goes (spec §7, §9). Plain words; the folder and formats start from Settings.
+    var exportSection: some View {
+        Section("Export") {
+            ForEach(ExportFormat.allCases, id: \.self) { format in
+                Toggle(isOn: Binding(get: { model.exportFormats.contains(format) },
+                                     set: { if $0 { model.exportFormats.insert(format) } else { model.exportFormats.remove(format) } })) {
+                    VStack(alignment: .leading) {
+                        Text(Format.export(format))
+                        Text(Format.exportHelp(format)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Text(model.exportDir.map { URL(filePath: $0).lastPathComponent } ?? "No export folder yet").foregroundStyle(model.exportDir == nil ? .secondary : .primary)
+                Spacer()
+                Button("Choose Folder…") { choosingExportFolder = true }
+            }
+            .fileImporter(isPresented: $choosingExportFolder, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result { model.exportDir = url.path }
+            }
+            Toggle(isOn: $model.cleanupAfterExport) {
+                VStack(alignment: .leading) {
+                    Text("Free up space after exporting")
+                    Text("Deletes Lift's own copy of the job once every file is safely in the export folder.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(model.errors.filter { $0.field.hasPrefix("export") }, id: \.field) { e in
+                Text(e.message).font(.caption).foregroundStyle(.red)
+            }
+        }
     }
 
     @ViewBuilder var optionsSection: some View {

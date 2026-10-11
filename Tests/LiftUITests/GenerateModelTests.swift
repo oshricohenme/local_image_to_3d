@@ -54,6 +54,25 @@ import Testing
         #expect(g.followUps.contains(TaskRef(recipe: "unirig", task: "rig")))  // rig what Pixal3D makes
     }
 
+    @Test func exportOptionsFollowTheSettingsUntilChangedHere() async throws {
+        let g = try await model()
+        g.recipe = "test-cube"
+        g.add([try UIFixtures.file("a.png")])
+        var s = Settings()
+        s.exportDir = "/Exports"
+        s.exportFormats = [.glb, .usdz]
+        s.cleanupAfterExport = true
+        g.adoptExportDefaults(s)
+        #expect(g.exportFormats == [.glb, .usdz] && g.exportDir == "/Exports" && g.cleanupAfterExport)  // shown as in Settings
+        #expect(g.requests[0].export == ExportSpec())  // untouched: LiftCore applies the settings itself
+        g.exportFormats = [.fbx, .glb]
+        s.exportFormats = [.obj]
+        g.adoptExportDefaults(s)  // the user's choice here wins over a later settings change
+        #expect(g.requests[0].export?.formats == [.glb, .fbx])  // in a fixed order
+        g.exportFormats = []
+        #expect(g.requests[0].export?.formats == [])  // no export, just the job's own copy
+    }
+
     @Test func useAsInputPrefillsTheTask() async throws {
         let g = try await model()
         g.use("/tmp/out.glb", for: TaskRef(recipe: "test-cube", task: "fake_rig"))

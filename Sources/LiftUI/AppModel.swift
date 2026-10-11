@@ -242,7 +242,7 @@ public final class AppModel {
             if self.queue != queue { self.queue = queue }
             if self.resources != resources { self.resources = resources }
             if self.models != models { self.models = models; generate.models = models }
-            if self.settings != settings { self.settings = settings }
+            if self.settings != settings { self.settings = settings; generate.adoptExportDefaults(settings) }
             if serverStatus != status { serverStatus = status }
             reconcileLaunchAtLogin()
         } catch {
