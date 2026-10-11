@@ -1,0 +1,10 @@
+# Substitute registry (spec §5): CUDA-only package → how to provide it on Apple Silicon.
+# Keys are the names recipes list under `substitutes:`. Fields:
+#   install: commands run in models/<id>/ with the venv active
+#   alias:   `import <key>` resolves to this installed module (lift_shim alias)
+#   standin: a lift_shim built-in stand-in
+#   patches: named lift_shim runtime patches the substitute needs
+# Recipes using alias/standin/patches must have `shim:`. Metal substitutes (flex_gemm, nvdiffrast,
+# o_voxel, cumesh) and torch_scatter/torch_cluster are added in Plan 4 from the go/no-go findings.
+flash_attn: { standin: flash_attn }
+spconv: { standin: spconv }

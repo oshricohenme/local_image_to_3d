@@ -1,0 +1,41 @@
+# Test Cube: a fake image→3D recipe for Lift's own tests (spec §4). Hidden unless the developer setting is on.
+schema: 1
+id: test-cube
+name: Test Cube
+developer: true
+publisher: Lift
+license: MIT
+python: "3.11"
+platform: { status: supported }
+install:
+  - uv pip install "trimesh>=4,<5" numpy
+shim: { env: { TEST_CUBE_SHIM: "on" } }   # exercises lift_shim + .pth + LIFT_SHIM end to end
+substitutes: [flash_attn]
+resources:
+  memory_gb: 0.5
+  memory_keys: [size]
+  max_concurrent_per_process: 1
+  disk_gb: 0.5
+stages:
+  - { pattern: '^\[Stage\] (?P<name>.+)$' }
+  - { pattern: '^(?P<name>[^:|]+):\s*(?P<pct>\d+)%\|' }
+tasks:
+  - id: image_to_3d
+    modality: 3d
+    label: Image → 3D (cube)
+    inputs: [{ name: image, type: image }]
+    output: mesh
+    entry: launcher:run
+    settings:
+      - { key: size, label: Cube size, type: float, default: 1.0, min: 0.01, max: 100, group: basic }
+      - { key: delay, label: Delay (seconds), type: float, default: 0.0, min: 0, max: 600, group: advanced }
+      - { key: fail, label: Fail on purpose, type: bool, default: false, group: advanced }
+      - { key: crash, label: Crash the worker, type: bool, default: false, group: advanced }
+  - id: fake_rig
+    modality: 3d
+    label: Mesh → rigged mesh (copy)
+    inputs: [{ name: mesh, type: mesh }]
+    output: rigged_mesh
+    entry: launcher:run
+    settings:
+      - { key: delay, label: Delay (seconds), type: float, default: 0.0, min: 0, max: 600, group: advanced }
