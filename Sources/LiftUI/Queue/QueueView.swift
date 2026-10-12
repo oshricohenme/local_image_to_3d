@@ -77,9 +77,11 @@ struct QueueView: View {
                         }
                     }
                 }
+                // What the models really hold now (phys_footprint, swap included), not the per-job reservation.
+                let used = r.workers.reduce(0) { $0 + $1.footprintBytes }
                 stat("Memory for models", note: "\(Format.gb(r.systemFreeBytes)) free on this Mac",
-                     value: Self.number(r.reservedBytes), unit: "of \(Format.gb(r.budgetBytes)) reserved") {
-                    Meter(fraction: Double(r.reservedBytes) / Double(max(r.budgetBytes, 1)))
+                     value: Self.number(used), unit: "GB in use of \(Format.gb(r.budgetBytes))") {
+                    Meter(fraction: Double(used) / Double(max(r.budgetBytes, 1)))
                 }
                 loadedModels(r.workers)
             }
