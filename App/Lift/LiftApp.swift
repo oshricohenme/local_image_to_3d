@@ -26,6 +26,11 @@ struct LiftApp: App {
         Window("About Lift", id: "about") {
             CreditsView(app: delegate.app)
         }
+        // Settings → Request log → Show Log: every MCP and HTTP API request, for troubleshooting.
+        Window("MCP & API Log", id: "request-log") {
+            RequestLogView(app: delegate.app)
+        }
+        .defaultSize(width: 1100, height: 680)
         MenuBarExtra("Lift", systemImage: "cube.transparent", isInserted: menuBarInserted) {
             MenuBarView(app: delegate.app) {
                 openWindow(id: "main")

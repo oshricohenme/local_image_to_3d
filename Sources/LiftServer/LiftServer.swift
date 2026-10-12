@@ -64,6 +64,8 @@ public actor LiftServer {
     }
 
     public nonisolated let lift: Lift
+    /// Every MCP and HTTP API request (Settings → Show Log).
+    public nonisolated let requestLog: RequestLog
     let configuration: Configuration
     var secrets: any SecretStore { configuration.secrets }
     var running: (group: ServiceGroup, task: Task<Void, any Error>, sessions: MCPSessions)?
@@ -81,6 +83,7 @@ public actor LiftServer {
     public init(lift: Lift, configuration: Configuration = .init()) {
         self.lift = lift
         self.configuration = configuration
+        requestLog = RequestLog(file: lift.config.workdir.appending(path: "logs/requests.jsonl"))
     }
 
     /// Binds and serves. The configured port is tried first, then up to 19 after it (spec §13 "port taken").
@@ -107,6 +110,7 @@ public actor LiftServer {
         let host = lan ? configuration.lanHost : "127.0.0.1"
         let sessions = MCPSessions(lift: lift, control: self)
         let router = Router(context: LiftContext.self)
+        router.middlewares.add(RequestLogMiddleware(log: requestLog))
         router.middlewares.add(AccessMiddleware(lanMode: lan, secrets: secrets,
                                                 isRemote: configuration.isRemote))
         try API(lift: lift, server: self).registerHandlers(on: router, middlewares: [ProblemMiddleware(), LocationMiddleware()])

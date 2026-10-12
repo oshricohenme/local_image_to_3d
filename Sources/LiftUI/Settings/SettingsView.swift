@@ -7,6 +7,7 @@ import SwiftUI
 /// workers with learned estimates, app behavior, storage, Hugging Face token, toolchain, developer.
 struct SettingsView: View {
     let app: AppModel
+    @Environment(\.openWindow) private var openWindow
     @State private var port = ""
     @State private var hfAccess: HFAccess?
     @State private var showToken = false
@@ -80,6 +81,12 @@ struct SettingsView: View {
                     Button("Save") { if let p = Int(port) { app.run { _ = try await app.liveServer.setPort(p) } } }
                     Text("Applies the next time Lift starts.").font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            LabeledContent {
+                Button("Show Log") { openWindow(id: "request-log") }
+            } label: {
+                Text("Request log")
+                Text("Every request AI assistants and scripts sent to Lift, and its answer. For troubleshooting.")
             }
         }
     }
