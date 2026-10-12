@@ -1,6 +1,6 @@
 # Lift.app, generated with XcodeGen (`xcodegen generate --spec App/project.yml`). The .xcodeproj is
 # build output (git-ignored); this file and App/Lift/ are the source. Code lives in the Swift package at
-# the repo root: LiftUI (screens and view models), LiftCore, LiftServer, and lift-mcp's sources.
+# the repo root: LiftUI (screens and view models), LiftCore and LiftServer. MCP is HTTP only (no stdio bridge).
 name: Lift
 options:
   bundleIdPrefix: me.oshricohen
@@ -8,9 +8,6 @@ options:
   createIntermediateGroups: true
 packages:
   Lift: { path: .. }
-  # lift-mcp's own dependencies (the same versions Package.swift resolves).
-  ArgumentParser: { url: https://github.com/apple/swift-argument-parser, from: 1.8.2 }
-  MCP: { url: https://github.com/modelcontextprotocol/swift-sdk, minorVersion: 0.12.1 }
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -44,9 +41,6 @@ targets:
         product: LiftUI
       - package: Lift
         product: LiftServer
-      - target: lift-mcp
-        embed: true
-        copy: { destination: executables }
     info:
       path: Lift/Info.plist
       properties:
@@ -65,18 +59,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.oshricohen.Lift
         PRODUCT_NAME: Lift
         ENABLE_USER_SCRIPT_SANDBOXING: NO  # the bundling script reads the repo
-  lift-mcp:
-    type: tool
-    platform: macOS
-    sources: [../Sources/lift-mcp]
-    dependencies:
-      - package: MCP
-        product: MCP
-      - package: ArgumentParser
-        product: ArgumentParser
-    settings:
-      base:
-        PRODUCT_NAME: lift-mcp
 schemes:
   Lift:
     build: { targets: { Lift: all } }

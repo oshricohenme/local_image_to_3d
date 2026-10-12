@@ -4,27 +4,23 @@ import LiftServer
 import Observation
 
 /// Where Lift.app keeps what it ships: `Contents/Resources/dev-recipes`, `Contents/Resources/lift_worker`
-/// and `Contents/MacOS/lift-mcp`.
+/// and the Lift skill.
 public struct AppPaths: Sendable {
     public var bundledRecipes: URL
     /// The folder holding the `lift_worker` package.
     public var workerSource: URL
-    public var bridge: URL?
     /// The Lift skill installed for Claude Code and Codex (`Contents/Resources/skills/lift/SKILL.md`).
     public var skill: URL?
 
-    public init(bundledRecipes: URL, workerSource: URL, bridge: URL?, skill: URL? = nil) {
+    public init(bundledRecipes: URL, workerSource: URL, skill: URL? = nil) {
         self.bundledRecipes = bundledRecipes
         self.workerSource = workerSource
-        self.bridge = bridge
         self.skill = skill
     }
 
     public static var main: AppPaths {
         let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
-        let bridge = Bundle.main.bundleURL.appending(path: "Contents/MacOS/lift-mcp")
         return AppPaths(bundledRecipes: resources.appending(path: "dev-recipes"), workerSource: resources,
-                        bridge: FileManager.default.isExecutableFile(atPath: bridge.path) ? bridge : nil,
                         skill: resources.appending(path: "skills/lift/SKILL.md"))
     }
 }
@@ -134,7 +130,7 @@ public final class AppModel {
     public var alert: String?
     public var section = AppSection.generate
     public let generate = GenerateModel()
-    /// Claude Code, Claude Desktop and Codex: one-click connect (Settings, setup's last step).
+    /// Claude Code and Codex: one-click connect over HTTP (Settings, setup's last step).
     public let assistants = AssistantsModel()
 
     /// Called with each finished job and each new memory wait (the app posts notifications).
@@ -230,9 +226,9 @@ public final class AppModel {
     /// Re-detects the assistants against the running server's address: one connected to an old port then
     /// shows Update connection, and an unedited Lift skill is updated. In the background; it can take a few seconds.
     public func checkAssistants() {
-        let (url, bridge) = (serverStatus?.urls.mcp, paths.bridge?.path)
+        let url = serverStatus?.urls.mcp
         let skill = paths.skill.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-        Task { await assistants.check(mcpURL: url, bridge: bridge, skill: skill) }
+        Task { await assistants.check(mcpURL: url, skill: skill) }
     }
 
     /// Runs the tools check, with the Metal Toolchain when a recipe needs it (the bundled ones before Lift opens).
@@ -273,7 +269,7 @@ public final class AppModel {
             let runtime = try installRuntime(in: workdir)
             let lift = try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: runtime, bundledRecipes: paths.bundledRecipes,
                                                       hfToken: secrets.hfTokenReader, weightsMetadata: weightsMetadata))
-            let server = LiftServer(lift: lift, configuration: .init(secrets: secrets, port: serverPort, bridgePath: paths.bridge?.path))
+            let server = LiftServer(lift: lift, configuration: .init(secrets: secrets, port: serverPort))
             self.lift = lift
             self.server = server
             if let on = pendingMenuBar {

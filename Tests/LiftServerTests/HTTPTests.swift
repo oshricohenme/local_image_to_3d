@@ -140,7 +140,10 @@ import Testing
         let status = try await http.call("GET", "/v1/server").json
         #expect(status["port"] as? Int == base.port && status["bind"] as? String == "127.0.0.1")
         let entry = (status["mcp_config"] as? [String: Any]).flatMap { ($0["mcpServers"] as? [String: Any])?["lift"] as? [String: Any] }
-        #expect(entry?["args"] as? [String] == ["--url", "http://127.0.0.1:\(await server.port)/mcp"])
+        // HTTP only: no stdio bridge (command/args) is ever offered.
+        let mcp = "http://127.0.0.1:\(await server.port)/mcp"
+        #expect(entry?["type"] as? String == "http" && entry?["url"] as? String == mcp)
+        #expect(entry?["command"] == nil && entry?["args"] == nil)
     }
 
     @Test func settingsRoundTrip() async throws {

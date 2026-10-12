@@ -1072,7 +1072,7 @@ components:
         mcp_config:
           type: object
           additionalProperties: true
-          description: An mcpServers entry for MCP clients (the lift-mcp stdio bridge, or the URL).
+          description: An mcpServers entry for MCP clients, over HTTP (Lift has no stdio transport).
     ServerChange:
       type: object
       required: [server]

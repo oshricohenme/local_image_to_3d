@@ -15,10 +15,8 @@ public struct ServerStatus: Codable, Sendable, Equatable {
     }
 
     public struct MCPEntry: Codable, Sendable, Equatable {
-        public var command: String?
-        public var args: [String]?
-        public var type: String?
-        public var url: String?
+        public var type: String
+        public var url: String
     }
 
     /// The port the server listens on: the configured one, or the next free one when that was taken.
@@ -29,7 +27,7 @@ public struct ServerStatus: Codable, Sendable, Equatable {
     public var lanMode: Bool
     public var tokenSet: Bool
     public var urls: URLs
-    /// `{"mcpServers": {"lift": …}}` for MCP clients: the stdio bridge, and the URL for clients that speak HTTP.
+    /// `{"mcpServers": {"lift": {"type": "http", "url": …}}}` for MCP clients. MCP is HTTP only, never stdio.
     public var mcpConfig: [String: [String: MCPEntry]]
 }
 
@@ -48,8 +46,6 @@ public actor LiftServer {
         public var secrets: any SecretStore
         /// nil: the `port` setting (7777 by default), else the next free port after it. 0: any free port (tests).
         public var port: Int?
-        /// The `lift-mcp` executable, for the MCP config snippet.
-        public var bridgePath: String?
         /// Tests only: treat a request as coming from another machine. nil: the socket's peer address decides.
         public var isRemote: (@Sendable (HTTPFields) -> Bool)?
         /// Wait this long before rebinding after server_set_lan, so the answer reaches the caller first.
@@ -57,11 +53,10 @@ public actor LiftServer {
         /// Where LAN mode listens. Tests keep it on 127.0.0.1 so they never open the Mac to the network.
         public var lanHost: String
 
-        public init(secrets: any SecretStore = MemorySecretStore(), port: Int? = nil, bridgePath: String? = nil,
+        public init(secrets: any SecretStore = MemorySecretStore(), port: Int? = nil,
                     isRemote: (@Sendable (HTTPFields) -> Bool)? = nil, rebindDelay: Duration = .milliseconds(300), lanHost: String = "0.0.0.0") {
             self.secrets = secrets
             self.port = port
-            self.bridgePath = bridgePath
             self.isRemote = isRemote
             self.rebindDelay = rebindDelay
             self.lanHost = lanHost
@@ -160,12 +155,10 @@ public actor LiftServer {
 
     public func status() -> ServerStatus {
         let base = "http://127.0.0.1:\(port)"
-        var servers: [String: ServerStatus.MCPEntry] = ["lift-http": .init(type: "http", url: "\(base)/mcp")]
-        servers["lift"] = .init(command: configuration.bridgePath ?? "lift-mcp", args: ["--url", "\(base)/mcp"])
         return ServerStatus(port: port, configuredPort: configuredPort, bind: host, lanMode: lan,
                             tokenSet: secrets.get(.lanToken) != nil,
                             urls: .init(api: "\(base)/v1", openapi: "\(base)/openapi.json", docs: "\(base)/docs", mcp: "\(base)/mcp"),
-                            mcpConfig: ["mcpServers": servers])
+                            mcpConfig: ["mcpServers": ["lift": .init(type: "http", url: "\(base)/mcp")]])
     }
 
     /// Saves LAN mode, makes a token if there is none, and rebinds on the same port shortly after answering.

@@ -70,9 +70,7 @@ struct SettingsView: View {
                 LabeledContent("Listening", value: "\(s.bind):\(s.port)" + (s.port != s.configuredPort ? " (\(s.configuredPort) was taken)" : ""))
                 copyRow("Base URL", s.urls.api)
                 Link("Open API reference", destination: URL(string: s.urls.docs)!)
-                if let entry = s.mcpConfig["mcpServers"]?["lift"], let command = entry.command {
-                    copyRow("stdio bridge", ([command] + (entry.args ?? [])).joined(separator: " "))
-                }
+                copyRow("MCP (HTTP)", s.urls.mcp)
             } else {
                 Text("The server isn't running.").foregroundStyle(.secondary)
             }

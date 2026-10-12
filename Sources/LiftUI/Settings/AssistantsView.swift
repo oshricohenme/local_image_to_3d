@@ -36,9 +36,7 @@ struct AssistantRow: View {
                 status
                 if row.busy { ProgressView().controlSize(.small) } else { button }
             }
-            if assistant == .claudeDesktop {
-                Text("Skills aren't available in Claude Desktop, so it gets Lift's tools without the Lift skill.").font(.caption).foregroundStyle(.secondary)
-            } else if row.skill == .foreign && row.note == nil {
+            if row.skill == .foreign && row.note == nil {
                 Text("A different “lift” skill is already installed, so Lift leaves it alone.").font(.caption).foregroundStyle(.secondary)
             }
             if let note = row.note { Label(note, systemImage: "info.circle").font(.callout) }

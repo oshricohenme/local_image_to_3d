@@ -46,7 +46,7 @@ built for any modality (image, video, audio) so later projects need only a recip
 - Persistent job queue (SQLite) with parallel slots, a memory budget, priorities and manual reordering.
 - Multi-step jobs (e.g. Pixal3D → UniRig).
 - Export formats: GLB always, plus USDZ, FBX and OBJ, chosen by the user per job.
-- HTTP API with an OpenAPI spec and a `/docs` page; MCP over Streamable HTTP, plus a `lift-mcp` stdio bridge.
+- HTTP API with an OpenAPI spec and a `/docs` page; MCP over Streamable HTTP only (never stdio).
 - Optional LAN access with a bearer token.
 - macOS notifications.
 - GitHub Actions: a test workflow, and a release workflow that tags and publishes a GitHub Release (§14).
@@ -72,7 +72,6 @@ Lift.app (Swift 6, SwiftUI)
 │   └─ Commands        the single command layer (typed requests/responses)
 ├─ LiftServer          Hummingbird 2: /v1 (generated from openapi.yaml), /docs, /mcp
 ├─ LiftUI              SwiftUI screens (see the mockups)
-└─ lift-mcp            stdio ↔ HTTP MCP bridge (command-line tool in the app bundle)
 
 <workdir>/                                     (one folder chosen at first launch, see §11)
 ├─ lift.sqlite
@@ -94,13 +93,12 @@ downloaded until you choose to use a model.
 |---|---|
 | HTTP server | hummingbird 2 |
 | OpenAPI server stubs + `/openapi.json` | swift-openapi-generator + swift-openapi-runtime + swift-openapi-hummingbird |
-| MCP server (Streamable HTTP, stdio) | modelcontextprotocol/swift-sdk |
+| MCP server (Streamable HTTP) | modelcontextprotocol/swift-sdk |
 | SQLite, migrations, observation | GRDB |
 | Running processes (git, uv, brew, workers) | swiftlang/swift-subprocess |
 | Keychain (LAN token, HF token) | KeychainAccess |
 | Recipe manifests | Yams (YAML) |
 | GLB preview | GLTFKit2 |
-| CLI for `lift-mcp` | swift-argument-parser |
 | Logging | swift-log |
 | Launch at login | ServiceManagement (system) |
 | Notifications | UserNotifications (system) |
@@ -483,7 +481,8 @@ Without it they return `confirmation_required` with a description of the impact 
   `lift://models/{id}/install-log`, `lift://resources`. Clients can subscribe to updates on jobs and resources.
 - **MCP progress:** `jobs_wait` sends progress notifications (stage name and fraction).
 - **Outputs** are returned both as absolute file paths and as resource URIs.
-- **Transports:** Streamable HTTP at `/mcp`; the stdio bridge `lift-mcp` (inside the app bundle) forwards to it.
+- **Transport:** Streamable HTTP at `/mcp`, and nothing else: Lift never offers or sets up stdio. Assistants
+  whose MCP settings can only start a program (Claude Desktop, Codex before `mcp add --url`) are not connected.
 - **HTTP:** `/v1/*` mirrors the table above. File inputs use multipart upload or `*_path` / `*_base64`.
   `POST /v1/jobs` returns `202` with `Location`. `/openapi.json` and `/docs` (Redoc) are served too.
 - **HTTP status codes (Plan 2):**
@@ -514,9 +513,10 @@ Without it they return `confirmation_required` with a description of the impact 
 - **Your Mac:** native brew, git or uv isn't working, or the Metal Toolchain is absent while a bundled recipe
   needs it (§6). One button installs what's missing.
 - **Welcome** and a one-line **You're all set** on a true first run only. It has an optional "Use Lift from an AI
-  assistant" section listing the Claude Code, Claude Desktop and Codex installs it finds, each with a Connect button
+  assistant" section listing the Claude Code and Codex installs it finds, each with a Connect button
   (nothing is connected by default, and finishing never waits for it). Settings → AI assistants has the same rows,
-  with Disconnect, Update (after a port change) and the do-it-yourself command under Show details. These edit the
+  with Disconnect, Update (after a port change) and the do-it-yourself command under Show details. Both connect over HTTP and get the Lift skill; an old Codex
+  without `mcp add --url` is asked to update, never given stdio. These edit the
   user's own assistant settings, so they run only from a click and are not exposed over HTTP or MCP.
 
 Nothing missing goes straight to the main window. A later launch that finds something missing shows a short
@@ -556,7 +556,7 @@ As in the mockups (Generate, Queue, Models, Settings, History, Result viewers, M
   command layer.
 - **Integration tests:** the real app server with the Test Cube recipe, exercised over HTTP and MCP:
   submit → wait → outputs, chained steps, cancel, retry, reorder, priority, pause, interrupted resolve,
-  install/uninstall Test Cube, settings round trip, stdio bridge.
+  install/uninstall Test Cube, settings round trip.
 - **Python (pytest):** shim device redirection, attention stand-in, launcher protocol (fd separation,
   per-thread log tagging, concurrency), stage parsing.
 - **Manual acceptance:** one real run per v1 recipe (time and peak memory recorded). Every model download
@@ -566,7 +566,7 @@ As in the mockups (Generate, Queue, Models, Settings, History, Result viewers, M
 
 - **`.github/workflows/test.yml`** runs on push and pull request:
   - Resolve packages (cached).
-  - `xcodebuild build` of the app and `lift-mcp`.
+  - `xcodebuild build` of the app.
   - Swift unit tests and integration tests (Test Cube only; no real models, no weights).
   - `uv run pytest` for the shim and launcher.
   - Test results are uploaded as artifacts.
@@ -585,7 +585,7 @@ As in the mockups (Generate, Queue, Models, Settings, History, Result viewers, M
    Then create the public `oshricohenme/lift-recipes` repo with the v1 recipes and `shared/` (only with your go-ahead).
 1. LiftCore: Store, Recipes, Toolchain, Installer, Workers, Scheduler, Resources, Commands. Tested with
    Test Cube. The test CI workflow is added here, so every later milestone runs in CI.
-2. LiftServer: OpenAPI HTTP, MCP (tools, resources, progress), auth, the `lift-mcp` bridge.
+2. LiftServer: OpenAPI HTTP, MCP (tools, resources, progress), auth (a `lift-mcp` stdio bridge was later removed: MCP is HTTP only).
 3. LiftUI: all screens, the first-launch wizard, the interrupted sheet, the menu bar, notifications.
 4. Real recipes: Pixal3D, Pixal3D-MV, UniRig, TRELLIS.2, then exports (USDZ/OBJ/FBX).
 5. Release workflow, and the first tagged release `v0.1.0` (run only when you say so).

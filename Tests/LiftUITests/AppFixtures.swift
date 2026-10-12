@@ -13,13 +13,13 @@ final class MemoryPrefs: PreferenceStore {
 }
 
 extension UIFixtures {
-    static func paths() throws -> AppPaths { AppPaths(bundledRecipes: try cubeBundle(), workerSource: workerSource, bridge: nil) }
+    static func paths() throws -> AppPaths { AppPaths(bundledRecipes: try cubeBundle(), workerSource: workerSource) }
 
     /// `check` stands in for the toolchain check (every tool present by default), `hf` for Hugging Face, and the
     /// engine's weights metadata is always offline, so no test talks to the network.
     @MainActor static func newApp(_ prefs: MemoryPrefs = MemoryPrefs(), bundle: URL? = nil, check: AppModel.PrereqsCheck? = { _ in readyTools },
                                   hf: any HFAccount = FakeHF()) throws -> AppModel {
-        AppModel(defaults: prefs, paths: AppPaths(bundledRecipes: try bundle ?? cubeBundle(), workerSource: workerSource, bridge: nil),
+        AppModel(defaults: prefs, paths: AppPaths(bundledRecipes: try bundle ?? cubeBundle(), workerSource: workerSource),
                  secrets: MemorySecretStore(), serverPort: 0, checkPrereqs: check, hf: hf, weightsMetadata: OfflineHub())
     }
 

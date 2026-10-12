@@ -8,7 +8,6 @@ let package = Package(
         .library(name: "LiftCore", targets: ["LiftCore"]),
         .library(name: "LiftUI", targets: ["LiftUI"]),
         .library(name: "LiftServer", targets: ["LiftServer"]),
-        .executable(name: "lift-mcp", targets: ["lift-mcp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.11.1"),
@@ -17,7 +16,7 @@ let package = Package(
         .package(url: "https://github.com/warrenm/GLTFKit2", from: "0.5.15"),
         // Plan 3: the models' READMEs, rendered in full (spec §4a).
         .package(url: "https://github.com/swiftlang/swift-cmark", from: "0.9.0"),
-        // Plan 2: LiftServer (HTTP + MCP) and lift-mcp.
+        // Plan 2: LiftServer (HTTP + MCP over HTTP only; never stdio).
         .package(url: "https://github.com/kishikawakatsumi/KeychainAccess", from: "4.2.2"),
         .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.27.1"),
         .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.14.0"),
@@ -25,7 +24,6 @@ let package = Package(
         .package(url: "https://github.com/swift-server/swift-openapi-hummingbird", from: "2.1.0"),
         // Pre-1.0: a minor release may break the API.
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk", .upToNextMinor(from: "0.12.1")),
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.8.2"),
         // Imported directly by LiftServer; already in the graph through Hummingbird.
         .package(url: "https://github.com/apple/swift-nio", from: "2.104.0"),
         .package(url: "https://github.com/apple/swift-http-types", from: "1.8.0"),
@@ -58,10 +56,6 @@ let package = Package(
             resources: [.copy("openapi.yaml"), .copy("Resources")],
             plugins: [.plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")]
         ),
-        .executableTarget(name: "lift-mcp", dependencies: [
-            .product(name: "MCP", package: "swift-sdk"),
-            .product(name: "ArgumentParser", package: "swift-argument-parser"),
-        ]),
         .testTarget(name: "LiftCoreTests", dependencies: ["LiftCore"]),
         .target(name: "LiftUI", dependencies: [
             "LiftCore",
@@ -73,7 +67,6 @@ let package = Package(
         .testTarget(name: "LiftUITests", dependencies: ["LiftUI"]),
         .testTarget(name: "LiftServerTests", dependencies: [
             "LiftServer",
-            "lift-mcp",
             .product(name: "MCP", package: "swift-sdk"),
         ]),
     ]

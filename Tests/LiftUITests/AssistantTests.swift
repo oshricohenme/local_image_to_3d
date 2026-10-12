@@ -32,9 +32,6 @@ final class Script: CommandRunner {
 struct Home {
     let root: URL
     let script = Script()
-    var apps: URL { root.appending(path: "Applications") }
-    var desktopConfig: URL { root.appending(path: "Library/Application Support/Claude/claude_desktop_config.json") }
-    var backup: URL { root.appending(path: "Library/Application Support/Claude/claude_desktop_config.json.lift-backup") }
 
     static let skillV1 = "---\nname: lift\ndescription: test v1\n---\nUse Lift.\n"
     static let skillV2 = "---\nname: lift\ndescription: test v2\n---\nUse Lift better.\n"
@@ -51,24 +48,13 @@ struct Home {
         return path
     }
 
-    func installDesktopApp() throws {
-        try FileManager.default.createDirectory(at: apps.appending(path: "Claude.app"), withIntermediateDirectories: true)
-    }
-
-    func writeDesktopConfig(_ text: String) throws {
-        try FileManager.default.createDirectory(at: desktopConfig.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(text.utf8).write(to: desktopConfig)
-    }
-
-    var desktopText: String { (try? String(contentsOf: desktopConfig, encoding: .utf8)) ?? "" }
-
     func skillFile(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/SKILL.md") }
     func marker(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/.installed-by-lift") }
     func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding: .utf8) }
 
-    func connector(port: Int = 7777, bridge: String? = "/Applications/Lift.app/Contents/MacOS/lift-mcp", skill: String? = Home.skillV1) -> AssistantConnector {
-        AssistantConnector(mcpURL: "http://127.0.0.1:\(port)/mcp", bridge: bridge, skill: skill, runner: script, home: root,
-                           searchDirs: [root.appending(path: ".local/bin").path], applications: [apps.appending(path: "Claude.app")])
+    func connector(port: Int = 7777, skill: String? = Home.skillV1) -> AssistantConnector {
+        AssistantConnector(mcpURL: "http://127.0.0.1:\(port)/mcp", skill: skill, runner: script, home: root,
+                           searchDirs: [root.appending(path: ".local/bin").path])
     }
 }
 
@@ -182,13 +168,18 @@ func codexGet(_ transport: String) -> [String] {
         #expect(await home.connector(port: 7001).detect(.codex) == .needsUpdate)
     }
 
-    @Test func aBridgeEntryWithAnOldPortNeedsUpdating() async throws {
+    @Test func anOldStdioBridgeEntryIsLiftsAndNeedsUpdating() async throws {
+        // Older Lifts set up the lift-mcp stdio bridge; Lift is HTTP only now, so Update swaps it for the URL.
         let home = try Home()
         try home.install("codex")
         home.script.on("mcp get lift --json", lines: codexGet(
             #"{"type": "stdio", "command": "/Applications/Lift.app/Contents/MacOS/lift-mcp", "args": ["--url", "http://127.0.0.1:7777/mcp"]}"#))
-        #expect(await home.connector().detect(.codex) == .connected)
-        #expect(await home.connector(port: 7778).detect(.codex) == .needsUpdate)
+        #expect(await home.connector().detect(.codex) == .needsUpdate)
+        home.script.on("mcp add --help", lines: Self.addHelp)
+        home.script.on("mcp remove lift")
+        home.script.on("mcp add lift")
+        try await home.connector().connect(.codex)
+        #expect(home.script.calls.suffix(2) == [["mcp", "remove", "lift"], ["mcp", "add", "lift", "--url", "http://127.0.0.1:7777/mcp"]])
     }
 
     @Test func connectUsesTheURLWhenCodexSupportsIt() async throws {
@@ -200,14 +191,13 @@ func codexGet(_ transport: String) -> [String] {
         #expect(home.script.calls.last == ["mcp", "add", "lift", "--url", "http://127.0.0.1:7777/mcp"])
     }
 
-    @Test func connectFallsBackToTheBridgeWithoutURLSupport() async throws {
+    @Test func aCodexWithoutURLSupportIsAskedToUpdateNeverGivenStdio() async throws {
         let home = try Home()
         try home.install("codex")
         home.script.on("mcp add --help", lines: Self.oldAddHelp)
         home.script.on("mcp add lift")
-        try await home.connector().connect(.codex)
-        #expect(home.script.calls.last == ["mcp", "add", "lift", "--", "/Applications/Lift.app/Contents/MacOS/lift-mcp",
-                                           "--url", "http://127.0.0.1:7777/mcp"])
+        await #expect(throws: AssistantError.codexTooOld) { try await home.connector().connect(.codex) }
+        #expect(!home.script.calls.contains { $0.starts(with: ["mcp", "add", "lift"]) })
     }
 
     @Test func connectReplacesAnOldEntryAndRefusesAForeignOne() async throws {
@@ -236,138 +226,10 @@ func codexGet(_ transport: String) -> [String] {
     }
 }
 
-@Suite struct ClaudeDesktopConnectorTests {
-    static let bridge = "/Applications/Lift.app/Contents/MacOS/lift-mcp"
-
-    @Test func installedWhenTheAppOrItsSettingsExist() async throws {
-        let home = try Home()
-        #expect(await home.connector().detect(.claudeDesktop) == .notInstalled)
-        try home.installDesktopApp()
-        #expect(await home.connector().detect(.claudeDesktop) == .notConnected)
-
-        let configOnly = try Home()
-        try configOnly.writeDesktopConfig("{}")
-        #expect(await configOnly.connector().detect(.claudeDesktop) == .notConnected)
-    }
-
-    @Test func connectWritesANewFileWhenThereIsNone() async throws {
-        let home = try Home()
-        try home.installDesktopApp()
-        let note = try await home.connector().connect(.claudeDesktop)
-        #expect(note == "Restart Claude to finish connecting.")
-        let json = try JSONSerialization.jsonObject(with: Data(home.desktopText.utf8)) as? [String: Any]
-        let lift = (json?["mcpServers"] as? [String: Any])?["lift"] as? [String: Any]
-        #expect(lift?["command"] as? String == Self.bridge)
-        #expect(lift?["args"] as? [String] == ["--url", "http://127.0.0.1:7777/mcp"])
-        #expect(!FileManager.default.fileExists(atPath: home.backup.path))
-        #expect(await home.connector().detect(.claudeDesktop) == .connected)
-    }
-
-    static let existing = """
-    {
-      "globalShortcut": "Alt+Space",
-      "mcpServers": {
-        "filesystem": {
-          "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Desktop"]
-        }
-      },
-      "zeta": [1, 2.50, "x\\u00e9"]
-    }
-
-    """
-
-    @Test func connectKeepsEveryOtherByteAndDisconnectPutsItBack() async throws {
-        let home = try Home()
-        try home.writeDesktopConfig(Self.existing)
-        try await home.connector().connect(.claudeDesktop)
-        #expect(home.desktopText == """
-        {
-          "globalShortcut": "Alt+Space",
-          "mcpServers": {
-            "filesystem": {
-              "command": "npx",
-              "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Desktop"]
-            },
-            "lift": {
-              "command": "\(Self.bridge)",
-              "args": [
-                "--url",
-                "http://127.0.0.1:7777/mcp"
-              ]
-            }
-          },
-          "zeta": [1, 2.50, "x\\u00e9"]
-        }
-
-        """)
-        try await home.connector().disconnect(.claudeDesktop)
-        #expect(home.desktopText == Self.existing)
-    }
-
-    @Test func connectAddsMCPServersWhenThereAreNone() async throws {
-        let home = try Home()
-        try home.writeDesktopConfig("{\n  \"theme\": \"dark\"\n}\n")
-        try await home.connector().connect(.claudeDesktop)
-        #expect(home.desktopText.hasPrefix("{\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"lift\": {\n      \"command\": "))
-        #expect(home.desktopText.hasSuffix("\n    }\n  }\n}\n"))
-    }
-
-    @Test func theBackupIsWrittenOnceAndKept() async throws {
-        let home = try Home()
-        try home.writeDesktopConfig(Self.existing)
-        try await home.connector().connect(.claudeDesktop)
-        #expect(try String(contentsOf: home.backup, encoding: .utf8) == Self.existing)
-        try await home.connector(port: 7790).connect(.claudeDesktop)
-        try await home.connector().disconnect(.claudeDesktop)
-        #expect(try String(contentsOf: home.backup, encoding: .utf8) == Self.existing)
-    }
-
-    @Test func malformedSettingsAreLeftAlone() async throws {
-        let home = try Home()
-        let broken = "{\n  \"mcpServers\": {\n    \"x\": { \"command\": \"y\", }\n"
-        try home.writeDesktopConfig(broken)
-        await #expect(throws: AssistantError.self) { try await home.connector().connect(.claudeDesktop) }
-        await #expect(throws: AssistantError.self) { try await home.connector().disconnect(.claudeDesktop) }
-        #expect(home.desktopText == broken)
-        #expect(!FileManager.default.fileExists(atPath: home.backup.path))
-    }
-
-    @Test func disconnectRemovesOnlyLift() async throws {
-        let home = try Home()
-        let text = """
-        {"mcpServers": {"lift": {"command": "\(Self.bridge)", "args": ["--url", "http://127.0.0.1:7777/mcp"]}, "other": {"command": "x"}}, "k": true}
-        """
-        try home.writeDesktopConfig(text)
-        try await home.connector().disconnect(.claudeDesktop)
-        #expect(home.desktopText == #"{"mcpServers": {"other": {"command": "x"}}, "k": true}"#)
-    }
-
-    @Test func anOldPortNeedsUpdatingAndUpdateReplacesOnlyTheValue() async throws {
-        let home = try Home()
-        try home.writeDesktopConfig(#"{"mcpServers": {"lift": {"command": "\#(Self.bridge)", "args": ["--url", "http://127.0.0.1:7777/mcp"]}}}"#)
-        #expect(await home.connector(port: 7801).detect(.claudeDesktop) == .needsUpdate)
-        try await home.connector(port: 7801).connect(.claudeDesktop)
-        #expect(home.desktopText == #"{"mcpServers": {"lift": {"command": "\#(Self.bridge)", "args": ["--url", "http://127.0.0.1:7801/mcp"]}}}"#)
-        #expect(await home.connector(port: 7801).detect(.claudeDesktop) == .connected)
-    }
-
-    @Test func aForeignLiftIsReplacedOnlyWhenAsked() async throws {
-        let home = try Home()
-        let text = #"{"mcpServers": {"lift": {"command": "uvx", "args": ["lift-tools"]}}}"#
-        try home.writeDesktopConfig(text)
-        #expect(await home.connector().detect(.claudeDesktop) == .taken)
-        await #expect(throws: AssistantError.taken(.claudeDesktop)) { try await home.connector().connect(.claudeDesktop) }
-        #expect(home.desktopText == text)
-        try await home.connector().connect(.claudeDesktop, replacing: true)
-        #expect(await home.connector().detect(.claudeDesktop) == .connected)
-    }
-}
-
 @MainActor @Suite struct AssistantsModelTests {
     @Test func nothingRunsUntilTheAppSaysHow() async throws {
         let model = AssistantsModel()
-        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil)
+        await model.check(mcpURL: "http://127.0.0.1:7777/mcp")
         #expect(model.rows.isEmpty)
         #expect(model.connector == nil)
     }
@@ -377,15 +239,14 @@ func codexGet(_ transport: String) -> [String] {
         try home.install("claude")
         home.script.on("mcp get lift", lines: claudeGet(url: "http://127.0.0.1:7777/mcp"))
         let model = AssistantsModel()
-        model.makeConnector = { url, bridge, _ in
-            AssistantConnector(mcpURL: url, bridge: bridge, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path],
-                               applications: [])
+        model.makeConnector = { url, _ in
+            AssistantConnector(mcpURL: url, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path])
         }
-        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil)
+        await model.check(mcpURL: "http://127.0.0.1:7777/mcp")
         #expect(model.rows[.claudeCode]?.state == .connected)
         #expect(model.rows[.codex]?.state == .notInstalled)
         #expect(model.needingUpdate.isEmpty)
-        await model.check(mcpURL: "http://127.0.0.1:7778/mcp", bridge: nil)
+        await model.check(mcpURL: "http://127.0.0.1:7778/mcp")
         #expect(model.needingUpdate == [.claudeCode])
     }
 
@@ -395,47 +256,31 @@ func codexGet(_ transport: String) -> [String] {
         home.script.on("mcp add --help", lines: CodexConnectorTests.addHelp)
         home.script.on("mcp add lift", code: 2, lines: ["error: config.toml is read-only"])
         let model = AssistantsModel()
-        model.makeConnector = { url, bridge, _ in
-            AssistantConnector(mcpURL: url, bridge: bridge, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path],
-                               applications: [])
+        model.makeConnector = { url, _ in
+            AssistantConnector(mcpURL: url, runner: home.script, home: home.root, searchDirs: [home.root.appending(path: ".local/bin").path])
         }
-        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil)
+        await model.check(mcpURL: "http://127.0.0.1:7777/mcp")
         await model.connect(.codex)
         #expect(model.rows[.codex]?.failure == "Lift couldn't connect Codex.")
         #expect(model.rows[.codex]?.details?.contains("config.toml is read-only") == true)
         #expect(model.rows[.codex]?.busy == false)
     }
 
-    @Test func connectingClaudeDesktopSaysToRestartIt() async throws {
-        let home = try Home()
-        try home.installDesktopApp()
-        let model = AssistantsModel()
-        model.makeConnector = { url, _, _ in home.connector(port: Int(URL(string: url)!.port!)) }
-        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil)
-        await model.connect(.claudeDesktop)
-        #expect(model.rows[.claudeDesktop]?.state == .connected)
-        #expect(model.rows[.claudeDesktop]?.note == "Restart Claude to finish connecting.")
-        await model.disconnect(.claudeDesktop)
-        #expect(model.rows[.claudeDesktop]?.state == .notConnected)
-        #expect(model.rows[.claudeDesktop]?.note == nil)
-    }
-
     @Test func theServerStartingChecksTheAssistants() async throws {
         let home = try Home()
-        try home.installDesktopApp()
+        try home.install("claude")
         let skill = try UIFixtures.tempDir().appending(path: "SKILL.md")
         try Data("shipped skill".utf8).write(to: skill)
-        let app = AppModel(defaults: MemoryPrefs(), paths: AppPaths(bundledRecipes: try UIFixtures.cubeBundle(), workerSource: UIFixtures.workerSource,
-                                                                    bridge: nil, skill: skill),
+        let app = AppModel(defaults: MemoryPrefs(), paths: AppPaths(bundledRecipes: try UIFixtures.cubeBundle(), workerSource: UIFixtures.workerSource, skill: skill),
                            secrets: MemorySecretStore(), serverPort: 0, checkPrereqs: { _ in readyTools }, hf: FakeHF(), weightsMetadata: OfflineHub())
         let seen = SeenMCP()
-        app.assistants.makeConnector = { url, _, skill in
+        app.assistants.makeConnector = { url, skill in
             seen.url = url
             seen.skill = skill
             return home.connector(port: Int(URL(string: url)!.port!))
         }
         #expect(await app.open(try UIFixtures.tempDir().appending(path: "workdir")))
-        #expect(try await eventually { app.assistants.rows[.claudeDesktop]?.state == .notConnected })
+        #expect(try await eventually { app.assistants.rows[.claudeCode]?.state == .notConnected })
         #expect(seen.url == app.serverStatus?.urls.mcp)
         #expect(seen.skill == "shipped skill")
         await app.close()
@@ -450,6 +295,7 @@ func codexGet(_ transport: String) -> [String] {
     static func ready(_ tool: String) throws -> Home {
         let home = try Home()
         try home.install(tool)
+        home.script.on("mcp add --help", lines: CodexConnectorTests.addHelp)
         home.script.on("mcp add")
         home.script.on("mcp remove")
         home.script.on("mcp get lift", lines: tool == "claude" ? claudeGet(url: "http://127.0.0.1:7777/mcp")
@@ -463,6 +309,7 @@ func codexGet(_ transport: String) -> [String] {
     func connectInstallsTheSkillWithItsMarker(_ tool: String, _ a: Assistant) async throws {
         let home = try Home()
         try home.install(tool)
+        home.script.on("mcp add --help", lines: CodexConnectorTests.addHelp)
         home.script.on("mcp add")
         #expect(home.connector().skillState(a) == .missing)
         try await home.connector().connect(a)
@@ -521,14 +368,6 @@ func codexGet(_ transport: String) -> [String] {
         #expect(!FileManager.default.fileExists(atPath: home.marker("claude").path))
     }
 
-    @Test func claudeDesktopHasNoSkill() async throws {
-        let home = try Home()
-        try home.installDesktopApp()
-        #expect(home.connector().skillState(.claudeDesktop) == nil)
-        try await home.connector().connect(.claudeDesktop)
-        #expect(!FileManager.default.fileExists(atPath: home.root.appending(path: ".claude").path))
-    }
-
     @Test func noShippedSkillMeansMCPOnly() async throws {
         let home = try Self.ready("claude")
         try await home.connector(skill: nil).connect(.claudeCode)
@@ -539,11 +378,10 @@ func codexGet(_ transport: String) -> [String] {
         let home = try Self.ready("claude")
         try await home.connector().connect(.claudeCode)
         let model = AssistantsModel()
-        model.makeConnector = { _, _, skill in home.connector(skill: skill) }
-        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", bridge: nil, skill: Home.skillV2)
+        model.makeConnector = { _, skill in home.connector(skill: skill) }
+        await model.check(mcpURL: "http://127.0.0.1:7777/mcp", skill: Home.skillV2)
         #expect(home.text(home.skillFile("claude")) == Home.skillV2)
         #expect(model.rows[.claudeCode]?.skill == .installed)
-        #expect(model.rows[.claudeDesktop]?.skill == nil)
     }
 
     /// The SKILL.md Lift.app ships: the right frontmatter, short, and only tools that exist.
