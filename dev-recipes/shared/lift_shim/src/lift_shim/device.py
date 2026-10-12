@@ -31,6 +31,25 @@ _AUTOCAST_OPS = {
 }
 
 
+# Torch < 2.14 on MPS builds attention's whole score matrix at once; past Metal's buffer limit that fails
+# ("Invalid buffer size: 42.07 GiB", Pixal3D at 1536). Each query row's softmax is its own, so splitting
+# the queries is exact. ponytail: unmasked, non-causal calls only (all that's needed so far).
+_SDPA_CHUNK_BYTES = 1 << 30
+_SDPA_ARGS = ("query", "key", "value", "attn_mask", "dropout_p", "is_causal", "scale", "enable_gqa")
+
+
+def _sdpa(func, args, kwargs):
+    a = {**dict(zip(_SDPA_ARGS, args)), **kwargs}
+    q, k = a["query"], a["key"]
+    rows = q.shape[-2]
+    row_bytes = q.numel() // (rows * q.shape[-1]) * k.shape[-2] * 4  # batch x heads x keys, fp32 scores
+    if a.get("attn_mask") is not None or a.get("is_causal") or a.get("dropout_p") or rows * row_bytes <= _SDPA_CHUNK_BYTES:
+        return func(*args, **kwargs)
+    rest = {n: x for n, x in a.items() if n != "query"}
+    step = max(1, _SDPA_CHUNK_BYTES // row_bytes)
+    return torch.cat([func(q[..., i:i + step, :], **rest) for i in range(0, rows, step)], dim=-2)
+
+
 def _to_fp32(obj):
     if isinstance(obj, torch.Tensor) and obj.dtype in (torch.float16, torch.bfloat16):
         return obj.float()
@@ -54,6 +73,8 @@ class _CudaRedirect(TorchFunctionMode):
             dev = kwargs["device"]
             kwargs["device"] = torch.device(_target) if isinstance(dev, int) or _is_cuda(dev) else dev
         args = tuple(_map(a) for a in args)
+        if getattr(func, "__name__", "") == "scaled_dot_product_attention":
+            return _sdpa(func, args, kwargs)
         return func(*args, **kwargs)
 
 

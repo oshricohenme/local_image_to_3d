@@ -82,6 +82,15 @@ def test_float32_autocast_inside_half_autocast_runs_in_float32():
     assert conv(x.half().float()).dtype == torch.float32
 
 
+def test_sdpa_matches_attention_when_split_by_query(monkeypatch):
+    from lift_shim import device
+    monkeypatch.setattr(device, "_SDPA_CHUNK_BYTES", 4 * 2 * 5 * 4)  # a few query rows per chunk
+    q, k, v = (torch.randn(1, 2, n, 8, device="cuda") for n in (13, 5, 5))
+    out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+    expected = torch.softmax(q @ k.transpose(-2, -1) / 8 ** 0.5, dim=-1) @ v
+    assert torch.allclose(out, expected, atol=1e-5)
+
+
 def test_new_thread_redirected():
     result = {}
 
