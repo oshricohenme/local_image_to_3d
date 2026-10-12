@@ -118,7 +118,10 @@ public enum Scheduler {
             // machine is otherwise idle, skipping the memory checks; until then it waits like any other.
             let tooBig = c.memoryAccepted && (needed > input.budget || needed > input.physical)
             let idle = input.runningSteps == 0 && startedHere == 0
-            if !c.forceStart && !(tooBig && idle) && (tooBig || needed > budgetFree || needed > systemFree) {
+            // An idle worker of this model just ran a job like this one, and right after a job it still holds that
+            // job's memory: the next job reuses it unchecked, so a queue of one model keeps going.
+            // ponytail: trusts the last job's fit; a much bigger setting on the same model could still overcommit.
+            if !c.forceStart && shared == nil && !(tooBig && idle) && (tooBig || needed > budgetFree || needed > systemFree) {
                 out.append(.wait(c.jobId, .memory(needed: needed, free: max(0, min(budgetFree, systemFree)))))
                 continue
             }

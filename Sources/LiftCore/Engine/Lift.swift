@@ -130,6 +130,8 @@ public actor Lift {
     var workers: [String: WorkerHandle] = [:]
     var logs: [String: LogFile] = [:]
     var housekeeping: Task<Void, Never>?
+    /// A job waits for memory: heartbeats and housekeeping re-run the scheduler, so it starts once memory frees up.
+    var waitingForMemory = false
     var closing = false
 
     var jobsDir: URL { config.workdir.appending(path: "jobs") }
@@ -315,7 +317,9 @@ public actor Lift {
                 }
             }
             // Steps that just started took their workers, so only truly idle ones are left to unload.
-            if let keep = Scheduler.keepLoaded(input, decisions) {
+            let keep = Scheduler.keepLoaded(input, decisions)
+            waitingForMemory = keep != nil
+            if let keep {
                 for w in workers.values where w.available && !keep.contains(w.recipe.id) { stop(w) }
             }
         } catch {
@@ -504,6 +508,7 @@ public actor Lift {
                     a.peak = max(a.peak, w.lastFootprint)
                     w.job = a
                 }
+                if waitingForMemory { tick() }
             case .stderr(let line):
                 w.tail.append(line)
                 if let a = w.job { appendLog(a.jobId, line) }
@@ -581,6 +586,7 @@ public actor Lift {
     // MARK: housekeeping
 
     func housekeep() {
+        if waitingForMemory { tick() }
         let limit = Duration.seconds(settings.idleUnloadMinutes * 60)
         for w in workers.values where w.available {
             if let idle = w.idleSince, ContinuousClock.now - idle >= limit { stop(w) }

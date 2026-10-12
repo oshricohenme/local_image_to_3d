@@ -44,6 +44,14 @@ import Testing
         #expect(run([c("a")], workers: [w], slots: 2) == [.start("a")])  // 2 GB fits in 48 − 40
     }
 
+    /// Right after a job, its model still holds that job's memory: the next job on the same idle model starts anyway.
+    @Test func anIdleLoadedModelTakesTheNextJobWithoutAMemoryCheck() {
+        let w = WorkerSnapshot(recipe: "r", freeCapacity: 1, reserved: 42 * gb)
+        #expect(run([c("a", job: 24)], workers: [w], free: 20) == [.start("a")])
+        #expect(run([c("a", position: 1, job: 24), c("b", position: 2, job: 24)], workers: [w], slots: 2, free: 20)
+                == [.start("a"), .wait("b", .memory(needed: 34 * gb, free: 0))])  // b would need a second worker: checked
+    }
+
     @Test func busyWorkerMeansANewOne() {
         let w = WorkerSnapshot(recipe: "r", freeCapacity: 0, reserved: 40 * gb)
         #expect(run([c("a")], workers: [w], slots: 2) == [.wait("a", .memory(needed: 12 * gb, free: 8 * gb))])
