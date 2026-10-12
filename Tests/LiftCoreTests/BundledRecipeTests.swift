@@ -63,7 +63,7 @@ import Testing
                 == ["deps/mtlgemm", "deps/mtldiffrast", "deps/mtlbvh", "deps/mtlmesh", "deps/trellis2-apple/o-voxel"])
         #expect(d.contains("git -C deps/trellis2-apple submodule update --init --depth 1 o-voxel/third_party/eigen"))
         let lastBuild = try #require(d.lastIndex { $0.contains("--no-build-isolation deps/") })
-        #expect(d[lastBuild + 1] == "/bin/uv pip install \(e.shared.path)/lift_shim")
+        #expect(d[lastBuild + 1] == "/bin/uv pip install -e \(e.shared.path)/lift_shim")
         #expect(d.last!.hasPrefix("\(m)/venv/bin/python -m lift_worker --check "))
         #expect(runner.commands.last!.environment["LIFT_SHIM"]?.contains(#""nvdiffrast":"mtldiffrast""#) == true)
         #expect(runner.commands[venv + 1].workingDirectory == m && runner.commands[venv + 1].environment["VIRTUAL_ENV"] == "\(m)/venv")

@@ -207,7 +207,9 @@ public struct Installer: Sendable {
         let shell = recipe.install + recipe.substitutes.flatMap { registry[$0]?.install ?? [] }
         steps += shell.map { ShellCommand("/bin/sh", ["-c", $0], environment: env, workingDirectory: root.path) }
         if shimConfig != nil {
-            steps.append(ShellCommand(uv, ["pip", "install", entry.shared.appending(path: "lift_shim").path], environment: env, workingDirectory: root.path))
+            // Editable: the venv imports the shim from shared/, which every app update refreshes, so a shim fix
+            // reaches installed models without a reinstall. A plain install froze the install-day copy.
+            steps.append(ShellCommand(uv, ["pip", "install", "-e", entry.shared.appending(path: "lift_shim").path], environment: env, workingDirectory: root.path))
             steps.append(ShellCommand(venvPython(recipe.id), ["-c", "import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])"], environment: env))
         }
 

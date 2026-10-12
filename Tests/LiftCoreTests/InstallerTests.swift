@@ -36,7 +36,7 @@ import Testing
             "/bin/git -C \(m)/.repo-staging submodule update --init --recursive --quiet",
             "/bin/uv venv --python 3.11 \(m)/venv",
             "uv pip install torch torchvision",
-            "/bin/uv pip install \(entry.shared.path)/lift_shim",
+            "/bin/uv pip install -e \(entry.shared.path)/lift_shim",
             "\(m)/venv/bin/python -c import site, lift_shim.pth as p; p.write_pth(site.getsitepackages()[0])",
             "\(m)/venv/bin/python -m lift_worker --check \(inst.workerConfig(entry.recipe, heartbeat: 2))",
         ])
