@@ -101,12 +101,58 @@ public struct Installer: Sendable {
     public func installedRecipeDir(_ id: String) -> URL { dir(id).appending(path: "recipe") }
     public func shimURL(_ id: String) -> URL { dir(id).appending(path: "shim.json") }
 
+    /// Every file of a recipe folder (recipe.yaml, launcher.py, files/…), by path and content.
     static func digest(_ recipeDir: URL) -> String {
         var hash = SHA256()
-        for name in ["recipe.yaml", "launcher.py"] {
-            hash.update(data: (try? Data(contentsOf: recipeDir.appending(path: name))) ?? Data())
+        let files = FileManager.default.enumerator(atPath: recipeDir.path)?.compactMap { $0 as? String } ?? []
+        for path in files.filter({ !$0.contains("__pycache__") }).sorted() {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: recipeDir.appending(path: path).path, isDirectory: &isDir), !isDir.boolValue else { continue }
+            hash.update(data: Data(path.utf8))
+            hash.update(data: (try? Data(contentsOf: recipeDir.appending(path: path))) ?? Data())
         }
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What an install builds from. Anything else in a recipe (its launcher and files, settings, phases,
+    /// progress names, messages) is only how the model runs, and is refreshed without reinstalling.
+    static func installDigest(_ r: Recipe) -> String {
+        struct Inputs: Encodable {
+            var repo, commit: String?
+            var python: String
+            var install, substitutes, brew: [String]
+            var shim: Recipe.Shim?
+            var metalToolchain: Bool
+            var weights: [Recipe.Weight]
+        }
+        let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
+        let data = (try? e.encode(Inputs(repo: r.repo, commit: r.commit, python: r.python, install: r.install, substitutes: r.substitutes,
+                                         brew: r.brew, shim: r.shim, metalToolchain: r.metalToolchain, weights: r.weights))) ?? Data()
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Copies a changed recipe folder over the installed copy when only how the model runs changed: same code,
+    /// same install. Returns whether it did. A worker already running keeps what it loaded; the next one uses this.
+    @discardableResult
+    public func refreshRecipe(_ entry: CatalogEntry, pin: String?) -> Bool {
+        let id = entry.recipe.id
+        guard var state = readState(id), state.installed, state.commit == (pin ?? entry.recipe.commit),
+              state.digest != Self.digest(entry.directory), let current = installedRecipe(id),
+              Self.installDigest(current) == Self.installDigest(entry.recipe) else { return false }
+        let fm = FileManager.default
+        let staged = dir(id).appending(path: "recipe.new")
+        do {
+            try? fm.removeItem(at: staged)
+            try fm.copyItem(at: entry.directory, to: staged)
+            _ = try fm.replaceItemAt(installedRecipeDir(id), withItemAt: staged)
+            state.digest = Self.digest(entry.directory)
+            try writeState(state, id: id)
+            return true
+        } catch {
+            try? fm.removeItem(at: staged)
+            return false
+        }
     }
 
     func readState(_ id: String) -> InstallState? {

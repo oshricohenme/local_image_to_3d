@@ -68,7 +68,9 @@ public enum Library {
             }
         }
         switch m.status {
-        case .installed, .updateAvailable: return "Installed"
+        case .installed: return "Installed"
+        // Only a change to what the install builds gets here (how it runs updates by itself): say so on the card.
+        case .updateAvailable: return "Update available"
         case .installing: return Format.status(m.status)
         case .unsupported: return "Not supported on this Mac"
         case .installFailed: return "Install failed"

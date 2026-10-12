@@ -243,6 +243,11 @@ public actor Lift {
         catalog = Catalog.scan(sourceDirs, includeDeveloper: developerMode)
         let models = config.workdir.appending(path: "models")
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: models.path)) ?? []
+        // A newer recipe that only changes how a model runs (launcher, settings, phases, messages) reaches the
+        // installed copy here; only a change to what the install builds needs a reinstall.
+        for id in ids where installing[id] == nil {
+            if let entry = catalog.entries[id] { installer.refreshRecipe(entry, pin: settings.pinOverrides[id]) }
+        }
         installed = Dictionary(uniqueKeysWithValues: ids.compactMap { id in installer.installedRecipe(id).map { (id, $0) } })
     }
 

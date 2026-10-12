@@ -40,6 +40,8 @@ import Testing
         #expect(Library.chip(pixal, hfKey: true) == "Not installed")
         let installed = with(pixal, .installed(commit: "c"))
         #expect(Library.chip(installed, hfKey: true) == "Installed" && Library.action(installed) == .useInGenerate)
+        let update = with(pixal, .updateAvailable(installedCommit: "c", recipeCommit: "d"))
+        #expect(Library.chip(update, hfKey: true) == "Update available" && Library.action(update) == .useInGenerate)  // still usable
         let downloading = with(pixal, .installing(phase: "downloading weights"), download(.downloading))
         #expect(Library.chip(downloading, hfKey: true) == "Downloading 42%" && Library.action(downloading) == .pause)
         let paused = with(pixal, .installing(phase: "download paused"), download(.paused))

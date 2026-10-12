@@ -138,6 +138,34 @@ import Testing
         #expect(inst.status(id: "pixal3d", source: entry, pin: nil) == .updateAvailable(installedCommit: entry.recipe.commit, recipeCommit: entry.recipe.commit))
     }
 
+    /// A new launcher, helper file or name is only how the model runs: the installed copy takes it in place, no
+    /// reinstall. A new install command (or code, or weights) changes what the install builds: that stays an update.
+    @Test func runOnlyChangesRefreshTheInstalledCopyInstallChangesDoNot() async throws {
+        let entry = try source()
+        let inst = try installer(FakeRunner())
+        try await inst.install(entry, pin: nil, onLine: { _ in })
+        #expect(!inst.refreshRecipe(entry, pin: nil))  // nothing changed
+
+        try "def run(state, job):\n    return ['x']\n".write(to: entry.directory.appending(path: "launcher.py"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: entry.directory.appending(path: "files"), withIntermediateDirectories: true)
+        try "y = 2\n".write(to: entry.directory.appending(path: "files/helper.py"), atomically: true, encoding: .utf8)
+        let renamed = try source(pixalYAML.replacingOccurrences(of: "name: Pixal3D", with: "name: Pixal 3D"))
+        try FileManager.default.removeItem(at: renamed.directory)
+        try FileManager.default.copyItem(at: entry.directory, to: renamed.directory)
+        try pixalYAML.replacingOccurrences(of: "name: Pixal3D", with: "name: Pixal 3D")
+            .write(to: renamed.directory.appending(path: "recipe.yaml"), atomically: true, encoding: .utf8)
+        #expect(inst.refreshRecipe(renamed, pin: nil))
+        #expect(inst.status(id: "pixal3d", source: renamed, pin: nil) == .installed(commit: entry.recipe.commit))
+        #expect(inst.installedRecipe("pixal3d")?.name == "Pixal 3D")
+        let copy = inst.installedRecipeDir("pixal3d")
+        #expect(try String(contentsOf: copy.appending(path: "launcher.py"), encoding: .utf8).contains("['x']"))
+        #expect(FileManager.default.fileExists(atPath: copy.appending(path: "files/helper.py").path))
+
+        let newInstall = try source(pixalYAML.replacingOccurrences(of: "  - uv pip install torch torchvision", with: "  - uv pip install torch torchvision numpy"))
+        #expect(!inst.refreshRecipe(newInstall, pin: nil))
+        #expect(inst.status(id: "pixal3d", source: newInstall, pin: nil) == .updateAvailable(installedCommit: entry.recipe.commit, recipeCommit: entry.recipe.commit))
+    }
+
     @Test func pinOverrideIsCheckedOut() async throws {
         let runner = FakeRunner()
         let inst = try installer(runner)
