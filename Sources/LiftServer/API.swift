@@ -55,17 +55,17 @@ struct API: APIProtocol {
     func jobsList(_ input: Operations.JobsList.Input) async throws -> Operations.JobsList.Output {
         let filter = JobFilter(states: try input.query.state.map { try Wire.convert($0) }, recipe: input.query.recipe,
                                modality: input.query.modality, text: input.query.text)
-        return .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsList(filter).map(JobOut.init))))))
+        return .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsList(filter))))))
     }
 
     func jobsListInterrupted(_ input: Operations.JobsListInterrupted.Input) async throws -> Operations.JobsListInterrupted.Output {
-        .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsListInterrupted().map(JobOut.init))))))
+        .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsListInterrupted())))))
     }
 
     func jobsResolveInterrupted(_ input: Operations.JobsResolveInterrupted.Input) async throws -> Operations.JobsResolveInterrupted.Output {
         guard case .json(let body) = input.body else { throw LiftError.invalidInput([FieldError("body", "required")]) }
         let action = InterruptedAction(rawValue: body.action.rawValue) ?? .requeue
-        return .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsResolveInterrupted(ids: body.ids, action: action).map(JobOut.init))))))
+        return .ok(.init(body: .json(try Wire.convert(JobListOut(jobs: try await lift.jobsResolveInterrupted(ids: body.ids, action: action))))))
     }
 
     func jobsGet(_ input: Operations.JobsGet.Input) async throws -> Operations.JobsGet.Output {
@@ -140,7 +140,7 @@ struct API: APIProtocol {
     }
 
     func modelsGet(_ input: Operations.ModelsGet.Input) async throws -> Operations.ModelsGet.Output {
-        .ok(.init(body: .json(try Wire.convert(try await lift.modelsGet(input.path.id)))))
+        .ok(.init(body: .json(try Wire.convert(ModelOut(try await lift.modelsGet(input.path.id))))))
     }
 
     func modelsUninstall(_ input: Operations.ModelsUninstall.Input) async throws -> Operations.ModelsUninstall.Output {
@@ -151,18 +151,18 @@ struct API: APIProtocol {
     func modelsInstall(_ input: Operations.ModelsInstall.Input) async throws -> Operations.ModelsInstall.Output {
         let model = try gated(await lift.modelsInstall(input.path.id, confirm: input.query.confirm ?? false, wait: input.query.wait ?? false,
                                                        downloadWeights: input.query.downloadWeights ?? true))
-        return .ok(.init(body: .json(try Wire.convert(model))))
+        return .ok(.init(body: .json(try Wire.convert(ModelOut(model)))))
     }
 
     func modelsReinstall(_ input: Operations.ModelsReinstall.Input) async throws -> Operations.ModelsReinstall.Output {
         let model = try gated(await lift.modelsReinstall(input.path.id, confirm: input.query.confirm ?? false, wait: input.query.wait ?? false))
-        return .ok(.init(body: .json(try Wire.convert(model))))
+        return .ok(.init(body: .json(try Wire.convert(ModelOut(model)))))
     }
 
     func modelsSetPin(_ input: Operations.ModelsSetPin.Input) async throws -> Operations.ModelsSetPin.Output {
         guard case .json(let body) = input.body else { throw LiftError.invalidInput([FieldError("body", "required")]) }
         let model = try gated(await lift.modelsSetPin(input.path.id, commit: body.commit, confirm: input.query.confirm ?? false, wait: input.query.wait ?? false))
-        return .ok(.init(body: .json(try Wire.convert(model))))
+        return .ok(.init(body: .json(try Wire.convert(ModelOut(model)))))
     }
 
     func modelsCheckUpstream(_ input: Operations.ModelsCheckUpstream.Input) async throws -> Operations.ModelsCheckUpstream.Output {
@@ -190,7 +190,7 @@ struct API: APIProtocol {
 
     func modelsDownloadWeights(_ input: Operations.ModelsDownloadWeights.Input) async throws -> Operations.ModelsDownloadWeights.Output {
         let model = try gated(await lift.modelsDownloadWeights(input.path.id, confirm: input.query.confirm ?? false, wait: input.query.wait ?? false))
-        return .ok(.init(body: .json(try Wire.convert(model))))
+        return .ok(.init(body: .json(try Wire.convert(ModelOut(model)))))
     }
 
     func downloadsList(_ input: Operations.DownloadsList.Input) async throws -> Operations.DownloadsList.Output {
@@ -218,7 +218,7 @@ struct API: APIProtocol {
     }
 
     func modelsCancelInstall(_ input: Operations.ModelsCancelInstall.Input) async throws -> Operations.ModelsCancelInstall.Output {
-        .ok(.init(body: .json(try Wire.convert(try await lift.modelsCancelInstall(input.path.id)))))
+        .ok(.init(body: .json(try Wire.convert(ModelOut(try await lift.modelsCancelInstall(input.path.id))))))
     }
 
     func modelsVerifyWeights(_ input: Operations.ModelsVerifyWeights.Input) async throws -> Operations.ModelsVerifyWeights.Output {

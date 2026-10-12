@@ -17,6 +17,11 @@ import Testing
         while let ref = schema["$ref"] as? String {
             schema = ref.split(separator: "/").dropFirst().reduce(doc as Any?) { ($0 as? [String: Any])?[String($1)] } as? [String: Any] ?? [:]
         }
+        if let parts = schema["allOf"] as? [Any] {  // merged: properties and required of every part
+            let resolved = parts.map(resolve)
+            schema["properties"] = resolved.reduce(into: [String: Any]()) { $0.merge($1["properties"] as? [String: Any] ?? [:]) { a, _ in a } }
+            schema["required"] = resolved.flatMap { $0["required"] as? [String] ?? [] }
+        }
         return schema
     }
 
@@ -161,10 +166,9 @@ import Testing
     // MARK: the checks
 
     @Test func jobsAndQueue() throws {
-        try Self.verify(JobOut(Self.jobView), "JobView", mirrors: [Self.jobView])
-        try Self.verify(JobListOut(jobs: [JobOut(Self.jobView)]), "JobList")
-        let queue = QueueStatus(paused: true, maxSlots: 1, running: 1, jobs: [Self.jobView])
-        try Self.verify(QueueOut(queue), "QueueStatus", mirrors: [queue])
+        try Self.verify(JobOut(Self.jobView), "JobView", mirrors: [JobSummary(Self.jobView)])
+        try Self.verify(JobListOut(jobs: [Self.jobView]), "JobList")
+        try Self.verify(QueueOut(QueueStatus(paused: true, maxSlots: 1, running: 1, jobs: [Self.jobView])), "QueueStatus")
         try Self.verify(MemoryWarningOut(memoryWarning: Self.memoryWarning), "MemoryWarningResult")
         try Self.verify(DeletedOut(deleted: true), "Deleted")
     }
@@ -175,7 +179,7 @@ import Testing
 
     @Test func modelsAndRecipes() throws {
         let model = try Self.model()
-        try Self.verify(model, "ModelView")
+        try Self.verify(ModelOut(model), "ModelView")
         try Self.verify(ModelListOut(models: [model]), "ModelList")
         try Self.verify(UninstalledOut(model: model), "Uninstalled")
         try Self.verify(Self.weights, "WeightsReport")

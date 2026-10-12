@@ -785,46 +785,41 @@ components:
           enum: [no_free_slot, memory, model_installing, model_not_installed, model_unsupported, weights_unverified, queue_paused]
         needed: { type: integer, description: Bytes the step needs (memory). }
         free: { type: integer, description: Bytes available (memory). }
-    Job:
+    JobSummary:
       type: object
-      required: [id, title, priority, position, source, state, force_start, current_step, created_at, updated_at]
+      description: A job as lists show it (queue_status, jobs_list) — where it stands and what it made. Credits stay in the app and in each export's credits file.
+      required: [id, title, state, priority, position, current_step, step_count, created_at, outputs, exports, export_pending]
       properties:
         id: { type: string }
         title: { type: string }
+        state: { $ref: '#/components/schemas/JobState' }
         priority: { $ref: '#/components/schemas/Priority' }
         position: { type: number }
-        source: { type: string, enum: [ui, http, mcp] }
-        state: { $ref: '#/components/schemas/JobState' }
         wait_reason: { $ref: '#/components/schemas/WaitReason' }
-        force_start: { type: boolean }
-        memory_accepted: { type: boolean, description: Submitted with accept_memory_warning; it may start only when nothing else runs. }
-        current_step: { type: integer }
         error: { type: string }
+        current_step: { type: integer, description: 0-based, of step_count. }
+        step_count: { type: integer }
+        recipe: { type: string, description: The current step's recipe. }
+        stage: { type: string, description: What the current step is doing now. }
+        fraction: { type: number }
         created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
-        export: { $ref: '#/components/schemas/ExportSpec' }
+        outputs: { type: array, items: { $ref: '#/components/schemas/OutputFile' }, description: The last step's outputs once the job succeeded. }
         exports: { type: array, items: { $ref: '#/components/schemas/ExportResult' }, description: One result per format from the latest export. }
         export_pending: { type: boolean, description: Succeeded; its export hasn't finished yet (jobs_wait waits for it). }
-        cleaned_up: { type: boolean, description: The job's files were deleted after a verified export; the record stays. }
-        credits: { type: array, items: { $ref: '#/components/schemas/Attribution' }, description: Who made each model this job runs, in step order. }
     Step:
       type: object
-      required: [job_id, idx, recipe, task, inputs, settings, state, outputs]
+      required: [recipe, task, state, inputs, settings]
       properties:
-        job_id: { type: string }
-        idx: { type: integer }
         recipe: { type: string }
         task: { type: string }
+        state: { $ref: '#/components/schemas/JobState' }
         inputs: { type: object, additionalProperties: { type: string }, description: Input name → path inside the job folder (or the text). }
         settings: { type: object, additionalProperties: { $ref: '#/components/schemas/SettingValue' } }
-        state: { $ref: '#/components/schemas/JobState' }
-        wait_reason: { $ref: '#/components/schemas/WaitReason' }
         stage: { type: string }
         fraction: { type: number }
-        outputs: { type: array, items: { type: string } }
         error: { type: string }
-        worker_id: { type: string }
         started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
     OutputFile:
@@ -835,18 +830,20 @@ components:
         uri: { type: string, description: 'MCP resource URI (lift://jobs/{id}/outputs/{file}).' }
         url: { type: string, description: 'HTTP path (/v1/jobs/{id}/outputs/{file}).' }
     JobView:
-      type: object
-      required: [job, steps, outputs]
-      properties:
-        attribution: { $ref: '#/components/schemas/Attribution', description: Who made the model behind the result (the last step's). }
-        job: { $ref: '#/components/schemas/Job' }
-        steps: { type: array, items: { $ref: '#/components/schemas/Step' } }
-        outputs: { type: array, items: { $ref: '#/components/schemas/OutputFile' }, description: The last step's outputs once the job succeeded. }
+      description: One job (jobs_get, submit, wait, cancel …) — the JobSummary fields plus its steps and export folder.
+      allOf:
+        - $ref: '#/components/schemas/JobSummary'
+        - type: object
+          required: [steps]
+          properties:
+            steps: { type: array, items: { $ref: '#/components/schemas/Step' } }
+            export: { $ref: '#/components/schemas/ExportSpec' }
+            cleaned_up: { type: boolean, description: The job's files were deleted after a verified export; the record stays. }
     JobList:
       type: object
       required: [jobs]
       properties:
-        jobs: { type: array, items: { $ref: '#/components/schemas/JobView' } }
+        jobs: { type: array, items: { $ref: '#/components/schemas/JobSummary' } }
     Deleted:
       type: object
       required: [deleted]
@@ -859,22 +856,66 @@ components:
         paused: { type: boolean }
         max_slots: { type: integer }
         running: { type: integer }
-        jobs: { type: array, items: { $ref: '#/components/schemas/JobView' } }
-    ModelView:
+        jobs: { type: array, items: { $ref: '#/components/schemas/JobSummary' } }
+    ModelStatus:
       type: object
-      required: [id, name, status, recipe]
+      additionalProperties: true
+      description: 'One key: not_installed, installing {phase: getting the code, setting up python, checking the install, downloading weights, verifying weights or cancelling}, installed {commit}, update_available {installed_commit, recipe_commit}, install_failed {command, exit_code, reason (the step and its cause in plain words)}, unsupported {reason}, weights_missing {_0: problems} or weights_corrupt {_0: problems}.'
+    ModelSummary:
+      type: object
+      description: A model as models_list shows it — what it is, whether it's ready, what it can do. models_get has the task settings.
+      required: [id, name, status, tasks]
       properties:
         id: { type: string }
         name: { type: string }
-        source: { type: string }
-        status:
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ModelStatus' }
+        tasks: { type: array, items: { type: string }, description: Task ids (jobs_submit's task). }
+        progress: { $ref: '#/components/schemas/InstallProgress' }
+        download:
           type: object
-          additionalProperties: true
-          description: 'One key: not_installed, installing {phase: getting the code, setting up python, checking the install, downloading weights, verifying weights or cancelling}, installed {commit}, update_available {installed_commit, recipe_commit}, install_failed {command, exit_code, reason (the step and its cause in plain words)}, unsupported {reason}, weights_missing {_0: problems} or weights_corrupt {_0: problems}.'
-        recipe:
-          type: object
-          additionalProperties: true
-          description: The recipe (recipe.yaml schema v1 as JSON); tasks[].settings is the settings schema.
+          required: [state]
+          properties:
+            state: { type: string, enum: [queued, downloading, paused, failed, done, cancelled] }
+            reason: { type: string }
+            link: { type: string, description: The page whose terms to accept for gated weights. }
+    ModelView:
+      type: object
+      description: One model (models_get, install …) — each task's inputs and settings (what jobs_submit needs), memory needs, pin, disk use and weights check.
+      required: [id, name, status, tasks, memory_gb, memory_overrides]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ModelStatus' }
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, label, modality, inputs, output, settings]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              modality: { type: string }
+              inputs:
+                type: array
+                items:
+                  type: object
+                  required: [name, type]
+                  properties:
+                    name: { type: string }
+                    type: { type: string }
+              output: { type: string }
+              settings: { type: array, items: { type: object, additionalProperties: true }, description: 'The settings schema (key, type, default, options or min/max, label, help).' }
+        memory_gb: { type: number, description: Memory a job usually needs with default settings. }
+        memory_overrides:
+          type: array
+          items:
+            type: object
+            required: [when, memory_gb]
+            properties:
+              when: { type: object, additionalProperties: { $ref: '#/components/schemas/SettingValue' } }
+              memory_gb: { type: number }
         pin: { type: string }
         disk_bytes: { type: integer }
         weights: { $ref: '#/components/schemas/WeightsReport' }
@@ -924,7 +965,7 @@ components:
       type: object
       required: [models]
       properties:
-        models: { type: array, items: { $ref: '#/components/schemas/ModelView' } }
+        models: { type: array, items: { $ref: '#/components/schemas/ModelSummary' } }
     Uninstalled:
       type: object
       properties:

@@ -104,11 +104,11 @@ enum Tools {
         "jobs_submit": { a, c in .admission(try await c.shared.submit(a.whole(SubmitWire.self), inputs: Inputs(workdir: c.lift.config.workdir), source: .mcp)) },
         "jobs_list": { a, c in
             .json(JobListOut(jobs: try await c.lift.jobsList(JobFilter(states: try a.decode("state"), recipe: try a.decode("recipe"),
-                                                                       modality: try a.decode("modality"), text: try a.decode("text"))).map(JobOut.init)))
+                                                                       modality: try a.decode("modality"), text: try a.decode("text")))))
         },
-        "jobs_list_interrupted": { _, c in .json(JobListOut(jobs: try await c.lift.jobsListInterrupted().map(JobOut.init))) },
+        "jobs_list_interrupted": { _, c in .json(JobListOut(jobs: try await c.lift.jobsListInterrupted())) },
         "jobs_resolve_interrupted": { a, c in
-            .json(JobListOut(jobs: try await c.lift.jobsResolveInterrupted(ids: try a.decode("ids"), action: try a.required("action")).map(JobOut.init)))
+            .json(JobListOut(jobs: try await c.lift.jobsResolveInterrupted(ids: try a.decode("ids"), action: try a.required("action"))))
         },
         "jobs_get": { a, c in .job(try await c.lift.jobsGet(a.required("id"))) },
         "jobs_delete": { a, c in .json(DeletedOut(deleted: try gated(await c.lift.jobsDelete(a.required("id"), confirm: a.flag("confirm"))))) },
@@ -124,15 +124,15 @@ enum Tools {
         "queue_pause": { _, c in .json(QueueOut(try await c.lift.queuePause())) },
         "queue_resume": { _, c in .json(QueueOut(try await c.lift.queueResume())) },
         "models_list": { _, c in .json(ModelListOut(models: try await c.lift.modelsList())) },
-        "models_get": { a, c in .json(try await c.lift.modelsGet(a.required("id"))) },
+        "models_get": { a, c in .json(ModelOut(try await c.lift.modelsGet(a.required("id")))) },
         "models_uninstall": { a, c in .json(UninstalledOut(model: try gated(await c.lift.modelsUninstall(a.required("id"), confirm: a.flag("confirm"))))) },
         "models_install": { a, c in
-            .json(try gated(await c.lift.modelsInstall(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"),
-                                                       downloadWeights: a.decode("download_weights") ?? true)))
+            .json(ModelOut(try gated(await c.lift.modelsInstall(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"),
+                                                                downloadWeights: a.decode("download_weights") ?? true))))
         },
-        "models_reinstall": { a, c in .json(try gated(await c.lift.modelsReinstall(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait")))) },
+        "models_reinstall": { a, c in .json(ModelOut(try gated(await c.lift.modelsReinstall(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"))))) },
         "models_set_pin": { a, c in
-            .json(try gated(await c.lift.modelsSetPin(a.required("id"), commit: a.required("commit"), confirm: a.flag("confirm"), wait: a.flag("wait"))))
+            .json(ModelOut(try gated(await c.lift.modelsSetPin(a.required("id"), commit: a.required("commit"), confirm: a.flag("confirm"), wait: a.flag("wait")))))
         },
         "models_check_upstream": { a, c in .json(try await c.lift.modelsCheckUpstream(a.required("id"))) },
         "models_install_log": { a, c in .text(try await c.lift.modelsInstallLog(a.required("id"))) },
@@ -142,10 +142,10 @@ enum Tools {
         },
         "jobs_export": { a, c in .job(try await c.lift.jobsExport(a.required("id"), formats: a.decode("formats"), dir: a.decode("dir"))) },
         "models_download_weights": { a, c in
-            .json(try gated(await c.lift.modelsDownloadWeights(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait"))))
+            .json(ModelOut(try gated(await c.lift.modelsDownloadWeights(a.required("id"), confirm: a.flag("confirm"), wait: a.flag("wait")))))
         },
         "models_verify_weights": { a, c in .json(try await c.lift.modelsVerifyWeights(a.required("id"))) },
-        "models_cancel_install": { a, c in .json(try await c.lift.modelsCancelInstall(a.required("id"))) },
+        "models_cancel_install": { a, c in .json(ModelOut(try await c.lift.modelsCancelInstall(a.required("id")))) },
         "downloads_list": { _, c in .json(DownloadListOut(downloads: await c.lift.downloadsList())) },
         "downloads_pause": { a, c in .json(try await c.lift.downloadsPause(a.required("id"))) },
         "downloads_resume": { a, c in .json(try await c.lift.downloadsResume(a.required("id"))) },

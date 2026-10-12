@@ -24,7 +24,7 @@ import Testing
             "steps": [["recipe": "test-cube", "task": "image_to_3d", "inputs": ["image_path": .string(try Fixtures.image())], "settings": .object(settings)]],
         ])
         #expect(isError != true)
-        return try #require((try json(content)["job"] as? [String: Any])?["id"] as? String)
+        return try #require(try json(content)["id"] as? String)
     }
 
     @Test func jobsExportReExportsAFinishedJob() async throws {
@@ -34,7 +34,7 @@ import Testing
         let dir = try Fixtures.tempDir()
         let (content, isError) = try await client.callTool(name: "jobs_export", arguments: ["id": .string(id), "formats": ["glb"], "dir": .string(dir.path)])
         #expect(isError != true)
-        let exports = try #require((try json(content)["job"] as? [String: Any])?["exports"] as? [[String: Any]])
+        let exports = try #require(try json(content)["exports"] as? [[String: Any]])
         #expect((exports.first?["path"] as? String)?.hasPrefix(dir.path) == true)
     }
 
@@ -52,7 +52,7 @@ import Testing
                                                            meta: Metadata(progressToken: .unique()))
         #expect(isError != true)
         let view = try json(content)
-        #expect((view["job"] as? [String: Any])?["state"] as? String == "succeeded")
+        #expect(view["state"] as? String == "succeeded")
         let output = try #require((view["outputs"] as? [[String: Any]])?.first)
         let uri = try #require(output["uri"] as? String)
         #expect((output["path"] as? String)?.hasSuffix("cube.glb") == true)
@@ -77,7 +77,7 @@ import Testing
         let (content, isError) = try await client.callTool(name: "jobs_wait", arguments: ["id": .string(id), "timeout_seconds": 120],
                                                            meta: Metadata(progressToken: .unique()))
         #expect(isError != true)
-        #expect((try json(content)["job"] as? [String: Any])?["state"] as? String == "succeeded")
+        #expect(try json(content)["state"] as? String == "succeeded")
     }
 
     @Test func subscribersHearAboutJobChanges() async throws {

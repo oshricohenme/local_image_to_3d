@@ -18,10 +18,10 @@ import Testing
         let http = HTTP(base: base)
         let submit = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()], settings: ["size": 2])], "title": "cube"])
         #expect(submit.status == 202)
-        let id = try #require((submit.json["job"] as? [String: Any])?["id"] as? String)
+        let id = try #require(submit.json["id"] as? String)
         #expect(submit.response.value(forHTTPHeaderField: "Location") == "/v1/jobs/\(id)")
         let done = try await wait(http, id)
-        #expect((done["job"] as? [String: Any])?["state"] as? String == "succeeded")
+        #expect(done["state"] as? String == "succeeded")
         let output = try #require((done["outputs"] as? [[String: Any]])?.first)
         #expect(output["uri"] as? String == "lift://jobs/\(id)/outputs/cube.glb")
         #expect((output["path"] as? String)?.hasSuffix("/steps/0/cube.glb") == true)
@@ -35,26 +35,26 @@ import Testing
         let dir = try Fixtures.tempDir()
         let submit = try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()])], "title": "exported",
                                                                      "export": ["dir": dir.path, "formats": ["glb"], "cleanup_after_export": false]])
-        let id = try #require((submit.json["job"] as? [String: Any])?["id"] as? String)
+        let id = try #require(submit.json["id"] as? String)
         let done = try await wait(http, id)
-        let job = try #require(done["job"] as? [String: Any])
+        let job = done
         #expect((job["exports"] as? [[String: Any]])?.first?["path"] as? String == dir.appending(path: "exported.glb").path)
         #expect(job["export_pending"] as? Bool == false)
-        #expect((done["attribution"] as? [String: Any])?["credit"] as? String == "Test Cube (Lift test fixture) by Lift (MIT)")
+        #expect(done["attribution"] == nil && done["credits"] == nil)  // lean answers: credits stay in the app and credits files
         let again = try await http.call("POST", "/v1/jobs/\(id)/export", json: ["formats": ["obj"]])
         #expect(again.status == 200)
-        #expect(((again.json["job"] as? [String: Any])?["exports"] as? [[String: Any]])?.first?["format"] as? String == "obj")
+        #expect((again.json["exports"] as? [[String: Any]])?.first?["format"] as? String == "obj")
         #expect(try await http.call("GET", "/v1/models/test-cube/readme").status == 404)  // no upstream repo, no network
     }
 
     @Test func waitWithZeroTimeoutAnswersAtOnce() async throws {
         let (_, _, base) = try await ServerFixture.shared.get()
         let http = HTTP(base: base)
-        let id = try #require((try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()], settings: ["delay": 2])]])
-            .json["job"] as? [String: Any])?["id"] as? String)
+        let id = try #require(try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()], settings: ["delay": 2])]])
+            .json["id"] as? String)
         let now = try await http.call("GET", "/v1/jobs/\(id)/wait?timeout_seconds=0").json
-        #expect(["queued", "waiting", "loading", "running"].contains((now["job"] as? [String: Any])?["state"] as? String ?? ""))
-        #expect((try await wait(http, id)["job"] as? [String: Any])?["state"] as? String == "succeeded")
+        #expect(["queued", "waiting", "loading", "running"].contains(now["state"] as? String ?? ""))
+        #expect(try await wait(http, id)["state"] as? String == "succeeded")
     }
 
     @Test func multipartAndBase64Uploads() async throws {
@@ -78,10 +78,10 @@ import Testing
         #expect(base64.status == 202)
 
         for (reply, name) in [(multipart, "upload.png"), (base64, "inline.png")] {
-            let job = reply.json["job"] as? [String: Any]
+            let job: [String: Any]? = reply.json
             let image = ((reply.json["steps"] as? [[String: Any]])?.first?["inputs"] as? [String: String])?["image"]
             #expect(image?.hasPrefix(lift.config.workdir.appending(path: "jobs").path) == true && image?.hasSuffix("/\(name)") == true)
-            #expect((try await wait(http, try #require(job?["id"] as? String))["job"] as? [String: Any])?["state"] as? String == "succeeded")
+            #expect(try await wait(http, try #require(job?["id"] as? String))["state"] as? String == "succeeded")
         }
         let uploads = (try? FileManager.default.contentsOfDirectory(atPath: lift.config.workdir.appending(path: "uploads").path)) ?? []
         #expect(uploads.isEmpty)
@@ -104,8 +104,8 @@ import Testing
     @Test func confirmGatesAnswer409AndChangeNothing() async throws {
         let (_, _, base) = try await ServerFixture.shared.get()
         let http = HTTP(base: base)
-        let id = try #require((try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()])], "title": "keep me"])
-            .json["job"] as? [String: Any])?["id"] as? String)
+        let id = try #require(try await http.call("POST", "/v1/jobs", json: ["steps": [cube(["image_path": try Fixtures.image()])], "title": "keep me"])
+            .json["id"] as? String)
         _ = try await wait(http, id)
         let gate = try await http.call("DELETE", "/v1/jobs/\(id)")
         #expect(gate.status == 409 && gate.json["error"] as? String == "confirmation_required")
@@ -188,8 +188,8 @@ import Testing
         var accepted = job
         accepted["accept_memory_warning"] = true
         let queued = try await http.call("POST", "/v1/jobs", json: accepted)
-        #expect(queued.status == 202 && (queued.json["job"] as? [String: Any])?["memory_accepted"] as? Bool == true)
-        #expect(try await lift.jobsList().count == 1)
+        #expect(queued.status == 202)
+        #expect(try await lift.jobsList().map(\.job.memoryAccepted) == [true])
         await server.stop()
     }
 
@@ -238,7 +238,7 @@ import Testing
         let job: [String: Any] = ["steps": [["recipe": "test-cube", "task": "image_to_3d", "inputs": ["image_path": try Fixtures.image()]]],
                                   "accept_memory_warning": true]
         let http = HTTP(base: URL(string: "http://127.0.0.1:\(port)")!)
-        let id = try #require((try await http.call("POST", "/v1/jobs", json: job).json["job"] as? [String: Any])?["id"] as? String)
+        let id = try #require(try await http.call("POST", "/v1/jobs", json: job).json["id"] as? String)
         let wait = Task { try? await http.call("GET", "/v1/jobs/\(id)/wait?timeout_seconds=3600") }
         try await Task.sleep(for: .milliseconds(300))
         let start = ContinuousClock.now
