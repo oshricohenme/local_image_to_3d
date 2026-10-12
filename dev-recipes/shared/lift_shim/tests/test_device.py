@@ -155,3 +155,24 @@ def test_load_cuda_checkpoint(cuda_checkpoint, kw):
 def test_load_cuda_checkpoint_explicit_cpu_stays_cpu(cuda_checkpoint):
     p, t = cuda_checkpoint
     assert torch.load(p, map_location="cpu")["w"].device.type == "cpu"
+
+
+@pytest.mark.skipif(TARGET != "mps", reason="float64 is only refused on MPS")
+@pytest.mark.parametrize("move", [
+    lambda t: t.to("mps"),                        # Lightning's batch_to: data.to(device)
+    lambda t: t.to(torch.device("mps"), non_blocking=True),
+    lambda t: t.cuda(),
+    lambda t: t.to("cuda"),
+])
+def test_float64_reaches_mps_as_float32(move):
+    # MPS has no float64: a CUDA model's float64 data (numpy arrays) arrives as float32 instead of failing.
+    t = move(torch.arange(4, dtype=torch.float64))
+    assert t.device.type == "mps" and t.dtype == torch.float32
+    assert t.cpu().tolist() == [0.0, 1.0, 2.0, 3.0]
+
+
+@pytest.mark.skipif(TARGET != "mps", reason="float64 is only refused on MPS")
+def test_float64_factories_on_mps_become_float32():
+    assert torch.zeros(3, dtype=torch.float64, device="cuda").dtype == torch.float32
+    assert torch.zeros(2, dtype=torch.float64).to(dtype=torch.float32, device="mps").dtype == torch.float32  # unchanged
+    assert torch.zeros(2, dtype=torch.float64).dtype == torch.float64  # on the CPU float64 stays

@@ -67,15 +67,28 @@ class _CudaRedirect(TorchFunctionMode):
             # torch.device("cuda"[, index]) itself dispatches here; drop the CUDA ordinal
             return torch.device(_target)
         if func is torch.Tensor.cuda:
-            # Tensor.cuda(device=None, non_blocking=False, ...): any CUDA ordinal → target
-            return args[0].to(_target, non_blocking=kwargs.get("non_blocking", False))
+            # Tensor.cuda(device=None, non_blocking=False, ...): any CUDA ordinal → target (a .to, below)
+            func, args, kwargs = torch.Tensor.to, (args[0], _target), {"non_blocking": kwargs.get("non_blocking", False)}
         if "device" in kwargs:
             dev = kwargs["device"]
             kwargs["device"] = torch.device(_target) if isinstance(dev, int) or _is_cuda(dev) else dev
         args = tuple(_map(a) for a in args)
         if getattr(func, "__name__", "") == "scaled_dot_product_attention":
             return _sdpa(func, args, kwargs)
-        return func(*args, **kwargs)
+        try:
+            return func(*args, **kwargs)
+        except TypeError as e:
+            # MPS has no float64. CUDA code moves float64 data (numpy arrays) onto the GPU freely; here it
+            # goes as float32, the precision MPS has. Only a call MPS just refused for float64 is retried.
+            if "float64" not in str(e) or _target != "mps":
+                raise
+            if kwargs.get("dtype") is torch.float64:
+                kwargs["dtype"] = torch.float32
+            elif args and isinstance(args[0], torch.Tensor) and args[0].dtype == torch.float64:
+                args = (args[0].to(torch.float32), *args[1:])
+            else:
+                raise
+            return func(*args, **kwargs)
 
 
 _tls = threading.local()
