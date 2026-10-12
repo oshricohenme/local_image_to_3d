@@ -223,6 +223,7 @@ from the same folders.
 Multi-view input (`image_set`) accepts any of: a 4-view preset (front/right/back/left slots; Lift writes the
 upstream example `transforms.json` with your file names), a folder that already contains
 `transforms.json`, or N images plus an orbit (count, elevation, FOV), for which Lift writes evenly spaced cameras.
+In Generate, a set is a folder, or photos (png/jpg/jpeg/webp) picked or dropped together, which make one set.
 
 ## 4a. Attribution
 

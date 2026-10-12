@@ -197,6 +197,18 @@ extension Fixtures {
         #expect(await fieldErrors { _ = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": parent])])).accepted() }
                 == ["steps[0].inputs.views"])
     }
+
+    /// A set of photos picked one by one (Generate links them into a folder): the job keeps the photos themselves.
+    @Test func linkedPhotosAreCopiedAsFiles() async throws {
+        let lift = try await Fixtures.lift(bundle: try bundle())
+        let photos = try Fixtures.tempDir(), views = try Fixtures.tempDir()
+        try Data([7]).write(to: photos.appending(path: "front.png"))
+        try FileManager.default.createSymbolicLink(at: views.appending(path: "front.png"), withDestinationURL: photos.appending(path: "front.png"))
+        let v = try await lift.jobsSubmit(SubmitRequest(steps: [StepRequest(recipe: "views-cube", task: "image_to_3d", inputs: ["views": views.path])])).accepted()
+        let copied = URL(filePath: try #require(v.steps[0].inputs["views"])).appending(path: "front.png")
+        #expect(try FileManager.default.attributesOfItem(atPath: copied.path)[.type] as? FileAttributeType == .typeRegular)
+        #expect(try Data(contentsOf: copied) == Data([7]))
+    }
 }
 
 

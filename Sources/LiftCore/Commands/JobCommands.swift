@@ -162,7 +162,7 @@ extension Lift {
     }
 
     /// Copies each step's file inputs into `<jobDir>/inputs/<step>-<name>/`; an image set copies only its
-    /// listed files. Returns each step's input map. Runs off the actor: inputs can be large.
+    /// listed files, linked photos as the files themselves. Returns each step's input map. Runs off the actor: inputs can be large.
     nonisolated static func copyInputs(_ plan: [(StepRequest, [TaskInput])], into jobDir: URL) throws -> [[String: String]] {
         let fm = FileManager.default
         return try plan.enumerated().map { i, entry in
@@ -174,7 +174,7 @@ extension Lift {
                 let dest = jobDir.appending(path: "inputs/\(i)-\(input.name)/\(source.lastPathComponent)")
                 if input.type == .imageSet {
                     try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-                    for f in ImageSet.files(source) ?? [] { try fm.copyItem(at: f, to: dest.appending(path: f.lastPathComponent)) }
+                    for f in ImageSet.files(source) ?? [] { try fm.copyItem(at: f.resolvingSymlinksInPath(), to: dest.appending(path: f.lastPathComponent)) }
                 } else {
                     try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try fm.copyItem(at: source, to: dest)

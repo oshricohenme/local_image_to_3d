@@ -143,16 +143,33 @@ public final class GenerateModel {
     /// The first input's type, which decides what the drop zone takes.
     public var firstInput: TaskInput? { task(current)?.inputs.first }
 
-    /// Adds dropped or chosen files that fit the first input (folders for `image_set`); returns how many.
+    /// Adds dropped or chosen files that fit the first input; returns how many. For `image_set`, each folder is
+    /// a set, and the photos added together make one more: a folder of links to them, named "N photos".
     @discardableResult
     public func add(_ urls: [URL]) -> Int {
         guard let type = firstInput?.type else { return 0 }
         let before = files.count
+        var photos: [URL] = []
         for url in urls where !files.contains(url) {
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            if type == .imageSet ? isDir : !isDir && type.fileExtensions.contains(url.pathExtension.lowercased()) { files.append(url) }
+            let fits = IOType.image.fileExtensions.contains(url.pathExtension.lowercased())
+            if type == .imageSet {
+                if isDir { files.append(url) } else if fits, !photos.contains(url) { photos.append(url) }
+            } else if !isDir && type.fileExtensions.contains(url.pathExtension.lowercased()) {
+                files.append(url)
+            }
         }
+        if !photos.isEmpty, let set = Self.photoSet(photos) { files.append(set) }
         return files.count - before
+    }
+
+    /// A temporary folder of links to `photos` (the job copies the photos themselves). Same-named photos keep the first.
+    static func photoSet(_ photos: [URL]) -> URL? {
+        let fm = FileManager.default
+        let set = fm.temporaryDirectory.appending(path: "Lift photo sets/\(UUID().uuidString)/\(photos.count) photo\(photos.count == 1 ? "" : "s")")
+        guard (try? fm.createDirectory(at: set, withIntermediateDirectories: true)) != nil else { return nil }
+        for p in photos { try? fm.createSymbolicLink(at: set.appending(path: p.lastPathComponent), withDestinationURL: p) }
+        return set
     }
 
     /// Prefills the form to use `path` (an output) as the input of `ref` ("Use as input for…").

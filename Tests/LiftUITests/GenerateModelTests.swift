@@ -54,6 +54,21 @@ import Testing
         #expect(g.followUps.contains(TaskRef(recipe: "unirig", task: "rig")))  // rig what Pixal3D makes
     }
 
+    /// Multi-view takes photos too: the ones picked or dropped together make one set (one job); a folder is one set.
+    @Test func photosPickedTogetherMakeOneMultiViewSet() async throws {
+        let g = GenerateModel()
+        g.models = try await UIFixtures.lift(bundle: UIFixtures.devRecipes).modelsList()
+        g.kind = g.chips("3d").first { $0.kind.inputs == [.imageSet] }?.kind
+        g.recipe = "pixal3d"
+        let front = try UIFixtures.file("front.png"), back = try UIFixtures.file("back.JPG"), folder = try UIFixtures.tempDir()
+        #expect(g.add([front, back, try UIFixtures.file("m.glb")]) == 1)
+        #expect(g.add([folder]) == 1)
+        let set = try #require(g.files.first)
+        #expect(set.lastPathComponent == "2 photos" && g.requests.count == 2)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: set.path).sorted() == ["back.JPG", "front.png"])
+        #expect(ImageSet.problem(set, workdir: nil) == nil)
+    }
+
     @Test func exportOptionsFollowTheSettingsUntilChangedHere() async throws {
         let g = try await model()
         g.recipe = "test-cube"

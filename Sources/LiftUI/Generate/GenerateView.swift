@@ -102,11 +102,12 @@ struct GenerateView: View {
     }
 
     func dropZone(_ input: TaskInput) -> some View {
-        let what = input.type == .imageSet ? "folders (one multi-view set each)" : input.type.fileExtensions.joined(separator: ", ")
+        let what = input.type == .imageSet ? "photos (\(IOType.image.fileExtensions.joined(separator: ", ")), added together as one set, or folders of them"
+            : input.type.fileExtensions.joined(separator: ", ")
         return VStack(spacing: 8) {
             Image(systemName: "square.and.arrow.down").font(.largeTitle)
             Text("Drop \(Format.io(input.type).lowercased()) files here").font(.headline)
-            Text("Accepts \(what) · one job per file").font(.caption).foregroundStyle(.secondary)
+            Text("Accepts \(what) · one job per \(input.type == .imageSet ? "set" : "file")").font(.caption).foregroundStyle(.secondary)
             Button("Choose Files…") { choosing = true }
         }
         .frame(maxWidth: .infinity, minHeight: 160)
@@ -118,7 +119,7 @@ struct GenerateView: View {
     }
 
     func contentTypes(_ type: IOType) -> [UTType] {
-        type == .imageSet ? [.folder] : type.fileExtensions.compactMap { UTType(filenameExtension: $0) }
+        (type == .imageSet ? [.folder] : []) + (type == .imageSet ? IOType.image : type).fileExtensions.compactMap { UTType(filenameExtension: $0) }
     }
 
     /// Inputs after the first: one fixed value each (a path, or text).
