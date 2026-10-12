@@ -115,20 +115,20 @@ public struct Installer: Sendable {
     }
 
     /// What an install builds from. Anything else in a recipe (its launcher and files, settings, phases,
-    /// progress names, messages) is only how the model runs, and is refreshed without reinstalling.
+    /// progress names, messages, the shim's patches and env) is only how the model runs, refreshed without reinstalling.
     static func installDigest(_ r: Recipe) -> String {
         struct Inputs: Encodable {
             var repo, commit: String?
             var python: String
             var install, substitutes, brew: [String]
-            var shim: Recipe.Shim?
+            var usesShim: Bool  // installs lift_shim; its settings only act at run time
             var metalToolchain: Bool
             var weights: [Recipe.Weight]
         }
         let e = JSONEncoder()
         e.outputFormatting = .sortedKeys
         let data = (try? e.encode(Inputs(repo: r.repo, commit: r.commit, python: r.python, install: r.install, substitutes: r.substitutes,
-                                         brew: r.brew, shim: r.shim, metalToolchain: r.metalToolchain, weights: r.weights))) ?? Data()
+                                         brew: r.brew, usesShim: r.shim != nil, metalToolchain: r.metalToolchain, weights: r.weights))) ?? Data()
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -146,6 +146,9 @@ public struct Installer: Sendable {
             try? fm.removeItem(at: staged)
             try fm.copyItem(at: entry.directory, to: staged)
             _ = try fm.replaceItemAt(installedRecipeDir(id), withItemAt: staged)
+            if let shim = try ShimConfig.build(entry.recipe, registry: Substitute.registry(shared: entry.shared)) {
+                try shim.json.write(to: shimURL(id), atomically: true, encoding: .utf8)
+            }
             state.digest = Self.digest(entry.directory)
             try writeState(state, id: id)
             return true

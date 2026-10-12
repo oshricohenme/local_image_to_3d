@@ -161,6 +161,16 @@ import Testing
         #expect(try String(contentsOf: copy.appending(path: "launcher.py"), encoding: .utf8).contains("['x']"))
         #expect(FileManager.default.fileExists(atPath: copy.appending(path: "files/helper.py").path))
 
+        // The shim's settings (env, patches) only act while the model runs: refreshed in place, shim.json too.
+        let shimYAML = pixalYAML.replacingOccurrences(of: "env: { ATTN_BACKEND: sdpa }", with: "env: { ATTN_BACKEND: sdpa, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: \"1\" }")
+        let newShim = try source(shimYAML)
+        try FileManager.default.removeItem(at: newShim.directory)
+        try FileManager.default.copyItem(at: renamed.directory, to: newShim.directory)
+        try shimYAML.write(to: newShim.directory.appending(path: "recipe.yaml"), atomically: true, encoding: .utf8)
+        #expect(inst.refreshRecipe(newShim, pin: nil))
+        #expect(try String(contentsOf: inst.shimURL("pixal3d"), encoding: .utf8).contains(#""TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD":"1""#))
+        #expect(inst.workerEnvironment(newShim.recipe)["LIFT_SHIM"]?.contains("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD") == true)
+
         let newInstall = try source(pixalYAML.replacingOccurrences(of: "  - uv pip install torch torchvision", with: "  - uv pip install torch torchvision numpy"))
         #expect(!inst.refreshRecipe(newInstall, pin: nil))
         #expect(inst.status(id: "pixal3d", source: newInstall, pin: nil) == .updateAvailable(installedCommit: entry.recipe.commit, recipeCommit: entry.recipe.commit))

@@ -12,7 +12,10 @@ repo: https://github.com/VAST-AI-Research/UniRig
 commit: 6793c6640ff01c8fb389f3993434124bb43d2933
 python: "3.11"
 platform: { status: supported }
-shim: { patches: [transformers_fa2_to_sdpa] }   # transformers 4.51 raises on flash_attention_2 without CUDA
+# transformers 4.51 raises on flash_attention_2 without CUDA. The skin checkpoint pickles a box.Box (its
+# hyperparameters), which torch >= 2.6's weights_only loader can't rebuild even when allowed; Lightning leaves
+# weights_only unset, so this lets it load UniRig's own pinned, hash-verified checkpoints the way upstream expects.
+shim: { patches: [transformers_fa2_to_sdpa], env: { TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: "1" } }
 brew: [libusb]   # open3d (merge step) links /opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib
 install:
   - uv pip install torch==2.14.1 torchvision==0.29.1
