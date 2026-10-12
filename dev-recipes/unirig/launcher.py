@@ -59,13 +59,27 @@ def _stage(job, name, fraction, script, args, expected):
     cmd = ["bash", script] + [_arg(a) for a in args]
     print("$ " + " ".join(cmd), flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    said = None
     for line in proc.stdout:  # universal newlines: tqdm's \r updates arrive as lines
         sys.stdout.write(line)
+        said = _message(line) or said
     code = proc.wait()
+    why = f": UniRig said \"{said}\"" if said else "; see the job log"
     if code != 0:
-        raise RuntimeError(f"UniRig {os.path.basename(script)} exited with code {code}")
+        raise RuntimeError(f"UniRig {os.path.basename(script)} exited with code {code}{why}")
     if not os.path.isfile(expected):
-        raise RuntimeError(f"UniRig {os.path.basename(script)} finished without writing {os.path.basename(expected)}; see the job log")
+        # Upstream catches some failures itself and prints only the message (e.g. its FBX writer), then goes on.
+        raise RuntimeError(f"UniRig {os.path.basename(script)} finished without writing {os.path.basename(expected)}{why}")
+
+
+def _message(line):
+    """A line upstream said something with: not a progress bar, a warning (or its source line) or the closing "done"."""
+    text = line.strip()
+    if not text or text == "done" or text.startswith("$ ") or line.startswith((" ", "\t")):
+        return None
+    if "%|" in text or "it/s]" in text or "Warning" in text:
+        return None
+    return text[:300]
 
 
 def _arg(value):

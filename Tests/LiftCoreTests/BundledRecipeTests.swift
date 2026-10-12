@@ -32,6 +32,17 @@ import Testing
         #expect(try shim("trellis2-mac") == nil)
     }
 
+    /// UniRig's FBX writer catches its own error and prints only the message: the launcher passes that on, and a
+    /// skeleton with too few bones gets its own plain message instead of the generic skinning one.
+    @Test func uniRigSaysWhyTheSkinStepFailed() throws {
+        let r = try entry("unirig").recipe
+        let few = #"RuntimeError: UniRig generate_skin.sh finished without writing skin.fbx: UniRig said "index 3 is out of bounds for axis 1 with size 3""#
+        #expect(r.plainError(few)?.hasPrefix("UniRig's skeleton for this model has only a few bones") == true)
+        let other = #"RuntimeError: UniRig generate_skin.sh finished without writing skin.fbx: UniRig said "something else""#
+        #expect(r.plainError(other)?.hasPrefix("UniRig made a skeleton but couldn't compute the skinning") == true)
+        #expect(r.failureMessage(other).contains(#"UniRig said "something else""#))  // the details keep upstream's words
+    }
+
     /// Every git clone is followed by a checkout of a full sha, and every git+https requirement names one.
     @Test func everyUpstreamSourceIsPinned() throws {
         let registry = try Substitute.registry(shared: Fixtures.devRecipes.appending(path: "shared"))
