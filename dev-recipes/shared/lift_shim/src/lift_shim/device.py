@@ -23,9 +23,27 @@ def _map(obj):
     return torch.device(_target) if _is_cuda(obj) else obj
 
 
+# The ops CUDA autocast casts to its dtype (its lower-precision list); in a float32 region they get fp32 inputs.
+_AUTOCAST_OPS = {
+    "conv1d", "conv2d", "conv3d", "conv_transpose1d", "conv_transpose2d", "conv_transpose3d", "convolution",
+    "prelu", "addmm", "addmv", "addr", "matmul", "__matmul__", "__rmatmul__", "einsum", "mm", "mv", "linear",
+    "addbmm", "baddbmm", "bmm", "chain_matmul", "multi_dot", "scaled_dot_product_attention",
+}
+
+
+def _to_fp32(obj):
+    if isinstance(obj, torch.Tensor) and obj.dtype in (torch.float16, torch.bfloat16):
+        return obj.float()
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_to_fp32(o) for o in obj)
+    return obj
+
+
 class _CudaRedirect(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = dict(kwargs or {})
+        if getattr(_tls, "fp32", 0) and getattr(func, "__name__", "") in _AUTOCAST_OPS:
+            args, kwargs = _to_fp32(args), {k: _to_fp32(v) for k, v in kwargs.items()}
         if func is torch.device and args and _is_cuda(args[0]):
             # torch.device("cuda"[, index]) itself dispatches here; drop the CUDA ordinal
             return torch.device(_target)
@@ -92,14 +110,30 @@ def _patch_cuda_module() -> None:
     c.empty_cache, c.synchronize, c.memory_allocated = empty_cache, synchronize, memory_allocated
     c.manual_seed, c.manual_seed_all, c.current_device = manual_seed, manual_seed_all, current_device
 
-    original_init = torch.autocast.__init__
+    original_init, original_enter, original_exit = torch.autocast.__init__, torch.autocast.__enter__, torch.autocast.__exit__
 
-    def autocast_init(self, device_type, *a, **kw):
+    # CUDA runs an enabled float32 autocast region in fp32 (MoGe-2 forces its output projection so, inside
+    # an fp16 region). MPS and CPU reject float32 and turn autocast off, leaving half activations against
+    # float weights. So: off, quietly, and _CudaRedirect gives the region's autocast ops fp32 inputs.
+    def autocast_init(self, device_type, dtype=None, enabled=True, cache_enabled=None):
         if device_type == "cuda":
             device_type = _target
-        original_init(self, device_type, *a, **kw)
+        self._lift_fp32 = enabled and dtype == torch.float32 and device_type != "cuda"
+        if self._lift_fp32:
+            dtype, enabled = None, False
+        original_init(self, device_type, dtype=dtype, enabled=enabled, cache_enabled=cache_enabled)
 
-    torch.autocast.__init__ = autocast_init
+    def autocast_enter(self):
+        if getattr(self, "_lift_fp32", False):
+            _tls.fp32 = getattr(_tls, "fp32", 0) + 1
+        return original_enter(self)
+
+    def autocast_exit(self, *exc):
+        if getattr(self, "_lift_fp32", False):
+            _tls.fp32 -= 1
+        return original_exit(self, *exc)
+
+    torch.autocast.__init__, torch.autocast.__enter__, torch.autocast.__exit__ = autocast_init, autocast_enter, autocast_exit
 
     # torch.load: every map_location form (None, str, device, dict, callable returning None) ends in
     # this module-global lookup, so CUDA-saved checkpoints land on the target. Patching torch.load

@@ -68,6 +68,20 @@ def test_autocast_cuda():
     assert out.device.type == TARGET
 
 
+def test_float32_autocast_inside_half_autocast_runs_in_float32():
+    # MoGe-2 forces its output projection to fp32 this way. MPS rejects a float32 autocast and turns
+    # autocast off instead, so the half activations met float weights: "Input type (c10::Half) and bias
+    # type (float) should be the same".
+    conv = torch.nn.Conv2d(4, 2, 1).to("cuda")
+    x = torch.randn(1, 4, 8, 8, device="cuda")
+    with torch.autocast("cuda", dtype=torch.float16):
+        outer = conv(x).dtype
+        with torch.autocast("cuda", dtype=torch.float32):
+            assert conv(x.half()).dtype == torch.float32
+        assert conv(x).dtype == outer  # the half region resumes
+    assert conv(x.half().float()).dtype == torch.float32
+
+
 def test_new_thread_redirected():
     result = {}
 
