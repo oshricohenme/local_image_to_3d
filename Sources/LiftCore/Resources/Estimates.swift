@@ -14,12 +14,7 @@ public enum Estimates {
 
     /// `memory_gb`, or the first `memory_overrides` entry whose `when` all match.
     public static func recipeBytes(_ recipe: Recipe, settings: [String: SettingValue]) -> Int {
-        let match = recipe.resources.memoryOverrides.first { o in
-            o.when.allSatisfy { key, value in
-                guard let s = settings[key] else { return false }
-                return s == value || (s.number != nil && s.number == value.number)
-            }
-        }
+        let match = recipe.resources.memoryOverrides.first { RecipeTask.matches($0.when, settings) }
         return Int((match?.memoryGB ?? recipe.resources.memoryGB) * gb)
     }
 

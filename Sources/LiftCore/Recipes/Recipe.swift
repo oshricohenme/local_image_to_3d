@@ -40,6 +40,8 @@ public struct RecipeTask: Codable, Sendable, Equatable {
     /// Informational (`module:function` inside repo/); the launcher decides how to call upstream.
     public var entry: String?
     public var settings: [SettingDef]
+    /// The job's phases in the order the launcher reports them (its `[Stage]` names), for the Queue's "Stage k of N".
+    public var phases: [Phase]
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,7 +52,40 @@ public struct RecipeTask: Codable, Sendable, Equatable {
         output = try c.decode(IOType.self, forKey: .output)
         entry = try c.decodeIfPresent(String.self, forKey: .entry)
         settings = try c.decodeIfPresent([SettingDef].self, forKey: .settings) ?? []
+        phases = try c.decodeIfPresent([Phase].self, forKey: .phases) ?? []
     }
+
+    /// Where a stage stands among the phases these settings run; nil when the stage isn't one of them.
+    public func phase(of stage: String?, settings: [String: SettingValue]) -> PhasePosition? {
+        guard let stage else { return nil }
+        let run = phases.filter { p in
+            p.when.map { Self.matches($0, settings) } ?? true && !(p.unless.map { Self.matches($0, settings) } ?? false)
+        }
+        guard let i = run.firstIndex(where: { (try? Regex($0.match)).map(stage.contains) ?? false }) else { return nil }
+        return PhasePosition(number: i + 1, count: run.count)
+    }
+
+    /// Every key has that value in the settings (numbers compare as numbers).
+    public static func matches(_ when: [String: SettingValue], _ settings: [String: SettingValue]) -> Bool {
+        when.allSatisfy { key, value in
+            guard let s = settings[key] else { return false }
+            return s == value || (s.number != nil && s.number == value.number)
+        }
+    }
+}
+
+/// One phase of a task's job: `match` (a regular expression) finds it in the stage name the launcher reports;
+/// `when` / `unless` (setting values) say for which settings it runs.
+public struct Phase: Codable, Sendable, Equatable {
+    public var match: String
+    public var when: [String: SettingValue]?
+    public var unless: [String: SettingValue]?
+}
+
+public struct PhasePosition: Sendable, Equatable {
+    public var number: Int
+    public var count: Int
+    public init(number: Int, count: Int) { (self.number, self.count) = (number, count) }
 }
 
 /// `recipe.yaml`, schema v1 (spec §4), plus `shim`, `brew`, `stages`, `developer` and `weights[].revision`

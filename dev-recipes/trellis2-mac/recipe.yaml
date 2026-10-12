@@ -109,3 +109,17 @@ tasks:
       - { key: no_texture, label: Shape only, type: bool, default: false, group: basic, help: "Skip the colors and textures: much faster, gray model." }
       - { key: texture_size, label: Texture size, type: enum, options: [512, 1024, 2048], default: 1024, group: advanced, help: "Bigger textures look sharper and take longer to bake." }
       - { key: steps, label: Sampling steps, type: int, default: 0, min: 0, group: advanced, help: "More steps can add detail and take longer. 0 uses the model's own setting (usually 12)." }
+    # In launcher order (its [Stage] names): the Queue shows "Stage k of N". Shape only skips the bake for a plain save.
+    phases:
+      - { match: "^Removing the background" }
+      - { match: "^Reading the photo" }
+      - { match: "^Laying out the rough 3D shape" }
+      - { match: "^Sculpting the shape" }
+      - { match: "^Painting the texture" }
+      - { match: "^Decoding the 3D shape" }
+      - { match: "^Decoding the texture" }
+      - { match: "^Baking the textures", unless: { no_texture: true } }
+      - { match: "^Simplifying the mesh", unless: { no_texture: true } }
+      - { match: "^Saving the GLB file", unless: { no_texture: true } }
+      - { match: "^Saving the 3D file with vertex colours", when: { no_texture: true } }
+      - { match: "^Writing the OBJ file" }

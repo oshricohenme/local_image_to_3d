@@ -26,6 +26,14 @@ import Testing
         #expect(Format.stage("Sampling texture SLat", fraction: 1) == "Sampling texture SLat done · still working…")
     }
 
+    /// No "Step 1 of 1": a one-model job shows the recipe's real phase count, a chain also its step.
+    @Test func thePositionCountsRealPhasesNotOneStep() {
+        #expect(Format.position(step: 0, of: 1, phase: nil) == nil)
+        #expect(Format.position(step: 0, of: 1, phase: PhasePosition(number: 3, count: 11)) == "Stage 3 of 11")
+        #expect(Format.position(step: 1, of: 2, phase: PhasePosition(number: 2, count: 5)) == "Step 2 of 2 · Stage 2 of 5")
+        #expect(Format.position(step: 1, of: 2, phase: nil) == "Step 2 of 2")
+    }
+
     @Test func theLiveLineIsTheNewestNonEmptyOne() {
         #expect(Format.lastLine("Loading\nSampling:  50%|#  | 1/2\rSampling: 100%|##| 2/2\n\n") == "Sampling: 100%|##| 2/2")
         #expect(Format.lastLine("a\n[Lift] Still working: no new output for 2 min (CPU 85%)\n") == "[Lift] Still working: no new output for 2 min (CPU 85%)")

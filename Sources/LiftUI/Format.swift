@@ -117,6 +117,13 @@ public enum Format {
         return (fraction ?? 0) >= 1 ? "\(stage) done · still working…" : stage
     }
 
+    /// Where a running job stands: "Stage 3 of 11" from the recipe's phases, plus "Step 2 of 3" only when the job
+    /// chains several models. nil when neither is known (a single step whose recipe declares no phases).
+    public static func position(step: Int, of steps: Int, phase: PhasePosition?) -> String? {
+        let parts = [steps > 1 ? "Step \(step + 1) of \(steps)" : nil, phase.map { "Stage \($0.number) of \($0.count)" }].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// The newest non-empty line of a log tail (progress bars redraw with \r, so those count as lines too).
     public static func lastLine(_ log: String) -> String {
         log.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).last { !$0.allSatisfy(\.isWhitespace) }

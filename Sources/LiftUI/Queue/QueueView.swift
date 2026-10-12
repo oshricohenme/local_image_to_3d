@@ -218,7 +218,11 @@ struct QueueView: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(Format.stage(step.stage, fraction: step.fraction)).lineLimit(1)
                             Spacer()
-                            Text("Step \(v.job.currentStep + 1) of \(v.steps.count)").font(.caption).foregroundStyle(.secondary)
+                            let task = app.models.first { $0.id == step.recipe }?.recipe.tasks.first { $0.id == step.task }
+                            if let position = Format.position(step: v.job.currentStep, of: v.steps.count,
+                                                              phase: task?.phase(of: step.stage, settings: step.settings)) {
+                                Text(position).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         // A finished bar while the step still runs is a step without a bar (decoding, baking): keep moving.
                         if let f = step.fraction, f < 1 { Meter(fraction: f) } else { ProgressView().progressViewStyle(.linear) }
