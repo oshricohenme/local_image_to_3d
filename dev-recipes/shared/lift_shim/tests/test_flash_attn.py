@@ -107,6 +107,8 @@ def _calls():
         "flash_attn_func": lambda **kw: fa.flash_attn_func(q, k, v, **kw),
         "flash_attn_qkvpacked_func": lambda **kw: fa.flash_attn_qkvpacked_func(torch.stack([q, k, v], 2), **kw),
         "flash_attn_kvpacked_func": lambda **kw: fa.flash_attn_kvpacked_func(q, torch.stack([k, v], 2), **kw),
+        "flash_attn_varlen_kvpacked_func":
+            lambda **kw: fa.flash_attn_varlen_kvpacked_func(q[0], torch.stack([k[0], v[0]], 1), cu, cu, 4, 4, **kw),
         "flash_attn_varlen_func": lambda **kw: fa.flash_attn_varlen_func(q[0], k[0], v[0], cu, cu, 4, 4, **kw),
         "flash_attn_varlen_qkvpacked_func":
             lambda **kw: fa.flash_attn_varlen_qkvpacked_func(torch.stack([q[0], k[0], v[0]], 1), cu, 4, **kw),
@@ -158,3 +160,73 @@ def test_mha_init_accepts_neutral_upstream_args_rejects_unknown():
         rotary_emb_base=10000.0, rotary_emb_scale_base=None, rotary_emb_interleaved=False)
     with pytest.raises(TypeError):
         MHA(embed_dim=16, num_heads=4, cross_attn=True, no_such_arg=1)
+
+
+def test_varlen_kvpacked_matches_per_sequence():
+    torch.manual_seed(0)
+    cq, ck = torch.tensor([0, 2, 5], dtype=torch.int32), torch.tensor([0, 4, 9], dtype=torch.int32)
+    q, k, v = torch.randn(5, 2, 4), torch.randn(9, 2, 4), torch.randn(9, 2, 4)
+    out = fa.flash_attn_varlen_kvpacked_func(q, torch.stack([k, v], 1), cq, ck, 3, 5)  # kv: (total_k, 2, H, D)
+    for (qs, qe), (ks, ke) in [((0, 2), (0, 4)), ((2, 5), (4, 9))]:
+        assert torch.allclose(out[qs:qe], naive(q[None, qs:qe], k[None, ks:ke], v[None, ks:ke])[0], atol=1e-5)
+
+
+# kornia.feature.lightglue: `from flash_attn.modules.mha import FlashCrossAttention`, then
+# FlashCrossAttention()(q, stack([k, v], 2)); only `except ModuleNotFoundError` guards the import.
+def test_flash_cross_attention_matches_naive():
+    from lift_shim.standins.flash_attn.modules.mha import FlashCrossAttention
+    torch.manual_seed(0)
+    q, k, v = torch.randn(2, 5, 3, 8), torch.randn(2, 7, 3, 8), torch.randn(2, 7, 3, 8)
+    kv = torch.stack([k, v], 2)                                     # (B, Sk, 2, H, D)
+    assert torch.allclose(FlashCrossAttention()(q, kv), naive(q, k, v), atol=1e-5)
+    assert torch.allclose(FlashCrossAttention(causal=True)(q, kv), naive_bottom_right(q, k, v), atol=1e-5)
+    assert torch.allclose(FlashCrossAttention(causal=True)(q, kv, causal=False), naive(q, k, v), atol=1e-5)
+    scaled = FlashCrossAttention(softmax_scale=0.5)(q, kv)
+    assert torch.allclose(scaled, naive(q * (0.5 * 8 ** 0.5), k, v), atol=1e-5)
+
+
+def test_flash_cross_attention_varlen():
+    from lift_shim.standins.flash_attn.modules.mha import FlashCrossAttention
+    torch.manual_seed(0)
+    cq, ck = torch.tensor([0, 2, 5], dtype=torch.int32), torch.tensor([0, 4, 9], dtype=torch.int32)
+    q, k, v = torch.randn(5, 2, 4), torch.randn(9, 2, 4), torch.randn(9, 2, 4)
+    out = FlashCrossAttention()(q, torch.stack([k, v], 1), cu_seqlens=cq, max_seqlen=3, cu_seqlens_k=ck, max_seqlen_k=5)
+    for (qs, qe), (ks, ke) in [((0, 2), (0, 4)), ((2, 5), (4, 9))]:
+        assert torch.allclose(out[qs:qe], naive(q[None, qs:qe], k[None, ks:ke], v[None, ks:ke])[0], atol=1e-5)
+
+
+def test_flash_self_attention_matches_naive():
+    from lift_shim.standins.flash_attn.modules.mha import FlashSelfAttention
+    torch.manual_seed(0)
+    qkv = torch.randn(2, 5, 3, 3, 8)                                # (B, S, 3, H, D)
+    q, k, v = qkv.unbind(2)
+    assert torch.allclose(FlashSelfAttention()(qkv), naive(q, k, v), atol=1e-5)
+    assert torch.allclose(FlashSelfAttention()(qkv, causal=True), naive(q, k, v, causal=True), atol=1e-5)
+    cu = torch.tensor([0, 2, 5], dtype=torch.int32)
+    out = FlashSelfAttention()(qkv[0], cu_seqlens=cu, max_seqlen=3)  # (total, 3, H, D)
+    for s, e in [(0, 2), (2, 5)]:
+        assert torch.allclose(out[s:e], naive(q[None, 0, s:e], k[None, 0, s:e], v[None, 0, s:e])[0], atol=1e-5)
+
+
+def test_flash_attention_modules_match_upstream_signatures():
+    # positional order differs between the two upstream classes (window_size vs alibi_slopes)
+    import inspect
+    from lift_shim.standins.flash_attn.modules.mha import FlashCrossAttention, FlashSelfAttention
+    params = lambda f: list(inspect.signature(f).parameters)
+    assert params(FlashSelfAttention.__init__)[1:] == ["causal", "softmax_scale", "attention_dropout", "window_size",
+                                                        "alibi_slopes", "deterministic"]
+    assert params(FlashCrossAttention.__init__)[1:] == ["causal", "softmax_scale", "attention_dropout", "alibi_slopes",
+                                                         "window_size", "deterministic"]
+    assert params(FlashSelfAttention.forward)[1:] == ["qkv", "causal", "cu_seqlens", "max_seqlen"]
+    assert params(FlashCrossAttention.forward)[1:] == ["q", "kv", "causal", "cu_seqlens", "max_seqlen",
+                                                        "cu_seqlens_k", "max_seqlen_k"]
+
+
+@pytest.mark.parametrize("kw", [dict(window_size=(2, 2)), dict(alibi_slopes=torch.ones(3))])
+def test_flash_attention_modules_unsupported_numerics_raise(kw):
+    from lift_shim.standins.flash_attn.modules.mha import FlashCrossAttention, FlashSelfAttention
+    q = torch.randn(1, 4, 3, 8)
+    with pytest.raises(NotImplementedError, match="lift_shim"):
+        FlashCrossAttention(**kw)(q, torch.stack([q, q], 2))
+    with pytest.raises(NotImplementedError, match="lift_shim"):
+        FlashSelfAttention(**kw)(torch.stack([q, q, q], 2))

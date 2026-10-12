@@ -66,6 +66,15 @@ def flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q=Non
     return out
 
 
+def flash_attn_varlen_kvpacked_func(q, kv, cu_seqlens_q, cu_seqlens_k, max_seqlen_q=None, max_seqlen_k=None,
+                                    dropout_p=0.0, softmax_scale=None, causal=False, window_size=(-1, -1),
+                                    softcap=0.0, alibi_slopes=None, deterministic=False, return_attn_probs=False):
+    _check(window_size, softcap, alibi_slopes, return_attn_probs)
+    k, v = kv.unbind(1)
+    return flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                                  dropout_p, softmax_scale, causal)
+
+
 def flash_attn_varlen_qkvpacked_func(qkv, cu_seqlens, max_seqlen=None, dropout_p=0.0, softmax_scale=None,
                                      causal=False, window_size=(-1, -1), softcap=0.0, alibi_slopes=None,
                                      deterministic=False, return_attn_probs=False):
