@@ -304,7 +304,8 @@ public actor Lift {
                 maxSlots: settings.maxSlots, budget: settings.memoryBudgetBytes, systemFree: config.systemFree(),
                 physical: config.physicalMemory, paused: settings.queuePaused)
             let byId = Dictionary(uniqueKeysWithValues: pending.map { ($0.0.id, $0) })
-            for decision in Scheduler.decide(input) {
+            let decisions = Scheduler.decide(input)
+            for decision in decisions {
                 switch decision {
                 case .wait(let id, let reason):
                     guard let (job, step) = byId[id], job.state != .waiting || job.waitReason != reason else { continue }
@@ -312,6 +313,10 @@ public actor Lift {
                 case .start(let id):
                     if let (job, step) = byId[id] { try startStep(job: job, step: step) }
                 }
+            }
+            // Steps that just started took their workers, so only truly idle ones are left to unload.
+            if let keep = Scheduler.keepLoaded(input, decisions) {
+                for w in workers.values where w.available && !keep.contains(w.recipe.id) { stop(w) }
             }
         } catch {
             print("lift: scheduler tick failed: \(error)")

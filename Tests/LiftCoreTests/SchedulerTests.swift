@@ -89,3 +89,26 @@ import Testing
         #expect(run([c("a", force: true)], paused: true) == [.wait("a", .queuePaused)])
     }
 }
+
+@Suite struct IdleUnloadTests {
+    let gb = 1_000_000_000
+
+    func input(_ cs: [Candidate], idle: [String]) -> SchedulerInput {
+        SchedulerInput(candidates: cs, workers: idle.map { WorkerSnapshot(recipe: $0, freeCapacity: 1, reserved: 13 * gb) },
+                       budget: 48 * gb, systemFree: 64 * gb)
+    }
+
+    @Test func aJobWaitingForMemoryUnloadsTheIdleModelsItDoesNotRun() {
+        let big = Candidate(jobId: "rig", recipe: "unirig", position: 1, need: MemoryNeed(load: 30 * gb, job: 10 * gb))
+        let i = input([big], idle: ["pixal3d", "trellis"])
+        let d = Scheduler.decide(i)
+        #expect(d == [.wait("rig", .memory(needed: 40 * gb, free: 22 * gb))])
+        #expect(Scheduler.keepLoaded(i, d) == ["unirig"])  // pixal3d and trellis go now, not after the idle timeout
+    }
+
+    @Test func idleModelsStayWhileNothingWaitsForMemory() {
+        let small = Candidate(jobId: "a", recipe: "unirig", position: 1, need: MemoryNeed(load: 2 * gb, job: 1 * gb))
+        let i = input([small], idle: ["pixal3d"])
+        #expect(Scheduler.keepLoaded(i, Scheduler.decide(i)) == nil)
+    }
+}

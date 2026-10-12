@@ -1,6 +1,7 @@
 """The worker: loads the recipe launcher once, runs jobs on a thread pool, reports over the channel."""
 from __future__ import annotations
 
+import gc
 import importlib.util
 import json
 import os
@@ -38,6 +39,18 @@ def _mps_allocated() -> int:
     except Exception:  # noqa: BLE001 - a heartbeat must never fail
         pass
     return 0
+
+
+def _free_memory() -> None:
+    """After a job: drop its garbage and hand PyTorch's cached Metal memory back to macOS, so an idle
+    model holds only what it keeps loaded (the cache otherwise stays at the job's peak)."""
+    gc.collect()
+    torch = sys.modules.get("torch")  # never import torch here: it is the launcher's choice
+    try:
+        if torch is not None and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:  # noqa: BLE001 - freeing memory must never fail a job
+        pass
 
 
 def coerce_settings(settings: dict, types: dict) -> dict:
@@ -158,3 +171,4 @@ class Worker:
             self.local.job = None
             with self.lock:
                 self.jobs.pop(job.id, None)
+            _free_memory()

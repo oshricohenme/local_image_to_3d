@@ -137,3 +137,19 @@ def test_launcher_imports_from_recipe_files(tmp_path):
     r = subprocess.run([sys.executable, "-m", "lift_worker", "--check", cfg], capture_output=True, text=True,
                        env={**os.environ, "PYTHONPATH": str(SRC)})
     assert r.returncode == 0, r.stderr
+
+
+def test_free_memory_returns_the_mps_cache(monkeypatch):
+    # After every job the worker hands PyTorch's cached Metal memory back, so an idle model holds only its weights.
+    sys.path.insert(0, str(SRC))
+    from types import SimpleNamespace
+    from lift_worker import worker as w
+    emptied = []
+    fake = SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True)),
+                           mps=SimpleNamespace(empty_cache=lambda: emptied.append(1)))
+    monkeypatch.setitem(sys.modules, "torch", fake)
+    w._free_memory()
+    assert emptied == [1]
+    monkeypatch.delitem(sys.modules, "torch")
+    w._free_memory()  # no torch imported: nothing to free, and it never imports torch itself
+    assert "torch" not in sys.modules

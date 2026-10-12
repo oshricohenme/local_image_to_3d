@@ -131,4 +131,15 @@ public enum Scheduler {
         }
         return out
     }
+
+    /// The models idle workers may keep while a job waits for memory: the ones those jobs run (sharing a loaded
+    /// model costs less than loading it again). Every other idle worker is unloaded now, not after the idle
+    /// timeout. nil when no job waits for memory.
+    public static func keepLoaded(_ input: SchedulerInput, _ decisions: [Decision]) -> Set<String>? {
+        let recipes = Dictionary(input.candidates.map { ($0.jobId, $0.recipe) }, uniquingKeysWith: { a, _ in a })
+        let waiting = decisions.compactMap { d -> String? in
+            if case .wait(let id, .memory) = d { recipes[id] } else { nil }
+        }
+        return waiting.isEmpty ? nil : Set(waiting)
+    }
 }
