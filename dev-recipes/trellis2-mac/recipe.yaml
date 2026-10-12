@@ -87,8 +87,9 @@ resources:
   memory_keys: [pipeline_type]
   disk_gb: 3
 stages:
-  - { pattern: '^(?P<name>Loading pipeline|Generating 3D model|Baking PBR textures[^.]*|Exporting with vertex colors)' }
-  - { pattern: '^(?P<name>[^:|]+):\s*(?P<pct>\d+)%\|' }
+  # Bars give the percentage only: the stage keeps the plain name its [Stage] line gave ("Painting the texture",
+  # not "Sampling texture SLat"). [Stage] lines are built into every worker.
+  - { pattern: '^[^:|]+:\s*(?P<pct>\d+)%\|' }
   - { pattern: '^\s*(?P<pct>\d+)%\|' }
 errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
   - { match: "GPU watchdog", message: "Your Mac's graphics chip took too long on this image. Try the 512 quality setting, close other apps, or unplug external displays, then try again." }

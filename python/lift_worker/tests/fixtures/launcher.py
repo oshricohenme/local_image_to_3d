@@ -25,6 +25,8 @@ def run(state, job):
         print("[Stage] Sampling")
         sys.stderr.write("Sampling:  50%|#####     | 1/2\r")
         sys.stderr.write("Sampling: 100%|##########| 2/2\n")
+    if s.get("report"):
+        job.stage("Writing the file", 0.5)
     if s.get("thread_log"):
         t = threading.Thread(target=lambda: print("from upstream thread"))
         t.start()

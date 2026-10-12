@@ -74,7 +74,9 @@ resources:
   disk_gb: 3
 stages:
   - { pattern: '^\[(?:Pipeline|ImageCond|NAF|MoGe-2|Views|Camera|Inference|Done)\] (?P<name>.+)$' }
-  - { pattern: '^(?P<name>[^:|]+):\s*(?P<pct>\d+)%\|' }
+  # Bars give the percentage only: the stage keeps the plain name its [Stage] line gave ("Painting the texture",
+  # not "Sampling texture SLat"). [Stage] lines are built into every worker.
+  - { pattern: '^[^:|]+:\s*(?P<pct>\d+)%\|' }
   - { pattern: '^\s*(?P<pct>\d+)%\|' }
 errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
   - { match: "MPS backend out of memory|Invalid buffer size|out of memory", message: "Your Mac ran out of memory for this model. Turn on Low memory mode, or close other apps and try again." }

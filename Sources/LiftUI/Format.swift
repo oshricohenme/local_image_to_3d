@@ -111,6 +111,18 @@ public enum Format {
         return String(format: "%02d:%02d", s / 60, s % 60)
     }
 
+    /// A running step's stage line. A bar at 100% means that part finished and the next has no bar of its own.
+    public static func stage(_ stage: String?, fraction: Double?) -> String {
+        guard let stage else { return "Starting…" }
+        return (fraction ?? 0) >= 1 ? "\(stage) done · still working…" : stage
+    }
+
+    /// The newest non-empty line of a log tail (progress bars redraw with \r, so those count as lines too).
+    public static func lastLine(_ log: String) -> String {
+        log.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).last { !$0.allSatisfy(\.isWhitespace) }
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    }
+
     public static func source(_ s: JobSource) -> String {
         switch s {
         case .ui: "App"

@@ -153,3 +153,55 @@ def test_free_memory_returns_the_mps_cache(monkeypatch):
     monkeypatch.delitem(sys.modules, "torch")
     w._free_memory()  # no torch imported: nothing to free, and it never imports torch itself
     assert "torch" not in sys.modules
+
+
+def test_a_quiet_job_logs_that_it_is_still_working(worker):
+    # A model that prints nothing for a while (TRELLIS.2 decoding, a long bake) must never look frozen.
+    w = worker(heartbeat_seconds=0.1, quiet_seconds=0.3)
+    w.until(is_ev("ready"))
+    w.run("j1", sleep=1.0)
+    evs = w.until(is_ev("done", "j1"))
+    notes = [e["line"] for e in evs if e["ev"] == "log" and e["line"].startswith("[Lift] Still working")]
+    assert notes and "no new output for" in notes[0] and "CPU" in notes[0]
+    assert 2 <= len(notes) <= 4  # one per quiet period, not one per heartbeat
+    assert notes[0] != notes[-1]  # each counts from the last real output, so the later one says longer
+
+
+def test_output_resets_the_quiet_clock(worker):
+    w = worker(heartbeat_seconds=0.1, quiet_seconds=5)
+    w.until(is_ev("ready"))
+    w.run("j1", sleep=0.5)
+    evs = w.until(is_ev("done", "j1"))
+    assert not [e for e in evs if e["ev"] == "log" and e["line"].startswith("[Lift] Still working")]
+
+
+def test_a_stage_line_names_the_step_for_every_model(worker):
+    # No recipe pattern needed: "[Stage] …" is built in, and a stage without a bar has no fraction.
+    w = worker()  # stages: []
+    w.until(is_ev("ready"))
+    w.run("j1", stages=True)
+    evs = w.until(is_ev("done", "j1"))
+    assert {"ev": "stage", "job": "j1", "name": "Sampling", "fraction": None} in evs
+
+
+def test_a_reported_stage_is_logged_too(worker):
+    w = worker()
+    w.until(is_ev("ready"))
+    w.run("j1", report=True)
+    evs = w.until(is_ev("done", "j1"))
+    assert {"ev": "stage", "job": "j1", "name": "Writing the file", "fraction": 0.5} in evs
+    assert "[Stage] Writing the file" in [e["line"] for e in evs if e["ev"] == "log"]
+
+
+def test_announce_names_an_upstream_step_when_it_starts(capsys):
+    sys.path.insert(0, str(SRC))
+    from lift_worker.stages import announce
+
+    class Pipeline:
+        def decode(self, x):
+            return x * 2
+
+    announce(Pipeline, {"decode": "Decoding the 3D shape"})
+    assert Pipeline().decode(3) == 6
+    assert capsys.readouterr().out == "[Stage] Decoding the 3D shape\n"
+    assert Pipeline.decode.__name__ == "decode"

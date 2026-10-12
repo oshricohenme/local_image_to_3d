@@ -33,17 +33,17 @@ def run(state, job):
         skeleton = os.path.join(work, "skeleton.fbx")
         common = ["--config", s["config"], "--require_suffix", s["require_suffix"], "--num_runs", s["num_runs"],
                   "--faces_target_count", s["faces_target_count"], "--seed", s["seed"]]
-        _stage(job, "skeleton", 0.0, "launch/inference/generate_skeleton.sh",
+        _stage(job, "Predicting the skeleton (UniRig step 1 of 3)", 0.0, "launch/inference/generate_skeleton.sh",
                ["--input", mesh, "--output", skeleton, "--skeleton_task", s["skeleton_task"],
                 "--add_root", s["add_root"], "--force_override", s["skeleton_force_override"], *common], skeleton)
         source = skeleton
         if s["stages"] == "skeleton+skin":
             source = os.path.join(work, "skin.fbx")
-            _stage(job, "skin", 0.4, "launch/inference/generate_skin.sh",
+            _stage(job, "Working out how the mesh bends with each bone (step 2 of 3)", 0.4, "launch/inference/generate_skin.sh",
                    ["--input", skeleton, "--output", source, "--skin_task", s["skin_task"],
                     "--force_override", s["skin_force_override"], "--data_name", s["data_name"], *common], source)
         rigged = os.path.join(work, f"rigged.{s['format']}")
-        _stage(job, "merge", 0.8, "launch/inference/merge.sh",
+        _stage(job, "Putting the rig on your mesh and saving it (step 3 of 3)", 0.8, "launch/inference/merge.sh",
                ["--source", source, "--target", mesh, "--output", rigged, "--require_suffix", s["require_suffix"]], rigged)
         outputs = []
         for path in (rigged, source if source != skeleton else None, skeleton):  # the rigged mesh first: chains use it

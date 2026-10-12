@@ -13,12 +13,12 @@ def bake(mesh_out, verts, faces, tex_size, base, glb_path):
         pp._grid_sample_3d = _grid_sample_3d_fix  # generate.py's fix for o_voxel's fallback layout
     if use_metal:
         try:
-            print(f"Baking PBR textures via Metal ({tex_size}x{tex_size})...")
+            print(f"[Stage] Baking the textures on the GPU ({tex_size}x{tex_size})")
             import fast_simplification
 
             target_faces = min(200000, len(faces))
             if len(faces) > target_faces:
-                print(f"  Simplifying mesh: {len(faces):,} -> ~{target_faces:,} faces")
+                print(f"[Stage] Simplifying the mesh: {len(faces):,} -> ~{target_faces:,} faces")
                 sv, sf = fast_simplification.simplify(verts, faces, 1.0 - target_faces / len(faces))
                 sv_t = torch.from_numpy(sv).float().to(mesh_out.vertices.device)
                 sf_t = torch.from_numpy(sf.astype("int32")).to(mesh_out.faces.device)
@@ -28,6 +28,7 @@ def bake(mesh_out, verts, faces, tex_size, base, glb_path):
                             coords=mesh_out.coords.cpu(), attr_layout=mesh_out.layout, voxel_size=mesh_out.voxel_size,
                             aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]], decimation_target=target_faces,
                             texture_size=tex_size, verbose=True)
+            print("[Stage] Saving the GLB file", flush=True)
             glb.export(glb_path)
             return
         except RuntimeError as e:
@@ -35,7 +36,7 @@ def bake(mesh_out, verts, faces, tex_size, base, glb_path):
     from PIL import Image
     from backends.texture_baker import bake_texture, export_glb_with_texture, uv_unwrap
 
-    print(f"Baking PBR textures via KDTree ({tex_size}x{tex_size})...")
+    print(f"[Stage] Baking the textures on the CPU ({tex_size}x{tex_size}; slower)")
     bv, bf = verts, faces
     target_faces = min(200000, len(faces))
     if len(faces) > target_faces:

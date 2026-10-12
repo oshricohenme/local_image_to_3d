@@ -61,7 +61,9 @@ resources:
   memory_gb: 8
   disk_gb: 4
 stages:
-  - { pattern: '^(?P<name>[^:|]+):\s*(?P<pct>\d+)%\|' }
+  # Bars give the percentage only: the stage keeps the plain name its [Stage] line gave ("Painting the texture",
+  # not "Sampling texture SLat"). [Stage] lines are built into every worker.
+  - { pattern: '^[^:|]+:\s*(?P<pct>\d+)%\|' }
   - { pattern: '^\s*(?P<pct>\d+)%\|' }
 errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
   - { match: "finished without writing skeleton", message: "UniRig couldn't find a skeleton for this model. Try a cleaner single mesh, or reduce the face count." }

@@ -19,6 +19,18 @@ import Testing
         #expect(Format.waitReason(.noFreeSlot) == "Waiting for a free slot")
         #expect(Format.waitReason(.weightsUnverified) == "Weights not verified")
     }
+
+    @Test func aFinishedBarSaysTheStepIsStillWorking() {
+        #expect(Format.stage(nil, fraction: nil) == "Starting…")
+        #expect(Format.stage("Sampling texture SLat", fraction: 0.5) == "Sampling texture SLat")
+        #expect(Format.stage("Sampling texture SLat", fraction: 1) == "Sampling texture SLat done · still working…")
+    }
+
+    @Test func theLiveLineIsTheNewestNonEmptyOne() {
+        #expect(Format.lastLine("Loading\nSampling:  50%|#  | 1/2\rSampling: 100%|##| 2/2\n\n") == "Sampling: 100%|##| 2/2")
+        #expect(Format.lastLine("a\n[Lift] Still working: no new output for 2 min (CPU 85%)\n") == "[Lift] Still working: no new output for 2 min (CPU 85%)")
+        #expect(Format.lastLine("") == "")
+    }
 }
 
 @Suite struct QueueCreditTests {

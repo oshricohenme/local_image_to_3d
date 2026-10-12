@@ -25,3 +25,11 @@ def test_no_match():
 
 def test_fraction_clamped():
     assert StageParser([TQDM]).feed("X: 140%|") == ("X", 1.0)
+
+
+def test_a_bar_without_a_name_continues_the_plain_stage():
+    p = StageParser([{"pattern": r"^[^:|]+:\s*(?P<pct>\d+)%\|"}])
+    assert p.feed("[Stage] Painting the texture") == ("Painting the texture", None)
+    assert p.feed("Sampling texture SLat:  50%|#####     | 6/12") == ("Painting the texture", 0.5)
+    p.named("Predicting the skeleton")
+    assert p.feed("Run: 100%|##########| 3/3") == ("Predicting the skeleton", 1.0)

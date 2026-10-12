@@ -28,6 +28,7 @@ sys.path.append(os.path.join(REPO, "stubs"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "files"))  # this recipe's own helpers
 
 import o_voxel.postprocess  # noqa: E402
+from lift_worker.stages import announce  # noqa: E402
 from trellis_bake import bake  # noqa: E402
 
 if o_voxel.postprocess._BACKEND != "metal" or not o_voxel.postprocess._HAS_DR:
@@ -51,7 +52,18 @@ def load(ctx):
     import torch
     from trellis2.pipelines.trellis2_image_to_3d import Trellis2ImageTo3DPipeline
 
-    print("Loading pipeline...")
+    # Each step of pipeline.run, named as it starts; the decoders have no progress bar and can take minutes.
+    announce(Trellis2ImageTo3DPipeline, {
+        "preprocess_image": "Removing the background and centring the object",
+        "get_cond": "Reading the photo",
+        "sample_sparse_structure": "Laying out the rough 3D shape",
+        "sample_shape_slat": "Sculpting the shape's detail",
+        "sample_shape_slat_cascade": "Sculpting the shape's detail",
+        "sample_tex_slat": "Painting the texture",
+        "decode_shape_slat": "Decoding the 3D shape (no progress bar; this can take a few minutes)",
+        "decode_tex_slat": "Decoding the texture (no progress bar)",
+    })
+    print("[Stage] Loading TRELLIS.2 into memory")
     pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
     pipeline.to(torch.device("mps"))
     return pipeline
@@ -64,7 +76,7 @@ def run(pipeline, job):
     img = Image.open(job.inputs["image"])
     base = os.path.join(job.out_dir, "mesh")
     overrides = {"steps": s["steps"]} if s["steps"] else {}
-    print(f"Generating 3D model (pipeline={s['pipeline_type']}, seed={s['seed']})...")
+    print(f"[Stage] Generating the 3D model (pipeline {s['pipeline_type']}, seed {s['seed']})")
     t0 = time.time()
     try:
         outputs = pipeline.run(img, seed=s["seed"], pipeline_type=s["pipeline_type"],
@@ -88,9 +100,10 @@ def run(pipeline, job):
     else:
         import trimesh
 
-        print("Exporting with vertex colors...")
+        print("[Stage] Saving the 3D file with vertex colours")
         trimesh.Trimesh(vertices=verts, faces=faces).export(glb_path)
     obj_path = f"{base}.obj"  # generate.py also writes the raw geometry as OBJ
+    print(f"[Stage] Writing the OBJ file ({verts.shape[0]:,} vertices; no progress bar)", flush=True)
     with open(obj_path, "w") as f:
         for v in verts:
             f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")

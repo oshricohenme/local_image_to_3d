@@ -53,6 +53,10 @@ def _free_memory() -> None:
         pass
 
 
+def _duration(seconds: float) -> str:
+    return f"{seconds:.0f} s" if seconds < 90 else f"{seconds / 60:.0f} min"
+
+
 def coerce_settings(settings: dict, types: dict) -> dict:
     """JSON can't tell 1 from 1.0: make `float` settings floats again (bools stay bools)."""
     out = dict(settings)
@@ -75,9 +79,14 @@ class Job:
         self.out_dir: str = msg["out_dir"]
         self.parser = StageParser(patterns)
         self._channel = None
+        # Since the job's last output line: when that was, and the process's CPU time then (Worker._note_quiet).
+        self.last_output = self.quiet_since = time.monotonic()
+        self.cpu_mark = time.process_time()
 
     def stage(self, name: str, fraction: float | None = None) -> None:
-        """Launchers may report a stage directly."""
+        """Launchers may report a stage directly; it goes into the job's log too."""
+        self.parser.named(name)
+        self._channel.send(ev="log", job=self.id, line=f"[Stage] {name}")
         self._channel.send(ev="stage", job=self.id, name=name, fraction=fraction)
 
 
@@ -108,6 +117,8 @@ class Worker:
         if job is None:
             os.write(2, (line + "\n").encode("utf-8", "replace"))
             return
+        job.last_output = job.quiet_since = time.monotonic()
+        job.cpu_mark = time.process_time()
         self.ch.send(ev="log", job=job_id, line=line)
         parsed = job.parser.feed(line)
         if parsed:
@@ -136,6 +147,23 @@ class Worker:
         while True:
             time.sleep(every)
             self.ch.send(ev="heartbeat", mps_allocated=_mps_allocated())
+            self._note_quiet()
+
+    def _note_quiet(self) -> None:
+        """A job that has printed nothing for `quiet_seconds` gets a log line saying so, with how hard the
+        process is working, once per quiet period: a silent model (decoding, baking) never looks frozen."""
+        quiet = float(self.cfg.get("quiet_seconds", 30))
+        now = time.monotonic()
+        with self.lock:
+            jobs = list(self.jobs.values())
+        for job in jobs:
+            window = now - job.quiet_since
+            if window < quiet:
+                continue
+            cpu = time.process_time()
+            busy = (cpu - job.cpu_mark) / window * 100
+            job.quiet_since, job.cpu_mark = now, cpu
+            self.ch.send(ev="log", job=job.id, line=f"[Lift] Still working: no new output for {_duration(now - job.last_output)} (CPU {busy:.0f}%)")
 
     def serve(self, stdin) -> None:
         """Read ops until shutdown or EOF (EOF means the app went away), then exit at once."""

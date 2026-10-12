@@ -219,11 +219,21 @@ struct QueueView: View {
                     steps(v)
                     VStack(alignment: .leading, spacing: 7) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(step.stage ?? "Starting…").lineLimit(1)
+                            Text(Format.stage(step.stage, fraction: step.fraction)).lineLimit(1)
                             Spacer()
                             Text("Step \(v.job.currentStep + 1) of \(v.steps.count)").font(.caption).foregroundStyle(.secondary)
                         }
-                        if let f = step.fraction { Meter(fraction: f) } else { ProgressView().progressViewStyle(.linear) }
+                        // A finished bar while the step still runs is a step without a bar (decoding, baking): keep moving.
+                        if let f = step.fraction, f < 1 { Meter(fraction: f) } else { ProgressView().progressViewStyle(.linear) }
+                        // What the model is doing right now, live: the newest line of its log.
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            Text(Format.lastLine(app.logTail(id, maxBytes: 4_096)))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
             }
