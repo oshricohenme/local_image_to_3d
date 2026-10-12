@@ -370,6 +370,9 @@ public struct Installer: Sendable {
         env["VIRTUAL_ENV"] = venv
         env["PYTHONPATH"] = workerRuntime.path
         env["PYTHONUNBUFFERED"] = "1"
+        // PyTorch fails MPS allocations past 1.7x Metal's recommended working set; 0 lifts that cap, so a big
+        // job swaps rather than failing.
+        env["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
         if let shim = try? String(contentsOf: shimURL(recipe.id), encoding: .utf8) { env["LIFT_SHIM"] = shim }
         // dyld's default fallback includes /usr/local/lib, where a Rosetta Homebrew keeps x86_64 libraries.
         if !recipe.brew.isEmpty, let prefix = brewPrefix { env["DYLD_FALLBACK_LIBRARY_PATH"] = "\(prefix)/lib:/usr/lib" }

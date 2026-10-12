@@ -224,8 +224,8 @@ func fakeInstalledCube(_ lift: Lift) async throws {
 @Suite struct MemoryTests_Engine {
     func cube() throws -> StepRequest { StepRequest(recipe: "test-cube", task: "image_to_3d", inputs: ["image": try Fixtures.image()]) }
 
-    /// M18: the default budget is min(48, 75% of this Mac's RAM), set once at first open.
-    @Test(arguments: [(16, 12.0), (32, 25.0), (128, 48.0)])
+    /// The default budget is all of this Mac's RAM (whole GB), set once at first open.
+    @Test(arguments: [(16, 17.0), (32, 34.0), (128, 137.0)])
     func defaultBudgetComesFromThisMac(gib: Int, expected: Double) async throws {
         let lift = try await Fixtures.lift(physical: gib << 30)
         #expect(await lift.settingsGet().memoryBudgetGB == expected)
@@ -239,68 +239,14 @@ func fakeInstalledCube(_ lift: Lift) async throws {
         #expect(await (try Fixtures.lift(workdir: workdir, physical: 16 << 30)).settingsGet().memoryBudgetGB == 14)
     }
 
-    /// Spec §8: too big is a warning, never a refusal; nothing changes until it's accepted.
-    @Test func tooBigForTheBudgetWarnsThenRunsWhenAccepted() async throws {
-        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
-        try await fakeInstalledCube(lift)
-        _ = try await lift.settingsSet("memory_budget_gb", .float(0.1))  // the cube needs 0.5 GB
-        let warned = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()]))
-        let w = try #require(warned.warning)
-        #expect(w.step == 0 && w.neededGB == 0.5 && w.budgetGB == 0.1)
-        #expect(w.message.contains("0.5 GB") && w.message.contains("budget"))
-        #expect(try await lift.jobsList().isEmpty)  // nothing was queued
-        let v = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()]), acceptMemoryWarning: true).accepted()
-        #expect(v.job.memoryAccepted)
-        // Over the budget and the queue is otherwise empty: it must start, never wait forever.
-        #expect(try await eventually(5) { try await lift.jobsGet(v.job.id).job.state == .loading })
-        _ = try await lift.jobsCancel(v.job.id, confirm: true)
-    }
-
-    @Test func tooBigForThisMacWarns() async throws {
+    /// Lift never limits memory: a job far bigger than the budget and this Mac queues with no warning and starts.
+    @Test func aTooBigJobQueuesWithoutAWarningAndStarts() async throws {
         let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path], physical: 256 << 20)  // a 256 MB Mac
         try await fakeInstalledCube(lift)
-        let w = try #require(try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).warning)
-        #expect(w.message.contains("this Mac has") && w.physicalGB < 0.5)
-    }
-
-    @Test func aNormalJobIsUnaffected() async throws {
-        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
-        try await fakeInstalledCube(lift)
+        _ = try await lift.settingsSet("memory_budget_gb", .float(0.1))  // the cube needs 0.5 GB
         let v = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted()
-        #expect(!v.job.memoryAccepted)
+        #expect(try await eventually(5) { try await lift.jobsGet(v.job.id).job.state == .loading })
         _ = try await lift.jobsCancel(v.job.id, confirm: true)
-    }
-
-    @Test func retryWarnsToo() async throws {
-        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
-        try await fakeInstalledCube(lift)
-        _ = try await lift.queuePause()
-        let id = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
-        _ = try await lift.jobsCancel(id)
-        _ = try await lift.settingsSet("memory_budget_gb", .float(0.1))
-        #expect(try await lift.jobsRetry(id).warning != nil)
-        #expect(try await lift.jobsGet(id).job.state == .cancelled)  // unchanged
-        #expect(try await lift.jobsRetry(id, acceptMemoryWarning: true).accepted().job.memoryAccepted)
-    }
-
-    /// M18: a starting worker's estimate is reserved at once, so a second tick can't start another
-    /// before the first worker has allocated anything.
-    @Test func aStartingWorkerIsReservedImmediately() async throws {
-        let lift = try await Fixtures.lift(searchDirs: [try Fixtures.fakeBin(["git", "uv"]).path])
-        try await fakeInstalledCube(lift)
-        _ = try await lift.settingsSet("memory_budget_gb", .float(0.8))  // room for one 0.5 GB cube
-        _ = try await lift.resourcesSet(maxSlots: 2)
-        _ = try await lift.queuePause()
-        let a = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
-        let b = try await lift.jobsSubmit(SubmitRequest(steps: [try cube()])).accepted().job.id
-        _ = try await lift.queueResume()
-        await lift.tick()
-        await lift.tick()
-        #expect(try await lift.jobsGet(a).job.state == .loading)
-        #expect(try await lift.jobsGet(b).job.waitReason == .memory(needed: 500_000_000, free: 300_000_000))
-        #expect(try await lift.resourcesGet().reservedBytes == 500_000_000)
-        _ = try await lift.jobsCancel(a, confirm: true)
-        _ = try await lift.jobsCancel(b)
     }
 }
 

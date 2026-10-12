@@ -12,8 +12,15 @@ public enum Memory {
         return ok == 0 ? Int(info.ri_phys_footprint) : nil
     }
 
-    /// Free + inactive pages, via `host_statistics64` (spec §8, condition 3).
+    /// What macOS itself counts as available (`kern.memorystatus_level`, the "free percentage" `memory_pressure`
+    /// prints): free, inactive, cached files and compressible memory alike. Free + inactive pages alone miss
+    /// tens of GB of reclaimable cache.
     @Sendable public static func systemFree() -> Int {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        if sysctlbyname("kern.memorystatus_level", &level, &size, nil, 0) == 0, (1...100).contains(level) {
+            return physical / 100 * Int(level)
+        }
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
         let kr = withUnsafeMutablePointer(to: &stats) { ptr in

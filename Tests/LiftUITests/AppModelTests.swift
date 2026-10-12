@@ -33,7 +33,7 @@ import Testing
         #expect(app.queue?.jobs[0].job.title == "chair" && app.queue?.jobs[0].job.waitReason == .modelNotInstalled)
     }
 
-    @Test func aTooBigJobAsksBeforeItsQueued() async throws {
+    @Test func aTooBigJobQueuesWithoutAsking() async throws {
         let app = try await UIFixtures.app()
         defer { Task { await app.close() } }
         _ = try await app.engine.resourcesSet(memoryBudgetGB: 0.1)  // the Test Cube estimates 0.5 GB
@@ -41,11 +41,8 @@ import Testing
         g.recipe = "test-cube"
         g.add([try UIFixtures.file("a.png"), try UIFixtures.file("b.png")])
         app.submitGenerate()
-        #expect(try await eventually { app.confirmation != nil })
-        #expect(app.confirmation?.action == "Run Anyway" && app.confirmation?.message.contains("memory budget") == true)
-        #expect(try await app.engine.jobsList().isEmpty)  // nothing queued before the answer
-        await app.confirmation?.confirm()
-        #expect(try await eventually { try await app.engine.jobsList().count == 2 && g.files.isEmpty })  // asked once for both
+        #expect(try await eventually { try await app.engine.jobsList().count == 2 && g.files.isEmpty })
+        #expect(app.confirmation == nil)
     }
 
     @Test func aFirstInstallShowsWhoMadeTheModelFirst() async throws {

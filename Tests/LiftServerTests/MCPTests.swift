@@ -106,25 +106,6 @@ import Testing
         #expect(deleted != true)
     }
 
-    @Test func aTooBigJobIsAWarningResultNotAnError() async throws {
-        let lift = try await Fixtures.lift()
-        _ = try await lift.resourcesSet(memoryBudgetGB: 0.1)  // Test Cube estimates 0.5 GB
-        let server = Fixtures.server(lift)
-        let client = try await connect(URL(string: "http://127.0.0.1:\(try await server.start().port)")!)
-        let step: Value = ["recipe": "test-cube", "task": "image_to_3d", "inputs": ["image_path": .string(try Fixtures.image())]]
-        let (content, isError) = try await client.callTool(name: "jobs_submit", arguments: ["steps": [step]])
-        #expect(isError != true && content.count == 2)
-        guard case .text(let message, _, _) = try #require(content.first) else { Issue.record("not text"); return }
-        #expect(message.contains("accept_memory_warning"))
-        guard case .text(let json, _, _) = content[1] else { Issue.record("not text"); return }
-        #expect(json.contains(#""memory_warning""#) && json.contains(#""needed_gb""#))
-        #expect(try await lift.jobsList().isEmpty)
-        let (_, acceptedError) = try await client.callTool(name: "jobs_submit", arguments: ["steps": [step], "accept_memory_warning": true])
-        #expect(acceptedError != true)
-        #expect(try await lift.jobsList().count == 1)
-        await server.stop()
-    }
-
     @Test func aLANRebindEndsSessionsAndANewOneWorksOnTheSameURL() async throws {
         let lift = try await Fixtures.lift()
         let server = Fixtures.server(lift)

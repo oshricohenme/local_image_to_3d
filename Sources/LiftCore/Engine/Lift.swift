@@ -164,8 +164,8 @@ public actor Lift {
         tools = ToolPaths()
         settings = try store.db.read { try Settings.load($0) }
         if try store.db.read({ try SettingRecord.fetchOne($0, key: "memory_budget_gb") }) == nil {
-            // First open (spec §8): min(48, 75% of this Mac's RAM), whole GB; the user can change it.
-            settings.memoryBudgetGB = max(1, min(48, (0.75 * Double(config.physicalMemory) / 1e9).rounded(.down)))
+            // First open: all of this Mac's RAM, whole GB; the user can lower it.
+            settings.memoryBudgetGB = max(1, (Double(config.physicalMemory) / 1e9).rounded(.down))
             let s = settings
             try store.db.write { try s.save($0) }
         }
@@ -306,8 +306,7 @@ public actor Lift {
                     requestVerify(r)
                 }
                 candidates.append(Candidate(jobId: job.id, recipe: step.recipe, priority: job.priority, position: job.position,
-                                            createdAt: job.createdAt, forceStart: job.forceStart, model: model, need: needs[i],
-                                            memoryAccepted: job.memoryAccepted))
+                                            createdAt: job.createdAt, forceStart: job.forceStart, model: model, need: needs[i]))
             }
             let input = SchedulerInput(
                 candidates: candidates,

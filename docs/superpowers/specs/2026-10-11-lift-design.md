@@ -382,8 +382,8 @@ how big they are, so you can remove them yourself.
 
 ## 8. Scheduler, workers and resources
 
-**Settings:** `max_slots` (default 1), `memory_budget_gb` (default: read from this Mac, `min(48, 75% of
-physical RAM)`, shown and adjustable), `idle_unload_minutes` (default 10).
+**Settings:** `max_slots` (default 1), `memory_budget_gb` (default: read from this Mac, all of its
+physical RAM, shown and adjustable), `idle_unload_minutes` (default 10).
 
 **Too big for this Mac → a warning; you decide.** If a step's memory estimate is more than this Mac's
 physical RAM, or more than the budget, Lift never refuses on its own. At submit time it returns a plain

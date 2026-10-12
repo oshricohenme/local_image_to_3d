@@ -30,65 +30,17 @@ import Testing
         #expect(run([c("a")], running: 1) == [.wait("a", .noFreeSlot)])
     }
 
-    @Test func budgetCountsReservedWorkers() {
+    /// Memory never holds a job back, alone or beside another: only slots, the model and pause do.
+    @Test func memoryNeverHoldsAJobBack() {
         let w = WorkerSnapshot(recipe: "other", freeCapacity: 1, reserved: 40 * gb)
-        #expect(run([c("a")], workers: [w], slots: 2) == [.wait("a", .memory(needed: 12 * gb, free: 8 * gb))])
-    }
-
-    @Test func systemFreeMemoryIsChecked() {
-        #expect(run([c("a")], free: 5) == [.wait("a", .memory(needed: 12 * gb, free: 5 * gb))])
-    }
-
-    @Test func existingWorkerNeedsOnlyJobMemory() {
-        let w = WorkerSnapshot(recipe: "r", freeCapacity: 1, reserved: 40 * gb)
-        #expect(run([c("a")], workers: [w], slots: 2) == [.start("a")])  // 2 GB fits in 48 − 40
-    }
-
-    /// Right after a job, its model still holds that job's memory: the next job on the same idle model starts anyway.
-    @Test func anIdleLoadedModelTakesTheNextJobWithoutAMemoryCheck() {
-        let w = WorkerSnapshot(recipe: "r", freeCapacity: 1, reserved: 42 * gb)
-        #expect(run([c("a", job: 24)], workers: [w], free: 20) == [.start("a")])
-        #expect(run([c("a", position: 1, job: 24), c("b", position: 2, job: 24)], workers: [w], slots: 2, free: 20)
-                == [.start("a"), .wait("b", .memory(needed: 34 * gb, free: 0))])  // b would need a second worker: checked
+        #expect(run([c("a", load: 48)], free: 40) == [.start("a")])  // TRELLIS.2: ~50 GB estimate, 40 GB free
+        #expect(run([c("a", load: 100)], workers: [w], running: 1, slots: 3, free: 5) == [.start("a")])
+        #expect(run([c("a", position: 1, load: 60), c("b", position: 2, load: 60)], slots: 2) == [.start("a"), .start("b")])
     }
 
     @Test func busyWorkerMeansANewOne() {
         let w = WorkerSnapshot(recipe: "r", freeCapacity: 0, reserved: 40 * gb)
-        #expect(run([c("a")], workers: [w], slots: 2) == [.wait("a", .memory(needed: 12 * gb, free: 8 * gb))])
-    }
-
-    @Test func startsDeductResources() {
-        #expect(run([c("a", position: 1, load: 20), c("b", position: 2, load: 20), c("c", position: 3, load: 20)], slots: 3)
-                == [.start("a"), .start("b"), .wait("c", .memory(needed: 22 * gb, free: 4 * gb))])
-    }
-
-    @Test func aWaitingJobDoesNotBlockSmallerOnes() {
-        #expect(run([c("big", position: 1, load: 60), c("small", position: 2, load: 1)], slots: 2)
-                == [.wait("big", .memory(needed: 62 * gb, free: 48 * gb)), .start("small")])
-    }
-
-    @Test func forceStartSkipsMemoryButNotSlots() {
-        #expect(run([c("a", force: true, load: 100)]) == [.start("a")])
-        #expect(run([c("a", force: true, load: 100)], running: 1) == [.wait("a", .noFreeSlot)])
-    }
-
-    /// Spec §8: an accepted too-big job starts when the machine is otherwise idle, skipping the memory checks.
-    @Test func anAcceptedTooBigJobStartsWhenNothingElseRuns() {
-        var big = c("big", load: 60)
-        big.memoryAccepted = true
-        #expect(run([big]) == [.start("big")])  // budget 48, free 64, needs 62: idle machine
-        #expect(run([big], running: 1, slots: 2) == [.wait("big", .memory(needed: 62 * gb, free: 48 * gb))])
-        #expect(run([c("first", position: 0, load: 1), big], slots: 2) == [.start("first"), .wait("big", .memory(needed: 62 * gb, free: 45 * gb))])
-        #expect(run([c("big", load: 60)]) == [.wait("big", .memory(needed: 62 * gb, free: 48 * gb))])  // not accepted: waits
-        var small = c("small", load: 10)
-        small.memoryAccepted = true
-        #expect(run([small], running: 1, slots: 2, budget: 48, free: 5) == [.wait("small", .memory(needed: 12 * gb, free: 5 * gb))])  // fits the budget: normal rules
-    }
-
-    @Test func anAcceptedJobTooBigForThisMacAlsoStartsWhenIdle() {
-        var big = c("big", load: 10)
-        big.memoryAccepted = true
-        #expect(Scheduler.decide(SchedulerInput(candidates: [big], budget: 48 * gb, systemFree: 4 * gb, physical: 8 * gb)) == [.start("big")])
+        #expect(run([c("a"), c("b", position: 2)], workers: [w], running: 1, slots: 2) == [.start("a"), .wait("b", .noFreeSlot)])
     }
 
     @Test func modelStatesAndPause() {
@@ -106,17 +58,23 @@ import Testing
                        budget: 48 * gb, systemFree: 64 * gb)
     }
 
-    @Test func aJobWaitingForMemoryUnloadsTheIdleModelsItDoesNotRun() {
+    @Test func aJobLoadingPastFreeMemoryUnloadsTheIdleModelsInItsWay() {
         let big = Candidate(jobId: "rig", recipe: "unirig", position: 1, need: MemoryNeed(load: 30 * gb, job: 10 * gb))
         let i = input([big], idle: ["pixal3d", "trellis"])
         let d = Scheduler.decide(i)
-        #expect(d == [.wait("rig", .memory(needed: 40 * gb, free: 22 * gb))])
+        #expect(d == [.start("rig")])
         #expect(Scheduler.keepLoaded(i, d) == ["unirig"])  // pixal3d and trellis go now, not after the idle timeout
     }
 
-    @Test func idleModelsStayWhileNothingWaitsForMemory() {
+    @Test func idleModelsStayWhenTheNewOneFits() {
         let small = Candidate(jobId: "a", recipe: "unirig", position: 1, need: MemoryNeed(load: 2 * gb, job: 1 * gb))
         let i = input([small], idle: ["pixal3d"])
+        #expect(Scheduler.keepLoaded(i, Scheduler.decide(i)) == nil)
+    }
+
+    @Test func aLoadedModelTakesItsJobWithoutUnloadingOthers() {
+        let next = Candidate(jobId: "a", recipe: "trellis", position: 1, need: MemoryNeed(load: 60 * gb, job: 10 * gb))
+        let i = input([next], idle: ["trellis", "pixal3d"])
         #expect(Scheduler.keepLoaded(i, Scheduler.decide(i)) == nil)
     }
 }

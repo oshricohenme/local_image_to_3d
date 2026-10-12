@@ -116,8 +116,6 @@ extension Lift {
             if !all.contains(a) { all.append(a) }
         }
         if !errors.isEmpty { throw LiftError.invalidInput(errors) }
-        let warning = try memoryWarning(checked.map { ($0.0.recipe, $0.0.task, $0.0.settings) }, firstIndex: 0)
-        if let warning, !acceptMemoryWarning { return .memoryWarning(warning) }
 
         let id = UUID().uuidString.lowercased()
         let now = Date()
@@ -132,7 +130,7 @@ extension Lift {
             let position = (try Double.fetchOne(db, sql: "SELECT MAX(position) FROM job") ?? 0) + 1
             let job = JobRecord(id: id, title: request.title ?? firstInput ?? request.steps[0].recipe, priority: request.priority,
                                 position: position, source: request.source, state: .queued, forceStart: false,
-                                memoryAccepted: warning != nil, currentStep: 0, createdAt: now, updatedAt: now,
+                                currentStep: 0, createdAt: now, updatedAt: now,
                                 export: export, credits: credits)
             try job.insert(db)
             for step in steps { try step.insert(db) }
@@ -141,24 +139,6 @@ extension Lift {
         }
         tick()
         return .accepted(try view(id))
-    }
-
-    /// The first step whose memory estimate (a new worker: load + job) is above this Mac's RAM or the budget.
-    func memoryWarning(_ steps: [(recipe: String, task: String, settings: [String: SettingValue])], firstIndex: Int) throws -> MemoryWarning? {
-        let physical = config.physicalMemory, budget = settings.memoryBudgetBytes
-        for (i, s) in steps.enumerated() {
-            guard let r = recipe(s.recipe) else { continue }
-            let need = try store.db.read { try Estimates.need($0, recipe: r, task: s.task, settings: s.settings) }.newWorker
-            guard need > physical || need > budget else { continue }
-            func gb(_ b: Int, binary: Bool = false) -> Double { Double(b) / (binary ? 1_073_741_824 : 1e9) }
-            func text(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...1))) }
-            let (neededGB, physicalGB, budgetGB) = (gb(need), gb(physical, binary: true), gb(budget))
-            let message = need > physical
-                ? "This model usually needs about \(text(neededGB)) GB; this Mac has \(text(physicalGB)) GB. It may be very slow or fail."
-                : "This model usually needs about \(text(neededGB)) GB; your memory budget is \(text(budgetGB)) GB (this Mac has \(text(physicalGB)) GB). It may be very slow or fail."
-            return MemoryWarning(message: message, neededGB: neededGB, physicalGB: physicalGB, budgetGB: budgetGB, step: firstIndex + i)
-        }
-        return nil
     }
 
     /// Copies each step's file inputs into `<jobDir>/inputs/<step>-<name>/`; an image set copies only its
@@ -262,9 +242,6 @@ extension Lift {
             guard let task = recipe(s.recipe)?.task(s.task) else { throw LiftError.notFound("recipe \(s.recipe)") }
             newSettings = try task.validated(settings: settings, prefix: "settings")
         }
-        let warning = try memoryWarning(v.steps.filter { $0.idx >= from }.map { s in (s.recipe, s.task, s.idx == from ? newSettings ?? s.settings : s.settings) },
-                                        firstIndex: from)
-        if let warning, !acceptMemoryWarning { return .memoryWarning(warning) }
         try store.db.write { db in
             for var s in v.steps where s.idx >= from {
                 s.state = .queued
@@ -281,7 +258,6 @@ extension Lift {
             }
             var job = v.job
             job.currentStep = from
-            job.memoryAccepted = warning != nil
             job.error = nil
             job.finishedAt = nil
             try self.setState(db, job: job, step: nil, .queued)

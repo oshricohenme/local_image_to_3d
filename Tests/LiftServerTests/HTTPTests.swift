@@ -182,26 +182,6 @@ import Testing
         await first.stop()
     }
 
-    @Test func tooBigJobsWarnAndQueueNothingUntilAccepted() async throws {
-        let lift = try await Fixtures.lift()
-        let server = Fixtures.server(lift)
-        let http = HTTP(base: URL(string: "http://127.0.0.1:\(try await server.start().port)")!)
-        _ = try await http.call("PATCH", "/v1/resources", json: ["memory_budget_gb": 0.1])  // Test Cube estimates 0.5 GB
-        let job: [String: Any] = ["steps": [["recipe": "test-cube", "task": "image_to_3d", "inputs": ["image_path": try Fixtures.image()]]]]
-        let warned = try await http.call("POST", "/v1/jobs", json: job)
-        #expect(warned.status == 200)
-        let warning = try #require(warned.json["memory_warning"] as? [String: Any])
-        #expect((warning["needed_gb"] as? Double ?? 0) > 0.1 && warning["message"] as? String != nil)
-        #expect((warned.json["hint"] as? String)?.contains("accept_memory_warning") == true)
-        #expect(try await lift.jobsList().isEmpty)
-        var accepted = job
-        accepted["accept_memory_warning"] = true
-        let queued = try await http.call("POST", "/v1/jobs", json: accepted)
-        #expect(queued.status == 202)
-        #expect(try await lift.jobsList().map(\.job.memoryAccepted) == [true])
-        await server.stop()
-    }
-
     @Test func portAndHFTokenAreServerSettings() async throws {
         let lift = try await Fixtures.lift()
         let secrets = MemorySecretStore()

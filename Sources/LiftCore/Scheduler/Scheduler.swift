@@ -25,12 +25,8 @@ public struct Candidate: Sendable, Equatable {
     public var forceStart: Bool
     public var model: ModelReadiness
     public var need: MemoryNeed
-    /// The caller accepted a memory warning for this job.
-    public var memoryAccepted: Bool
-
     public init(jobId: String, recipe: String, priority: Priority = .normal, position: Double, createdAt: Date = Date(timeIntervalSince1970: 0),
-                forceStart: Bool = false, model: ModelReadiness = .ready, need: MemoryNeed, memoryAccepted: Bool = false) {
-        self.memoryAccepted = memoryAccepted
+                forceStart: Bool = false, model: ModelReadiness = .ready, need: MemoryNeed) {
         self.jobId = jobId
         self.recipe = recipe
         self.priority = priority
@@ -96,10 +92,7 @@ public enum Scheduler {
 
     public static func decide(_ input: SchedulerInput) -> [Decision] {
         var slots = input.maxSlots - input.runningSteps
-        var reserved = input.workers.reduce(0) { $0 + $1.reserved }
-        var systemFree = input.systemFree
         var capacity = input.workers.map { ($0.recipe, $0.freeCapacity) }
-        var startedHere = 0
         var out: [Decision] = []
         for c in input.candidates.sorted(by: order) {
             if input.paused { out.append(.wait(c.jobId, .queuePaused)); continue }
@@ -111,38 +104,25 @@ public enum Scheduler {
             case .ready: break
             }
             guard slots > 0 else { out.append(.wait(c.jobId, .noFreeSlot)); continue }
+            // Memory never holds a job back: macOS swaps past RAM, and idle models in the way are unloaded (keepLoaded).
             let shared = capacity.firstIndex { $0.0 == c.recipe && $0.1 > 0 }
-            let needed = shared == nil ? c.need.newWorker : c.need.job
-            let budgetFree = input.budget - reserved
-            // An accepted too-big job (over the budget or this Mac's RAM) can never fit, so it starts when the
-            // machine is otherwise idle, skipping the memory checks; until then it waits like any other.
-            let tooBig = c.memoryAccepted && (needed > input.budget || needed > input.physical)
-            let idle = input.runningSteps == 0 && startedHere == 0
-            // An idle worker of this model just ran a job like this one, and right after a job it still holds that
-            // job's memory: the next job reuses it unchecked, so a queue of one model keeps going.
-            // ponytail: trusts the last job's fit; a much bigger setting on the same model could still overcommit.
-            if !c.forceStart && shared == nil && !(tooBig && idle) && (tooBig || needed > budgetFree || needed > systemFree) {
-                out.append(.wait(c.jobId, .memory(needed: needed, free: max(0, min(budgetFree, systemFree)))))
-                continue
-            }
             out.append(.start(c.jobId))
-            startedHere += 1
             slots -= 1
-            reserved += needed
-            systemFree -= needed
             if let shared { capacity[shared].1 -= 1 }
         }
         return out
     }
 
-    /// The models idle workers may keep while a job waits for memory: the ones those jobs run (sharing a loaded
-    /// model costs less than loading it again). Every other idle worker is unloaded now, not after the idle
-    /// timeout. nil when no job waits for memory.
+    /// When a starting job loads a model that doesn't fit beside the idle ones, the models idle workers may keep:
+    /// the ones those jobs run. Every other idle worker is unloaded now, not after the idle timeout. nil when it fits.
     public static func keepLoaded(_ input: SchedulerInput, _ decisions: [Decision]) -> Set<String>? {
-        let recipes = Dictionary(input.candidates.map { ($0.jobId, $0.recipe) }, uniquingKeysWith: { a, _ in a })
-        let waiting = decisions.compactMap { d -> String? in
-            if case .wait(let id, .memory) = d { recipes[id] } else { nil }
+        let byId = Dictionary(input.candidates.map { ($0.jobId, $0) }, uniquingKeysWith: { a, _ in a })
+        let loaded = Set(input.workers.filter { $0.freeCapacity > 0 }.map(\.recipe))
+        let free = min(input.budget - input.workers.reduce(0) { $0 + $1.reserved }, input.systemFree)
+        let short = decisions.compactMap { d -> String? in
+            guard case .start(let id) = d, let c = byId[id], !loaded.contains(c.recipe), c.need.newWorker > free else { return nil }
+            return c.recipe
         }
-        return waiting.isEmpty ? nil : Set(waiting)
+        return short.isEmpty ? nil : Set(short)
     }
 }
