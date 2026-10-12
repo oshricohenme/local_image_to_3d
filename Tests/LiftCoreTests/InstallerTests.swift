@@ -189,7 +189,7 @@ import Testing
         try "#!/bin/sh\n".write(to: bin.appending(path: "hf"), atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appending(path: "hf").path)
         try await inst.downloadWeights(entry.recipe, onLine: { _ in })
-        #expect(runner.displays.first == "\(bin.path)/hf download TencentARC/Pixal3D pipeline.json ckpts/a.safetensors --revision main")
+        #expect(runner.displays.last == "\(bin.path)/hf download TencentARC/Pixal3D pipeline.json ckpts/a.safetensors --revision main")
     }
 
     @Test func downloadWeightsRunsHFFromTheVenv() async throws {
@@ -202,8 +202,8 @@ import Testing
         try "#!/bin/sh\n".write(to: bin.appending(path: "hf"), atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appending(path: "hf").path)
         try await inst.downloadWeights(entry.recipe, onLine: { _ in })
-        #expect(runner.displays == ["\(bin.path)/hf download TencentARC/Pixal3D --revision main",
-                                    "\(bin.path)/hf download briaai/RMBG-2.0 --revision 1f3e2a7c"])
+        #expect(runner.displays == ["\(bin.path)/hf download briaai/RMBG-2.0 --revision 1f3e2a7c",  // gated first
+                                    "\(bin.path)/hf download TencentARC/Pixal3D --revision main"])
         #expect(runner.commands.allSatisfy { $0.environment["HF_HUB_CACHE"] == "/hf/hub" && $0.environment["HF_TOKEN"] == "hf_x" })
         #expect(try String(contentsOf: inst.logURL("pixal3d"), encoding: .utf8).contains("$ \(bin.path)/hf download TencentARC/Pixal3D"))
         await #expect(throws: LiftError.self) { try await self.installer(runner, token: nil).downloadWeights(entry.recipe, onLine: { _ in }) }

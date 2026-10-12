@@ -196,7 +196,7 @@ extension Lift {
         while true {
             do {
                 try? attempt(id)
-                for w in r.weights {
+                for w in r.downloadOrder {
                     do {
                         try await installer.downloadWeight(r, w, onLine: { line in reported.read(line, repo: w.repo) })
                     } catch { throw DownloadFailure(repo: w.repo, error: error) }

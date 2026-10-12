@@ -140,6 +140,12 @@ tasks:
         #expect(problems.contains(message))
     }
 
+    /// Gated weights download first: a refusal (terms not accepted) comes in seconds, not after the big repos.
+    @Test func gatedWeightsDownloadFirst() throws {
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.downloadOrder.map(\.repo) == ["briaai/RMBG-2.0", "TencentARC/Pixal3D"])
+    }
+
     @Test func noShimMeansNone() throws {
         let yaml = pixalYAML.replacingOccurrences(of: "shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }\n", with: "")
         guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }

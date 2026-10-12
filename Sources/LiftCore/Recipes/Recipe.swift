@@ -164,6 +164,8 @@ public struct Recipe: Codable, Sendable, Equatable {
     /// The install builds Metal shaders, so it needs the Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`).
     public var metalToolchain: Bool
     public var weights: [Weight]
+    /// Gated weights first, so a Hugging Face refusal (terms not accepted) comes before the big downloads.
+    public var downloadOrder: [Weight] { weights.filter(\.gated) + weights.filter { !$0.gated } }
     /// Who made it and under which licenses (spec §4a). Required: a recipe without it doesn't load.
     public var attribution: Attribution
     public var errors: [ErrorMessage]

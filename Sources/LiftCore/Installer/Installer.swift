@@ -330,7 +330,7 @@ public struct Installer: Sendable {
     /// `hf download <repo> --revision <rev>` for each weight, from the model's venv into the shared cache.
     /// Appends to `install.log`. Only ever started by an explicit user action (spec §6).
     public func downloadWeights(_ recipe: Recipe, onLine: @escaping @Sendable (String) -> Void) async throws {
-        for w in recipe.weights { try await downloadWeight(recipe, w, onLine: onLine) }
+        for w in recipe.downloadOrder { try await downloadWeight(recipe, w, onLine: onLine) }
     }
 
     /// `hf download` for one weight, in its own process group so a pause stops all of it. Run again, it picks

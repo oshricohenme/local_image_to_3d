@@ -335,6 +335,7 @@ uv (UniRig keeps files in LFS); Lift's own git runs its filter through `GIT_CONF
 - Lift never downloads weights on its own. Each recipe's `weights:` list (repo and optional revision) is
   shown with its total size, and **Download** (UI) or `models_download_weights` (MCP/HTTP, confirm
   needed) starts it explicitly, using `hf download` from the model's venv into the shared HF cache.
+  Gated repos download first, so terms not yet accepted fail the download at once, not after the big repos.
 - You can also download weights yourself outside Lift.
 - **`models_verify_weights`** runs before every worker start, and on demand. For each repo it gets the
   file list with LFS SHA-256 hashes and sizes from the Hugging Face API, checks every file exists in the
