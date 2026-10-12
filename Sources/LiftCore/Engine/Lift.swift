@@ -97,6 +97,8 @@ final class WorkerHandle {
     }
 
     var available: Bool { !stopping && job == nil }
+    /// Running a job, or unloading: its memory isn't back yet, so its slot stays taken until it exits.
+    var occupiesSlot: Bool { job != nil || stopping }
     var reserved: Int { max(lastFootprint, baseline + (job?.claim ?? 0)) }
 }
 
@@ -145,8 +147,8 @@ public actor Lift {
     var verifier: WeightsVerifier { WeightsVerifier(metadata: config.weightsMetadata, hub: config.hfHub, store: store) }
     var bundled: BundledRecipes { BundledRecipes(bundle: config.bundledRecipes, recipes: recipesDir) }
 
-    /// Opens the workdir, copies or refreshes the bundled recipes, marks jobs left loading/running as
-    /// interrupted, detects the toolchain, scans recipes and starts scheduling. Nothing is cloned or downloaded.
+    /// Opens the workdir, copies or refreshes the bundled recipes, puts jobs left loading/running back in the
+    /// queue, detects the toolchain, scans recipes and starts scheduling. Nothing is cloned or downloaded.
     public static func open(_ config: LiftConfig) async throws -> Lift {
         let lift = try Lift(config: config)
         await lift.start()
@@ -188,6 +190,9 @@ public actor Lift {
                 await self?.housekeep()
             }
         }
+        // Jobs a quit or crash cut short go back in the queue by themselves, from the step that was cut short
+        // (finished steps are kept). It runs unattended: nobody is asked.
+        do { _ = try jobsResolveInterrupted(action: .requeue) } catch { print("lift: requeueing interrupted jobs failed: \(error)") }
         tick()
     }
 
@@ -302,7 +307,7 @@ public actor Lift {
             let input = SchedulerInput(
                 candidates: candidates,
                 workers: workers.values.map { WorkerSnapshot(recipe: $0.recipe.id, freeCapacity: $0.available ? 1 : 0, reserved: $0.reserved) },
-                runningSteps: workers.values.filter { $0.job != nil }.count,
+                runningSteps: workers.values.filter(\.occupiesSlot).count,
                 maxSlots: settings.maxSlots, budget: settings.memoryBudgetBytes, systemFree: config.systemFree(),
                 physical: config.physicalMemory, paused: settings.queuePaused)
             let byId = Dictionary(uniqueKeysWithValues: pending.map { ($0.0.id, $0) })
@@ -533,6 +538,9 @@ public actor Lift {
         w.idleSince = .now
         w.lastFootprint = footprint(w)
         a.peak = max(a.peak, w.lastFootprint)
+        // The worker freed the job's memory before reporting. A model still holding more than it did when it
+        // loaded is unloaded, so the next job starts on a fresh one with its memory back.
+        if Self.keepsTooMuch(footprint: w.lastFootprint, baseline: w.baseline) { stop(w) }
         let jobBytes = max(0, a.peak - a.startFootprint)
         try store.db.write { db in
             guard var job = try JobRecord.fetchOne(db, key: id),
@@ -581,6 +589,12 @@ public actor Lift {
             logs[id] = nil
         }
         tick()
+    }
+
+    /// After a job: more than 2 GB (or a tenth of the model) above what the model held when it loaded.
+    /// ponytail: fixed allowance; a model that loads its weights lazily on the first job reloads every job.
+    static func keepsTooMuch(footprint: Int, baseline: Int) -> Bool {
+        footprint > baseline + max(2_000_000_000, baseline / 10)
     }
 
     // MARK: housekeeping

@@ -120,3 +120,15 @@ import Testing
         #expect(Scheduler.keepLoaded(i, Scheduler.decide(i)) == nil)
     }
 }
+
+@Suite struct BetweenJobsTests {
+    let gb = 1_000_000_000
+
+    /// After a job a model must be back near what it held when it loaded, or it's unloaded before the next job.
+    @Test func aModelStillHoldingTheJobsMemoryIsUnloaded() {
+        #expect(!Lift.keepsTooMuch(footprint: 15 * gb, baseline: 18 * gb))  // TRELLIS.2 after a job: freed
+        #expect(!Lift.keepsTooMuch(footprint: 19 * gb, baseline: 18 * gb))
+        #expect(Lift.keepsTooMuch(footprint: 30 * gb, baseline: 18 * gb))
+        #expect(Lift.keepsTooMuch(footprint: 3 * gb, baseline: gb / 3))  // lazy weights: reloaded each job
+    }
+}

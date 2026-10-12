@@ -205,3 +205,18 @@ def test_announce_names_an_upstream_step_when_it_starts(capsys):
     assert Pipeline().decode(3) == 6
     assert capsys.readouterr().out == "[Stage] Decoding the 3D shape\n"
     assert Pipeline.decode.__name__ == "decode"
+
+
+def test_memory_is_freed_before_the_job_is_reported(monkeypatch, tmp_path):
+    # Lift sends the next job as soon as it hears "done": the last job's memory must already be back by then.
+    sys.path.insert(0, str(SRC))
+    from types import SimpleNamespace
+    from lift_worker import worker as w
+    order = []
+    monkeypatch.setattr(w, "_free_memory", lambda: order.append("free"))
+    worker = w.Worker({}, SimpleNamespace(send=lambda **ev: order.append(ev["ev"])))
+    for name, run in [("ok", lambda state, job: []), ("bad", lambda state, job: 1 / 0)]:
+        worker.launcher = SimpleNamespace(run=run)
+        job = w.Job({"job": name, "task": "t", "out_dir": str(tmp_path / name)}, [])
+        worker._run(job)
+    assert order == ["free", "done", "free", "error"]

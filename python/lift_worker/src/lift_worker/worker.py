@@ -188,15 +188,16 @@ class Worker:
         try:
             os.makedirs(job.out_dir, exist_ok=True)
             outputs = self.launcher.run(self.state, job) or []
-            for s in self.streams:
-                s.drain()
-            self.ch.send(ev="done", job=job.id, outputs=[os.path.abspath(o) for o in outputs])
+            result = dict(ev="done", job=job.id, outputs=[os.path.abspath(o) for o in outputs])
         except BaseException as e:  # noqa: BLE001 - SystemExit from upstream fails the job, not the worker
-            for s in self.streams:
-                s.drain()
-            self.ch.send(ev="error", job=job.id, message=f"{type(e).__name__}: {e}", traceback=traceback.format_exc())
-        finally:
-            self.local.job = None
-            with self.lock:
-                self.jobs.pop(job.id, None)
-            _free_memory()
+            # Strings only: the exception's frames hold the job's tensors, which must go before memory is freed.
+            result = dict(ev="error", job=job.id, message=f"{type(e).__name__}: {e}", traceback=traceback.format_exc())
+        for s in self.streams:
+            s.drain()
+        self.local.job = None
+        with self.lock:
+            self.jobs.pop(job.id, None)
+        # Before reporting: Lift sends the next job as soon as it hears this one ended, and measures the model's
+        # memory then to decide whether to unload it, so the job's memory must already be back.
+        _free_memory()
+        self.ch.send(**result)
