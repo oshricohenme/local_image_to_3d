@@ -102,6 +102,8 @@ public final class AppModel {
     public private(set) var server: LiftServer?
     public private(set) var serverStatus: ServerStatus?
     public private(set) var queue: QueueStatus?
+    /// Failed jobs, newest first, until retried or deleted (the Queue's Failed list).
+    public private(set) var failed: [JobView] = []
     public private(set) var resources: ResourcesView?
     public private(set) var models: [ModelView] = []
     public private(set) var settings = Settings()
@@ -330,6 +332,7 @@ public final class AppModel {
         guard let lift else { return }
         do {
             let queue = try await lift.queueStatus()
+            let failed = try await lift.jobsList(JobFilter(states: [.failed]))
             let resources = try await lift.resourcesGet()
             let models = try await lift.modelsList()
             let settings = await lift.settingsGet()
@@ -340,6 +343,7 @@ public final class AppModel {
             if hubFreeBytes != free { hubFreeBytes = free }
             // Assign only changes: every assignment re-renders the views that read it.
             if self.queue != queue { self.queue = queue }
+            if self.failed != failed { self.failed = failed }
             if self.resources != resources { self.resources = resources }
             sample(models)
             if self.models != models { self.models = models; generate.models = models }
@@ -518,6 +522,18 @@ public final class AppModel {
             confirmation = Confirmation(message: w.message, action: "Run Anyway") { [weak self] in
                 self?.run { try await self?.retry(id, settings: settings, accept: true) }
             }
+        }
+    }
+
+    /// Retries every failed job; those that may not fit in memory wait for one "Run Anyway" together.
+    public func retryAll(_ ids: [String]) async throws {
+        var warned: [String] = []
+        for id in ids {
+            if case .memoryWarning = try await engine.jobsRetry(id) { warned.append(id) }
+        }
+        guard !warned.isEmpty else { return }
+        confirmation = Confirmation(message: "\(warned.count) of these jobs may need more memory than is free right now.", action: "Run Anyway") { [weak self] in
+            self?.run { for id in warned { _ = try await self?.engine.jobsRetry(id, acceptMemoryWarning: true) } }
         }
     }
 

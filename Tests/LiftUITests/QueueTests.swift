@@ -1,3 +1,4 @@
+import Foundation
 import LiftCore
 import Testing
 @testable import LiftUI
@@ -27,5 +28,19 @@ import Testing
         let links = Credits.links(v)
         #expect(links.map(\.text) == ["Made with Test Cube (Lift test fixture) by " + (v.attribution?.authors.joined(separator: ", ") ?? "")])
         #expect(links.first?.url == v.attribution?.homepage)
+    }
+}
+
+@Suite struct JobPhotosTests {
+    @Test func aJobShowsItsPhotosAndAFolderItsImages() async throws {
+        let lift = try await UIFixtures.lift()
+        var v = try await lift.jobsSubmit(UIFixtures.cube(try UIFixtures.file("chair.png").path)).accepted()
+        #expect(JobPhotos.paths(v).map { URL(filePath: $0).pathExtension } == ["png"])
+
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in ["b.jpg", "a.PNG", "notes.txt"] { try Data().write(to: folder.appending(path: name)) }
+        v.steps[0].inputs = ["views": folder.path, "prompt": "a chair"]
+        #expect(JobPhotos.paths(v).map { URL(filePath: $0).lastPathComponent } == ["a.PNG", "b.jpg"])
     }
 }
