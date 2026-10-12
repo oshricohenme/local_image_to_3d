@@ -145,7 +145,7 @@ import Testing
     static let specTools: Set<String> = [
         "jobs_submit", "jobs_list", "jobs_get", "jobs_wait", "jobs_cancel", "jobs_retry", "jobs_move", "jobs_set_priority",
         "jobs_force_start", "jobs_delete", "jobs_export", "jobs_list_interrupted", "jobs_resolve_interrupted",
-        "queue_status", "queue_pause", "queue_resume",
+        "queue_status", "queue_resume",  // pausing is the app's Pause button only
         "models_list", "models_get", "models_install", "models_reinstall", "models_set_pin", "models_check_upstream",
         "models_uninstall", "models_install_log", "models_readme", "models_download_weights", "models_verify_weights",
         "models_cancel_install", "recipes_list",

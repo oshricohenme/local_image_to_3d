@@ -121,7 +121,6 @@ enum Tools {
         "jobs_set_priority": { a, c in .job(try await c.lift.jobsSetPriority(a.required("id"), a.required("priority"))) },
         "jobs_force_start": { a, c in .job(try gated(await c.lift.jobsForceStart(a.required("id"), confirm: a.flag("confirm")))) },
         "queue_status": { _, c in .json(QueueOut(try await c.lift.queueStatus())) },
-        "queue_pause": { _, c in .json(QueueOut(try await c.lift.queuePause())) },
         "queue_resume": { _, c in .json(QueueOut(try await c.lift.queueResume())) },
         "models_list": { _, c in .json(ModelListOut(models: try await c.lift.modelsList())) },
         "models_get": { a, c in .json(ModelOut(try await c.lift.modelsGet(a.required("id")))) },

@@ -125,9 +125,6 @@ struct API: APIProtocol {
         .ok(.init(body: .json(try Wire.convert(QueueOut(try await lift.queueStatus())))))
     }
 
-    func queuePause(_ input: Operations.QueuePause.Input) async throws -> Operations.QueuePause.Output {
-        .ok(.init(body: .json(try Wire.convert(QueueOut(try await lift.queuePause())))))
-    }
 
     func queueResume(_ input: Operations.QueueResume.Input) async throws -> Operations.QueueResume.Output {
         .ok(.init(body: .json(try Wire.convert(QueueOut(try await lift.queueResume())))))

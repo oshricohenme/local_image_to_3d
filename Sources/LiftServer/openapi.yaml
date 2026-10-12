@@ -281,21 +281,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/QueueStatus' }
         default: { $ref: '#/components/responses/Problem' }
-  /v1/queue/pause:
-    post:
-      operationId: queue_pause
-      summary: Pause the queue (running steps finish; nothing new starts).
-      responses:
-        '200':
-          description: The queue.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/QueueStatus' }
-        default: { $ref: '#/components/responses/Problem' }
   /v1/queue/resume:
     post:
       operationId: queue_resume
-      summary: Resume the queue.
+      summary: Resume the queue. Only the person at the Mac can pause it (the app's Pause button); there is no pause over HTTP or MCP.
       responses:
         '200':
           description: The queue.

@@ -30,7 +30,7 @@ public struct Settings: Codable, Sendable, Equatable {
         case notifications, launchAtLogin = "launch_at_login", menuBar = "menu_bar"
     }
 
-    /// Keys `settings_set` accepts. The rest have their own commands (queue_pause, models_set_pin).
+    /// Keys `settings_set` accepts. The rest have their own commands (the app's Pause button, models_set_pin).
     public static let userKeys: Set<String> = ["max_slots", "max_downloads", "memory_budget_gb", "idle_unload_minutes", "dev_recipes",
                                                "export_dir", "export_formats", "cleanup_after_export",
                                                "notifications", "launch_at_login", "menu_bar"]

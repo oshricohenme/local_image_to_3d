@@ -101,6 +101,15 @@ import Testing
         #expect(try await lift.jobsList(JobFilter(text: title)).isEmpty)
     }
 
+    /// Only the person at the Mac pauses the queue (the app's button): there's no pause over HTTP, nor through settings.
+    @Test func nothingRemoteCanPauseTheQueue() async throws {
+        let (lift, _, base) = try await ServerFixture.shared.get()
+        let http = HTTP(base: base)
+        #expect(try await http.call("POST", "/v1/queue/pause").status == 404)
+        #expect(try await http.call("POST", "/v1/settings", json: ["key": "queue_paused", "value": true]).status == 422)
+        #expect(try await lift.queueStatus().paused == false)
+    }
+
     @Test func confirmGatesAnswer409AndChangeNothing() async throws {
         let (_, _, base) = try await ServerFixture.shared.get()
         let http = HTTP(base: base)
