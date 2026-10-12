@@ -33,8 +33,9 @@ install:
   - ln -sfn ../venv repo/.venv
   # setup.sh installs unpinned torch. 2.14 headers need C++20 (the mtl* builds use C++17), 2.9 lacks
   # at::mps::dispatch_sync_with_rethrow, mtlgemm needs >=2.11: 2.13 fits. UV_NO_CACHE avoids stale local builds.
+  # Relative: uv splits UV_CONSTRAINT on spaces ("Application Support"), and setup.sh runs from repo/.
   - printf 'torch==2.13.0\n' > torch-constraint.txt
-  - cd repo && UV_CONSTRAINT="$PWD/../torch-constraint.txt" UV_NO_CACHE=1 bash setup.sh
+  - cd repo && UV_CONSTRAINT=../torch-constraint.txt UV_NO_CACHE=1 bash setup.sh
 attribution:   # spec §4a; facts from the READMEs and LICENSE files at the pins and the Hugging Face cards
   project: TRELLIS.2
   authors: [Jianfeng Xiang, Xiaoxue Chen, Sicheng Xu, Ruicheng Wang, Zelong Lv, Yu Deng, Hongyuan Zhu, Yue Dong, Hao Zhao,

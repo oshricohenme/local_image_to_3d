@@ -92,7 +92,7 @@ import Testing
         let m = inst.dir("trellis2-mac").path
         try await inst.install(try entry("trellis2-mac"), pin: nil, onLine: { _ in })
         let d = runner.displays
-        let setup = try #require(d.firstIndex(of: #"cd repo && UV_CONSTRAINT="$PWD/../torch-constraint.txt" UV_NO_CACHE=1 bash setup.sh"#))
+        let setup = try #require(d.firstIndex(of: "cd repo && UV_CONSTRAINT=../torch-constraint.txt UV_NO_CACHE=1 bash setup.sh"))
         for dep in ["TRELLIS.2", "deps/mtlbvh", "deps/mtldiffrast", "deps/mtlmesh", "deps/mtlgemm", "deps/trellis2-apple"] {
             let clone = try #require(d.firstIndex { $0.contains("git clone --filter=blob:none") && $0.contains(" repo/\(dep); }") }, "\(dep)")
             #expect(clone < setup)
