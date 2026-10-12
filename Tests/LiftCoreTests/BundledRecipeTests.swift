@@ -27,7 +27,7 @@ import Testing
     @Test func shimConfigsMatchTheGoNoGoFindings() throws {
         let registry = try Substitute.registry(shared: Fixtures.devRecipes.appending(path: "shared"))
         func shim(_ id: String) throws -> String? { try ShimConfig.build(entry(id).recipe, registry: registry)?.json }
-        #expect(try shim("pixal3d") == #"{"aliases":{"nvdiffrast":"mtldiffrast"},"env":{},"patches":[],"standins":["flash_attn"]}"#)
+        #expect(try shim("pixal3d") == #"{"aliases":{"nvdiffrast":"mtldiffrast"},"env":{},"patches":[],"standins":["flash_attn","natten"]}"#)
         #expect(try shim("unirig") == #"{"aliases":{},"env":{},"patches":["transformers_fa2_to_sdpa","torch_scatter_mps","torch_cluster_mps"],"standins":["flash_attn","spconv"]}"#)
         #expect(try shim("trellis2-mac") == nil)
     }

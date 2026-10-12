@@ -12,7 +12,8 @@ import importlib.util
 import sys
 import threading
 
-_STANDINS = {"flash_attn": "lift_shim.standins.flash_attn", "spconv": "lift_shim.standins.spconv"}
+_STANDINS = {"flash_attn": "lift_shim.standins.flash_attn", "spconv": "lift_shim.standins.spconv",
+             "natten": "lift_shim.standins.natten"}
 
 
 _IDENTITY = ("__name__", "__spec__", "__package__", "__loader__", "__file__", "__path__", "__cached__")

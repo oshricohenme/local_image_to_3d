@@ -13,7 +13,7 @@ repo: https://github.com/TencentARC/Pixal3D
 commit: f7cf38429b0bd264f1995f0f8743a88b1c728b94
 python: "3.11"
 platform: { status: supported }
-shim: {}          # on; the substitutes below add the nvdiffrast alias and the flash_attn stand-in
+shim: {}          # on; the substitutes below add the nvdiffrast alias and the flash_attn and natten stand-ins
 metal_toolchain: true
 install:
   # torch 2.11: the mtl* substitutes need >=2.11 and build with C++17, which 2.14 headers reject.
@@ -26,7 +26,9 @@ install:
   - uv pip install "click>=8.3.1" matplotlib requests huggingface-hub starlette "utils3d_moge @ git+https://github.com/EasternJournalist/utils3d-moge.git@62f09d58509485564e24d5d9f6aac9ee9ebc0c37" "pipeline @ git+https://github.com/EasternJournalist/pipeline.git@1c511390d90226c00c101f34b84df26a0f8789b4"
   - uv pip install https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
   - uv pip install setuptools wheel pybind11 xatlas fast-simplification scipy
-substitutes: [flex_gemm, nvdiffrast, cumesh, o_voxel, flash_attn]
+  # NAF (torch.hub valeoai/NAF, loaded at run time) imports einops; its natten is a substitute.
+  - uv pip install einops
+substitutes: [flex_gemm, nvdiffrast, cumesh, o_voxel, flash_attn, natten]
 attribution:   # spec §4a; facts from the README, NOTICE and LICENSE at the pin and the Hugging Face cards
   project: Pixal3D
   authors: [Dong-Yang Li, Wang Zhao, Yuxin Chen, Wenbo Hu, Meng-Hao Guo, Fang-Lue Zhang, Ying Shan, Shi-Min Hu,

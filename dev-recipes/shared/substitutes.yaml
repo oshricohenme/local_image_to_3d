@@ -46,6 +46,9 @@ o_voxel:
 
 flash_attn: { standin: flash_attn }
 
+# natten's kernels are CUDA-only (its flex backend: CUDA or CPU, never MPS): lift_shim's pure-torch na2d.
+natten: { standin: natten }
+
 # spconv has no macOS wheel or sdist: lift_shim's pure-torch SubMConv3d / SparseConvTensor.
 spconv: { standin: spconv }
 
