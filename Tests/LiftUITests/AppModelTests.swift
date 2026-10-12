@@ -74,7 +74,8 @@ import Testing
         #expect(try await eventually { try await app.engine.jobsList().isEmpty })
     }
 
-    @Test func interruptedJobsAreOfferedOnLaunch() async throws {
+    /// A job cut short by a crash is back in the queue on launch, with nothing to answer.
+    @Test func interruptedJobsGoBackInTheQueueOnLaunch() async throws {
         let prefs = MemoryPrefs()
         let first = try await UIFixtures.app(prefs)
         let workdir = try #require(first.workdir)
@@ -86,12 +87,8 @@ import Testing
         let app = try UIFixtures.newApp(prefs)
         #expect(await app.open(workdir))
         defer { Task { await app.close() } }
-        #expect(app.interrupted.map(\.job.id) == [id] && app.showInterrupted)
-        app.showInterrupted = false  // Decide Later: the sheet goes, the jobs stay for the Queue's button
-        #expect(app.interrupted.map(\.job.id) == [id])
-        app.resolveInterrupted(.requeue)
-        #expect(app.interrupted.isEmpty)
-        #expect(try await eventually { try await app.engine.jobsGet(id).job.state == .waiting })
+        #expect(try await app.engine.jobsGet(id).job.state == .waiting)
+        #expect(try await app.engine.jobsListInterrupted().isEmpty)
     }
 
     @Test func notifiesFinishedJobsAndNewMemoryWaits() async throws {

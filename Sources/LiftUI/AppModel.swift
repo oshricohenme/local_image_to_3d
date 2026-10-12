@@ -103,10 +103,6 @@ public final class AppModel {
     public private(set) var resources: ResourcesView?
     public private(set) var models: [ModelView] = []
     public private(set) var settings = Settings()
-    /// Jobs found interrupted at launch, until resolved (spec §7). Decide Later only hides the sheet;
-    /// the Queue's Interrupted button brings it back.
-    public var interrupted: [JobView] = []
-    public var showInterrupted = false
     /// The most recent job that finished while the app was watching (menu bar "Just finished").
     public private(set) var lastFinished: JobView?
     public var confirmation: Confirmation?
@@ -260,7 +256,7 @@ public final class AppModel {
         phase = .ready
     }
 
-    /// Opens (creating if needed) the workdir, starts the server, and loads interrupted jobs.
+    /// Opens (creating if needed) the workdir and starts the server. Jobs a quit cut short are already back in the queue.
     /// `ready: false` keeps the wizard on screen (it opens Lift halfway through).
     @discardableResult
     public func open(_ workdir: URL, ready: Bool = true) async -> Bool {
@@ -284,8 +280,6 @@ public final class AppModel {
                 self.server = nil  // the badge and Settings then say it isn't running
                 alert = "The HTTP/MCP server didn't start: \(Format.error(error))"
             }
-            interrupted = try await lift.jobsListInterrupted()
-            showInterrupted = !interrupted.isEmpty
             await refresh()
             if ready { phase = .ready }
             refresher = Task { [weak self] in
@@ -560,13 +554,6 @@ public final class AppModel {
         install(model)
     }
 
-    public func resolveInterrupted(_ action: InterruptedAction) {
-        let ids = interrupted.map(\.job.id)
-        interrupted = []
-        showInterrupted = false
-        run { _ = try await self.lift?.jobsResolveInterrupted(ids: ids, action: action) }
-    }
-
     /// The end of a job's log (`<workdir>/jobs/<id>/log.txt`).
     public func logTail(_ job: String, maxBytes: Int = 16_384) -> String {
         guard let workdir, let handle = try? FileHandle(forReadingFrom: workdir.appending(path: "jobs/\(job)/log.txt")) else { return "" }
@@ -577,11 +564,11 @@ public final class AppModel {
     }
 
     /// Moves the working directory (database, recipes, models, jobs) and reopens Lift there.
-    /// Needs confirmation; workers stop and running jobs come back as interrupted.
+    /// Needs confirmation; workers stop and running jobs go back in the queue.
     public func moveWorkdir(to destination: URL) {
         guard let from = workdir else { return }
         let message = "Moves Lift's working directory from \(from.path) to \(destination.path). Workers stop, "
-            + "running jobs come back as interrupted, and the HTTP/MCP server restarts. Installed models may need Reinstall "
+            + "running jobs start over from their current step, and the HTTP/MCP server restarts. Installed models may need Reinstall "
             + "if their environment has absolute paths."
         confirmation = Confirmation(message: message) { [weak self] in
             guard let self else { return }

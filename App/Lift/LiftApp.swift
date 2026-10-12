@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         !app.settings.menuBar
     }
 
-    /// Stops workers and the server before quitting; running jobs come back as interrupted next launch.
+    /// Stops workers and the server before quitting; running jobs go back in the queue at the next launch.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task {
             await app.close()

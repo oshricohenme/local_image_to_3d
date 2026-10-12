@@ -2,7 +2,7 @@ import LiftCore
 import SwiftUI
 
 /// The main window: the wizard on first launch, then the sidebar (Generate, Queue, History, Models,
-/// Settings) with the server badge and interrupted sheet, plus the app-wide install sheets (About this model, Hugging
+/// Settings) with the server badge, plus the app-wide install sheets (About this model, Hugging
 /// Face access), confirmation dialog and alert.
 public struct RootView: View {
     @Bindable var app: AppModel
@@ -71,9 +71,6 @@ public struct RootView: View {
             case .models: ModelsView(app: app)
             case .settings: SettingsView(app: app)
             }
-        }
-        .sheet(isPresented: Binding(get: { app.showInterrupted && !app.interrupted.isEmpty }, set: { app.showInterrupted = $0 })) {
-            InterruptedSheet(app: app)
         }
     }
 

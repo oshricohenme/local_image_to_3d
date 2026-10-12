@@ -50,9 +50,6 @@ struct QueueView: View {
         }
         .navigationTitle("Queue")
         .toolbar {
-            if !app.interrupted.isEmpty {
-                Button("Interrupted · \(app.interrupted.count)") { app.showInterrupted = true }
-            }
             let paused = app.queue?.paused == true
             Button {
                 app.run { _ = paused ? try await app.engine.queueResume() : try await app.engine.queuePause() }

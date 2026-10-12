@@ -130,7 +130,8 @@ extension Fixtures {
         #expect(try await lift.jobsForceStart(id, confirm: true).value?.job.forceStart == true)
     }
 
-    @Test func interruptedJobsAfterRelaunch() async throws {
+    /// A quit or crash cuts jobs short: the next open puts them back in the queue by itself, no one is asked.
+    @Test func interruptedJobsGoBackInTheQueueOnRelaunch() async throws {
         let workdir = try Fixtures.tempDir()
         let first = try await Fixtures.lift(workdir: workdir)
         let steps = [cube(try Fixtures.image()), StepRequest(recipe: "test-cube", task: "fake_rig")]
@@ -146,14 +147,12 @@ extension Fixtures {
             }
         }
         let lift = try await Fixtures.lift(workdir: workdir)
-        #expect(try await lift.jobsListInterrupted().map(\.job.id).sorted() == [a, b].sorted())
-        #expect(try await lift.jobsGet(a).steps.map(\.state) == [.succeeded, .interrupted])
-        let requeued = try await lift.jobsResolveInterrupted(ids: [a], action: .requeue)
-        #expect(requeued.first?.steps.map(\.state) == [.succeeded, .waiting])  // restarts from step 1
-        #expect(requeued.first?.job.currentStep == 1)
-        _ = try await lift.jobsResolveInterrupted(action: .discard)
-        #expect(try await lift.jobsGet(b).job.state == .cancelled)
         #expect(try await lift.jobsListInterrupted().isEmpty)
+        for id in [a, b] {
+            let v = try await lift.jobsGet(id)
+            #expect(v.steps.map(\.state) == [.succeeded, .waiting])  // restarts from step 1, step 0 kept
+            #expect(v.job.currentStep == 1 && v.job.state == .waiting)
+        }
     }
 
 }
