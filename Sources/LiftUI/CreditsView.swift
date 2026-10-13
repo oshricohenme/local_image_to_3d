@@ -17,7 +17,21 @@ public struct CreditsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Lift").font(.largeTitle).bold()
-                Text("Lift runs other people's open-source projects on your Mac. They made the models; Lift only installs and runs them.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Made by Oshri Cohen").font(.headline)
+                    HStack {
+                        Link("LinkedIn", destination: URL(string: "https://www.linkedin.com/in/oshricohen")!)
+                        Link("Website", destination: URL(string: "https://oshricohen.me")!)
+                        Link("GitHub", destination: URL(string: "https://github.com/oshricohenme")!)
+                    }
+                    .font(.callout)
+                }
+                Text("""
+                    Lift doesn't include any models. Each model is a recipe: instructions that download a project \
+                    from its authors' own repository and run it on your Mac. The models were made by the people \
+                    listed below, not by me, and I'm not responsible for them, what they make, or how it's used. \
+                    Each one has its own license; check it before using what it makes, especially for commercial work.
+                    """)
                     .foregroundStyle(.secondary)
                 ForEach(Self.attributions(app.models), id: \.project) { a in
                     Divider()
