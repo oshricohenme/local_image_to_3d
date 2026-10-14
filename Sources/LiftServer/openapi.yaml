@@ -1,0 +1,1273 @@
+openapi: 3.1.0
+info:
+  title: Lift
+  version: 1.0.0
+  summary: Run open-source generative-model projects locally on this Mac.
+  description: |
+    Lift executes; the caller decides. Every operation here except the file download is also an MCP tool
+    with the same name (the operationId) and arguments at `/mcp`; MCP reads files as `lift://` resources.
+
+    **Risky operations** take `confirm`. Without `confirm=true` they change nothing and answer
+    `409` with `error: confirmation_required` and an `impact` describing what would happen.
+
+    **Too big for this Mac** (spec §8): `jobs_submit` and `jobs_retry` answer `200` with `memory_warning`
+    (and queue nothing) when a step's estimate is above this Mac's memory or the budget; repeat with
+    `accept_memory_warning: true` to run it anyway. A queued job answers `202`.
+
+    **Errors** use one body (`Problem`): `422 invalid_input` (with per-field `fields`), `404 not_found`,
+    `409 invalid_state | prerequisite | confirmation_required`, `500 command_failed` (with the command
+    and the end of its output), `401 unauthorized`, `403 forbidden`.
+
+    **Auth:** requests from this Mac need no token. With LAN mode on, other machines send
+    `Authorization: Bearer <token>`.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+paths:
+  /v1/jobs:
+    post:
+      operationId: jobs_submit
+      summary: Submit a job (one or more chained steps).
+      description: |
+        Inputs are validated before anything is queued; bad input answers 422 with one error per field.
+        For each task input `<name>`, give `<name>_path` (an absolute path on this Mac, or just `<name>`),
+        or `<name>_base64` (the file's content) with an optional `<name>_filename` (default `<name>`; give
+        the right extension for meshes). `text` inputs take the text as `<name>`. A chained step may leave
+        its first input out: it gets the previous step's first output. Multipart uploads send the job as
+        the `job` part and each file as a part named `steps[<i>].<name>`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitJob' }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [job]
+              properties:
+                job: { $ref: '#/components/schemas/SubmitJob' }
+              additionalProperties:
+                description: 'A file, as a part named steps[<i>].<input> (any content type).'
+                type: string
+                contentMediaType: '*/*'
+            encoding:
+              job: { contentType: application/json }
+      responses:
+        '200':
+          description: Too big for this Mac; nothing was queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryWarningResult' }
+        '202':
+          description: Queued.
+          headers:
+            Location:
+              required: true
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: jobs_list
+      summary: List jobs, newest first.
+      parameters:
+        - name: state
+          in: query
+          description: Only jobs in these states.
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/JobState' }
+        - { name: recipe, in: query, description: Only jobs with a step of this recipe., schema: { type: string } }
+        - { name: modality, in: query, description: 'Only jobs with a step of this modality (3d, image, video, audio).', schema: { type: string } }
+        - { name: text, in: query, description: Case-insensitive match on the title., schema: { type: string } }
+      responses:
+        '200':
+          description: The jobs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/interrupted:
+    get:
+      operationId: jobs_list_interrupted
+      summary: Jobs that were loading or running when Lift last stopped.
+      responses:
+        '200':
+          description: The interrupted jobs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/interrupted/resolve:
+    post:
+      operationId: jobs_resolve_interrupted
+      summary: Requeue (from the interrupted step) or discard interrupted jobs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveInterrupted' }
+      responses:
+        '200':
+          description: The jobs after the change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    get:
+      operationId: jobs_get
+      summary: One job with its steps and outputs.
+      responses:
+        '200':
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: jobs_delete
+      summary: Delete a job, its inputs, outputs and log (stops it first if running).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deleted' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/wait:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    get:
+      operationId: jobs_wait
+      summary: Wait until the job finishes or the timeout passes; returns the job as it is then.
+      description: Over MCP, a request with a progress token gets progress notifications (stage name and fraction).
+      parameters:
+        - name: timeout_seconds
+          in: query
+          description: 'How long to wait (default 30, at most 3600). Keep it below your HTTP client''s timeout; 0 answers at once.'
+          schema: { type: number, minimum: 0, maximum: 3600, default: 30 }
+      responses:
+        '200':
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_cancel
+      summary: Cancel a job. A loading or running job needs confirm.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The cancelled job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/retry:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_retry
+      summary: Requeue a finished job from its first unfinished step, optionally with new settings for that step.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetryJob' }
+      responses:
+        '202':
+          description: The requeued job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        '200':
+          description: Too big for this Mac; nothing was requeued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryWarningResult' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/export:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_export
+      summary: Export a finished job again. Formats and folder default to the job's own export, then the export settings. Never deletes the job's files.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExportJob' }
+      responses:
+        '200':
+          description: The job, with one export result per format.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/move:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_move
+      summary: Move a job before or after another job, or to a 0-based position among unfinished jobs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoveJob' }
+      responses:
+        '200':
+          description: The moved job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/priority:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_set_priority
+      summary: Set a job's priority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetPriority' }
+      responses:
+        '200':
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/force-start:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    post:
+      operationId: jobs_force_start
+      summary: Start a waiting job without the memory checks (the slot check still applies).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/jobs/{id}/outputs/{file}:
+    x-mcp: false
+    parameters:
+      - { $ref: '#/components/parameters/JobId' }
+      - { name: file, in: path, required: true, description: An output's file name., schema: { type: string } }
+    get:
+      operationId: jobs_get_output
+      summary: Download one output file (MCP reads it as the resource lift://jobs/{id}/outputs/{file}).
+      responses:
+        '200':
+          description: The file.
+          content:
+            application/octet-stream:
+              schema: { type: string, contentEncoding: binary }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/queue:
+    get:
+      operationId: queue_status
+      summary: Unfinished jobs in scheduling order, slots in use and whether the queue is paused.
+      responses:
+        '200':
+          description: The queue.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/queue/resume:
+    post:
+      operationId: queue_resume
+      summary: Resume the queue. Only the person at the Mac can pause it (the app's Pause button); there is no pause over HTTP or MCP.
+      responses:
+        '200':
+          description: The queue.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models:
+    get:
+      operationId: models_list
+      summary: Every model from the recipe sources and every installed model.
+      responses:
+        '200':
+          description: The models.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    get:
+      operationId: models_get
+      summary: One model with its recipe (tasks and settings schema), status, pin, disk use and last weights check.
+      responses:
+        '200':
+          description: The model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: models_uninstall
+      summary: Remove the model's repo and environment (models/<id>). Weights in the Hugging Face cache are kept.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The model after uninstalling (absent when its recipe is gone too).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Uninstalled' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/install:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_install
+      summary: 'Use a model: install it (brew packages, clone at the pin, environment, smoke test), then download and verify its weights. Runs in the background unless wait.'
+      parameters:
+        - { $ref: '#/components/parameters/Confirm' }
+        - { $ref: '#/components/parameters/Wait' }
+        - { name: download_weights, in: query, description: "Download weights (default true). Recipes with asset preparation require true and fetch assets during installation.", schema: { type: boolean, default: true } }
+      responses:
+        '200':
+          description: The model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/install/cancel:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_cancel_install
+      summary: Stop the model's install or weights download. Downloaded files stay and resume next time; a cancelled install isn't marked failed.
+      responses:
+        '200':
+          description: The model (installing {phase cancelling} until it has stopped).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/reinstall:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_reinstall
+      summary: Delete and rebuild the model's repo and environment (weights are kept).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }, { $ref: '#/components/parameters/Wait' }]
+      responses:
+        '200':
+          description: The model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/pin:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_set_pin
+      summary: Pin the model to another upstream commit and reinstall it there.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }, { $ref: '#/components/parameters/Wait' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetPin' }
+      responses:
+        '200':
+          description: The model.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/upstream:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    get:
+      operationId: models_check_upstream
+      summary: Upstream HEAD (git ls-remote) and how many commits it is past the pin.
+      responses:
+        '200':
+          description: Upstream.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpstreamStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/install-log:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    get:
+      operationId: models_install_log
+      summary: The model's install.log (install steps and weight downloads).
+      responses:
+        '200':
+          description: The log.
+          content:
+            text/plain:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/readme:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    get:
+      operationId: models_readme
+      summary: The model's upstream README as Markdown (Lift's own copy once installed, else fetched at the pinned commit and cached; offline, the cached copy). 404 when there is none.
+      responses:
+        '200':
+          description: The README.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readme' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/weights/download:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_download_weights
+      summary: Download the recipe's weights with `hf download` from the model's environment, then verify them.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }, { $ref: '#/components/parameters/Wait' }]
+      responses:
+        '200':
+          description: The model (weights_downloading while it runs).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/models/{id}/weights/verify:
+    parameters: [{ $ref: '#/components/parameters/ModelId' }]
+    post:
+      operationId: models_verify_weights
+      summary: Check every weight file in the Hugging Face cache (presence, size, LFS SHA-256) against the Hub's file list.
+      responses:
+        '200':
+          description: The check.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WeightsReport' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads:
+    get:
+      operationId: downloads_list
+      summary: Every weights download in queue order (queued, downloading, paused, failed, done, cancelled), with bytes so far and the total.
+      description: Weights downloads come from models_install and models_download_weights; max_downloads (setting) run at once. Downloads that were running when Lift quit continue at launch (resumed). Nothing here deletes downloaded files.
+      responses:
+        '200':
+          description: The downloads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/pause:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_pause
+      summary: Pause a running or waiting download (stops hf download's process group). The files stay.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/resume:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_resume
+      summary: Resume a paused download; hf download picks up from its .incomplete files.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_cancel
+      summary: Stop a download. What's downloaded stays in the cache, so downloading it again resumes.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/retry:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_retry
+      summary: Start a failed or cancelled download again, from what is already in the cache.
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Download' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/downloads/{id}/position:
+    parameters: [{ $ref: '#/components/parameters/DownloadId' }]
+    post:
+      operationId: downloads_reorder
+      summary: Move a waiting download to a 0-based position among the waiting ones (0 runs next).
+      parameters: [{ name: position, in: query, required: true, description: 0-based position among queued downloads., schema: { type: integer, minimum: 0 } }]
+      responses:
+        '200':
+          description: The download.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/recipes:
+    get:
+      operationId: recipes_list
+      summary: Every available recipe by source (bundled, bundled-local), and problems such as "needs a newer Lift".
+      description: Recipes are the only way a model gets into Lift; they come with the app. There is no command that adds a source or a URL.
+      responses:
+        '200':
+          description: The recipes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecipeList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workers:
+    get:
+      operationId: workers_list
+      summary: Live worker processes with their jobs and memory.
+      responses:
+        '200':
+          description: The workers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkerList' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: workers_load
+      summary: Start a worker (load the model) ahead of time. No budget check; weights are verified first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoadWorker' }
+      responses:
+        '200':
+          description: The worker.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkerView' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/workers/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: The worker's id., schema: { type: string } }
+    delete:
+      operationId: workers_unload
+      summary: Stop a worker. A busy worker needs confirm (its running steps fail).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The remaining workers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkerList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/resources:
+    get:
+      operationId: resources_get
+      summary: Slots, memory budget, reserved and free memory, each worker's footprint, and learned estimates.
+      responses:
+        '200':
+          description: The resources.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resources' }
+        default: { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: resources_set
+      summary: Set max_slots, memory_budget_gb or idle_unload_minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetResources' }
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/settings:
+    get:
+      operationId: settings_get
+      summary: All settings.
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: settings_set
+      summary: 'Set one setting: max_slots, max_downloads, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats, cleanup_after_export, notifications, launch_at_login, menu_bar or port (port applies on the next server start).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetSetting' }
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/server:
+    get:
+      operationId: server_status
+      summary: The actual port, the bind address, LAN mode, URLs and an MCP client config snippet.
+      responses:
+        '200':
+          description: The server.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/server/lan:
+    post:
+      operationId: server_set_lan
+      summary: Turn LAN mode on (bind 0.0.0.0; other machines need the bearer token) or off (bind 127.0.0.1).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetLAN' }
+      responses:
+        '200':
+          description: The server as it will be once rebound, with the token when LAN mode is on.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerChange' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/server/token/rotate:
+    post:
+      operationId: server_rotate_token
+      summary: Replace the LAN bearer token; clients using the old one stop working.
+      parameters: [{ $ref: '#/components/parameters/Confirm' }]
+      responses:
+        '200':
+          description: The new token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerChange' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/secrets/hf-token:
+    put:
+      operationId: secrets_set_hf_token
+      summary: Store the Hugging Face token in the Keychain; an empty or null token removes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetHFToken' }
+      responses:
+        '200':
+          description: Whether a token is stored now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecretsStatus' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/system/prereqs:
+    get:
+      operationId: system_prereqs
+      summary: Detected brew, git and uv paths, and the Metal Toolchain when asked.
+      parameters: [{ $ref: '#/components/parameters/Metal' }]
+      responses:
+        '200':
+          description: The prerequisites.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prereqs' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/system/prereqs/install:
+    post:
+      operationId: system_install_prereqs
+      summary: Install what's missing (Homebrew, git, uv, and the Metal Toolchain when metal).
+      parameters: [{ $ref: '#/components/parameters/Confirm' }, { $ref: '#/components/parameters/Metal' }]
+      responses:
+        '200':
+          description: The prerequisites after installing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prereqs' }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    JobId:
+      { name: id, in: path, required: true, description: The job's id., schema: { type: string } }
+    DownloadId:
+      { name: id, in: path, required: true, description: The download id (downloads_list)., schema: { type: string } }
+    ModelId:
+      { name: id, in: path, required: true, description: 'The model (recipe) id, e.g. pixal3d.', schema: { type: string } }
+    Confirm:
+      name: confirm
+      in: query
+      description: Risky operation. Without true it changes nothing and answers 409 confirmation_required with the impact.
+      schema: { type: boolean, default: false }
+    Wait:
+      name: wait
+      in: query
+      description: Answer only when the work has finished.
+      schema: { type: boolean, default: false }
+    Metal:
+      name: metal
+      in: query
+      description: Include the Metal Toolchain.
+      schema: { type: boolean, default: false }
+  responses:
+    Problem:
+      description: An error (see the API description for the status codes).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [invalid_input, not_found, invalid_state, prerequisite, command_failed, confirmation_required, unauthorized, forbidden, bad_request, internal]
+        message: { type: string }
+        fields:
+          description: One entry per bad field (invalid_input).
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+        impact: { type: string, description: What the operation would do (confirmation_required). }
+        command: { type: string, description: The failing command (command_failed). }
+        exit_code: { type: integer }
+        tail: { type: array, items: { type: string }, description: The end of the command's output. }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string, description: 'e.g. steps[0].settings.size' }
+        message: { type: string }
+    SettingValue:
+      description: A setting value; its type comes from the recipe's settings schema.
+      anyOf: [{ type: boolean }, { type: integer }, { type: number }, { type: string }]
+    JobState:
+      type: string
+      enum: [queued, waiting, loading, running, succeeded, failed, cancelled, interrupted]
+    Priority:
+      type: string
+      enum: [low, normal, high]
+    WaitReason:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [no_free_slot, memory, model_installing, model_not_installed, model_unsupported, weights_unverified, queue_paused]
+        needed: { type: integer, description: Bytes the step needs (memory). }
+        free: { type: integer, description: Bytes available (memory). }
+    JobSummary:
+      type: object
+      description: A job as lists show it (queue_status, jobs_list) — where it stands and what it made. Credits stay in the app and in each export's credits file.
+      required: [id, title, state, priority, position, current_step, step_count, created_at, outputs, exports, export_pending]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        state: { $ref: '#/components/schemas/JobState' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        position: { type: number }
+        wait_reason: { $ref: '#/components/schemas/WaitReason' }
+        error: { type: string }
+        current_step: { type: integer, description: 0-based, of step_count. }
+        step_count: { type: integer }
+        recipe: { type: string, description: The current step's recipe. }
+        stage: { type: string, description: What the current step is doing now. }
+        fraction: { type: number }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        outputs: { type: array, items: { $ref: '#/components/schemas/OutputFile' }, description: The last step's outputs once the job succeeded. }
+        exports: { type: array, items: { $ref: '#/components/schemas/ExportResult' }, description: One result per format from the latest export. }
+        export_pending: { type: boolean, description: Succeeded; its export hasn't finished yet (jobs_wait waits for it). }
+    Step:
+      type: object
+      required: [recipe, task, state, inputs, settings]
+      properties:
+        recipe: { type: string }
+        task: { type: string }
+        state: { $ref: '#/components/schemas/JobState' }
+        inputs: { type: object, additionalProperties: { type: string }, description: Input name → path inside the job folder (or the text). }
+        settings: { type: object, additionalProperties: { $ref: '#/components/schemas/SettingValue' } }
+        stage: { type: string }
+        fraction: { type: number }
+        error: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    OutputFile:
+      type: object
+      required: [path, uri, url]
+      properties:
+        path: { type: string, description: Absolute path on this Mac. }
+        uri: { type: string, description: 'MCP resource URI (lift://jobs/{id}/outputs/{file}).' }
+        url: { type: string, description: 'HTTP path (/v1/jobs/{id}/outputs/{file}).' }
+    JobView:
+      description: One job (jobs_get, submit, wait, cancel …) — the JobSummary fields plus its steps and export folder.
+      allOf:
+        - $ref: '#/components/schemas/JobSummary'
+        - type: object
+          required: [steps]
+          properties:
+            steps: { type: array, items: { $ref: '#/components/schemas/Step' } }
+            export: { $ref: '#/components/schemas/ExportSpec' }
+            cleaned_up: { type: boolean, description: The job's files were deleted after a verified export; the record stays. }
+    JobList:
+      type: object
+      required: [jobs]
+      properties:
+        jobs: { type: array, items: { $ref: '#/components/schemas/JobSummary' } }
+    Deleted:
+      type: object
+      required: [deleted]
+      properties:
+        deleted: { type: boolean }
+    QueueStatus:
+      type: object
+      required: [paused, max_slots, running, jobs]
+      properties:
+        paused: { type: boolean }
+        max_slots: { type: integer }
+        running: { type: integer }
+        jobs: { type: array, items: { $ref: '#/components/schemas/JobSummary' } }
+    ModelStatus:
+      type: object
+      additionalProperties: true
+      description: 'One key: not_installed, installing {phase: getting the code, setting up python, checking the install, downloading weights, verifying weights or cancelling}, installed {commit}, update_available {installed_commit, recipe_commit}, install_failed {command, exit_code, reason (the step and its cause in plain words)}, unsupported {reason}, weights_missing {_0: problems} or weights_corrupt {_0: problems}.'
+    ModelSummary:
+      type: object
+      description: A model as models_list shows it — what it is, whether it's ready, what it can do. models_get has the task settings.
+      required: [id, name, status, tasks]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ModelStatus' }
+        tasks: { type: array, items: { type: string }, description: Task ids (jobs_submit's task). }
+        progress: { $ref: '#/components/schemas/InstallProgress' }
+        download:
+          type: object
+          required: [state]
+          properties:
+            state: { type: string, enum: [queued, downloading, paused, failed, done, cancelled] }
+            reason: { type: string }
+            link: { type: string, description: The page whose terms to accept for gated weights. }
+    ModelView:
+      type: object
+      description: One model (models_get, install …) — each task's inputs and settings (what jobs_submit needs), memory needs, pin, disk use and weights check.
+      required: [id, name, status, tasks, memory_gb, memory_overrides]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ModelStatus' }
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, label, modality, inputs, output, settings]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              modality: { type: string }
+              inputs:
+                type: array
+                items:
+                  type: object
+                  required: [name, type]
+                  properties:
+                    name: { type: string }
+                    type: { type: string }
+              output: { type: string }
+              settings: { type: array, items: { type: object, additionalProperties: true }, description: 'The settings schema (key, type, default, options or min/max, label, help).' }
+        memory_gb: { type: number, description: Memory a job usually needs with default settings. }
+        memory_overrides:
+          type: array
+          items:
+            type: object
+            required: [when, memory_gb]
+            properties:
+              when: { type: object, additionalProperties: { $ref: '#/components/schemas/SettingValue' } }
+              memory_gb: { type: number }
+        pin: { type: string }
+        disk_bytes: { type: integer }
+        weights: { $ref: '#/components/schemas/WeightsReport' }
+        progress: { $ref: '#/components/schemas/InstallProgress' }
+        download: { $ref: '#/components/schemas/Download' }
+    Download:
+      type: object
+      description: One weights download. state is queued, downloading, paused, failed, done or cancelled; reason says why it failed (or the retry under way) in plain words, and link is the page whose terms to accept for gated access.
+      required: [id, model, weights, state, downloaded_bytes, attempts, resumed, position, created_at]
+      properties:
+        id: { type: string }
+        model: { type: string }
+        weights:
+          type: array
+          items:
+            type: object
+            required: [repo, revision, gated]
+            properties:
+              repo: { type: string }
+              revision: { type: string }
+              gated: { type: boolean }
+              files: { type: array, items: { type: string } }
+        state: { type: string, enum: [queued, downloading, paused, failed, done, cancelled] }
+        total_bytes: { type: integer }
+        downloaded_bytes: { type: integer }
+        reason: { type: string }
+        link: { type: string }
+        attempts: { type: integer }
+        resumed: { type: boolean, description: Picked up again at launch after Lift quit mid-download. }
+        position: { type: integer }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    DownloadList:
+      type: object
+      required: [downloads]
+      properties:
+        downloads: { type: array, items: { $ref: '#/components/schemas/Download' } }
+    InstallProgress:
+      type: object
+      description: While weights download, the bytes in the Hugging Face cache so far out of the recipe's weights total (from the Hub's file sizes). Absent in other phases, or offline.
+      required: [downloaded_bytes, total_bytes]
+      properties:
+        downloaded_bytes: { type: integer }
+        total_bytes: { type: integer }
+    ModelList:
+      type: object
+      required: [models]
+      properties:
+        models: { type: array, items: { $ref: '#/components/schemas/ModelSummary' } }
+    Uninstalled:
+      type: object
+      properties:
+        model: { $ref: '#/components/schemas/ModelView' }
+    WeightsReport:
+      type: object
+      required: [state, problems, checked_at, hashed_files]
+      properties:
+        state: { type: string, enum: [ok, missing, corrupt, unknown], description: 'unknown: offline and never verified, or Hugging Face refused.' }
+        problems:
+          type: array
+          items:
+            type: object
+            required: [repo, path, issue]
+            properties:
+              repo: { type: string }
+              path: { type: string }
+              issue: { type: string, enum: [missing, wrong_size, wrong_hash] }
+              detail: { type: string }
+        checked_at: { type: string, format: date-time }
+        hashed_files: { type: integer, description: Files hashed in this check; unchanged files reuse cached hashes. }
+        metadata_from: { type: string, format: date-time, description: Set when Lift was offline and used the file lists of the last good check. }
+        note: { type: string }
+        upstream_moved:
+          type: array
+          items: { type: string }
+          description: Informational, never blocking. A branch or tag that has moved upstream past the downloaded commit.
+    UpstreamStatus:
+      type: object
+      required: [head]
+      properties:
+        pin: { type: string }
+        head: { type: string }
+        commits_ahead: { type: integer }
+    RecipeList:
+      type: object
+      required: [recipes]
+      properties:
+        recipes:
+          type: array
+          items:
+            type: object
+            required: [id, source, state]
+            properties:
+              id: { type: string, description: The recipe id (the folder name for an invalid recipe). }
+              name: { type: string }
+              source: { type: string, description: bundled or bundled-local. }
+              state: { type: string, enum: [available, needs_newer_lift, invalid, developer_hidden, shadowed] }
+              detail: { type: string, description: 'Why, when not available (e.g. "needs a newer Lift").' }
+    WorkerView:
+      type: object
+      required: [id, recipe, pid, ready, footprint_bytes, reserved_bytes]
+      properties:
+        id: { type: string }
+        recipe: { type: string }
+        pid: { type: integer }
+        ready: { type: boolean }
+        job: { type: string, description: The job it's running (one job per worker). }
+        footprint_bytes: { type: integer }
+        reserved_bytes: { type: integer }
+    WorkerList:
+      type: object
+      required: [workers]
+      properties:
+        workers: { type: array, items: { $ref: '#/components/schemas/WorkerView' } }
+    Resources:
+      type: object
+      required: [max_slots, budget_bytes, reserved_bytes, system_free_bytes, workers, estimates]
+      properties:
+        max_slots: { type: integer }
+        budget_bytes: { type: integer }
+        reserved_bytes: { type: integer }
+        system_free_bytes: { type: integer }
+        workers: { type: array, items: { $ref: '#/components/schemas/WorkerView' } }
+        estimates:
+          type: array
+          items:
+            type: object
+            required: [recipe, task, key_values]
+            properties:
+              recipe: { type: string }
+              task: { type: string }
+              key_values: { type: string }
+              load_bytes: { type: integer }
+              job_bytes: { type: integer }
+    Settings:
+      type: object
+      description: LiftCore's settings plus the server's port and lan_mode.
+      required: [max_slots, memory_budget_gb, idle_unload_minutes, port, lan_mode]
+      additionalProperties: true
+      properties:
+        max_slots: { type: integer }
+        max_downloads: { type: integer, minimum: 1, maximum: 3, description: Weights downloads that run at once (default 1). }
+        memory_budget_gb: { type: number }
+        idle_unload_minutes: { type: number }
+        dev_recipes: { type: boolean }
+        queue_paused: { type: boolean }
+        export_dir: { type: string, description: The export folder; "" clears it. }
+        export_formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' }, description: 'Default export formats; settings_set takes a comma list, e.g. "glb,usdz".' }
+        cleanup_after_export: { type: boolean, description: Default for deleting a job's files after a verified export. }
+        notifications: { type: boolean, description: Show a macOS notification when a job finishes, fails or waits for memory. }
+        launch_at_login: { type: boolean, description: Start Lift when you log in. }
+        menu_bar: { type: boolean, description: Keep Lift running in the menu bar after the window closes. }
+        recipe_sources:
+          type: array
+          items:
+            type: object
+            required: [name, url]
+            properties:
+              name: { type: string }
+              url: { type: string }
+        pin_overrides: { type: object, additionalProperties: { type: string } }
+        port: { type: integer }
+        lan_mode: { type: boolean }
+    Prereqs:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: object
+          properties:
+            brew: { type: string }
+            git: { type: string }
+            git_lfs: { type: string, description: Some models keep files in Git LFS; Lift's own git uses it. }
+            uv: { type: string }
+            rosetta_brew: { type: string, description: An Intel/Rosetta Homebrew that was found; it's reported and never used. }
+        metal_toolchain: { type: boolean }
+    ServerStatus:
+      type: object
+      required: [port, configured_port, bind, lan_mode, token_set, urls, mcp_config]
+      properties:
+        port: { type: integer, description: The port the server listens on (configured_port, or the next free one). }
+        configured_port: { type: integer }
+        bind: { type: string, description: 127.0.0.1, or 0.0.0.0 in LAN mode. }
+        lan_mode: { type: boolean }
+        token_set: { type: boolean }
+        urls:
+          type: object
+          required: [api, openapi, docs, mcp]
+          properties:
+            api: { type: string }
+            openapi: { type: string }
+            docs: { type: string }
+            mcp: { type: string }
+        mcp_config:
+          type: object
+          additionalProperties: true
+          description: An mcpServers entry for MCP clients, over HTTP (Lift has no stdio transport).
+    ServerChange:
+      type: object
+      required: [server]
+      properties:
+        server: { $ref: '#/components/schemas/ServerStatus' }
+        token: { type: string, description: The bearer token for other machines. }
+    SecretsStatus:
+      type: object
+      required: [hf_token_set]
+      properties:
+        hf_token_set: { type: boolean }
+    ExportFormat: { type: string, enum: [glb, usdz, obj, fbx, original] }
+    ExportSpec:
+      type: object
+      description: Missing fields take the export_dir, export_formats and cleanup_after_export settings; formats [] means no export.
+      properties:
+        dir: { type: string, description: A folder on this Mac. }
+        formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' } }
+        cleanup_after_export: { type: boolean, description: Delete the job's own files once every format is copied and verified. }
+    ExportResult:
+      type: object
+      required: [format]
+      properties:
+        format: { $ref: '#/components/schemas/ExportFormat' }
+        path: { type: string, description: The exported file (a folder for OBJ). }
+        error: { type: string }
+        credits: { type: string, description: The <title>.credits.txt next to it (USDZ, OBJ and FBX). }
+    License:
+      type: object
+      required: [spdx, url]
+      properties:
+        spdx: { type: string, description: 'SPDX id, or LicenseRef-… / NOASSERTION.' }
+        url: { type: string }
+    Attribution:
+      type: object
+      description: Who made a model, where it comes from and its licenses (spec §4a).
+      required: [project, authors, homepage, license, components, credit, disclaimer]
+      properties:
+        project: { type: string }
+        authors: { type: array, items: { type: string } }
+        homepage: { type: string }
+        repo: { type: string }
+        paper:
+          type: object
+          required: [title, url]
+          properties:
+            title: { type: string }
+            url: { type: string }
+            bibtex: { type: string }
+        license: { $ref: '#/components/schemas/License' }
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, role, url, license, restrictions]
+            properties:
+              name: { type: string }
+              role: { type: string }
+              url: { type: string }
+              license: { $ref: '#/components/schemas/License' }
+              restrictions: { type: array, items: { type: string }, description: 'Shown prominently, e.g. non-commercial.' }
+        credit: { type: string, description: '"<Project> by <authors> (<license>)".' }
+        disclaimer: { type: string, description: The fixed wording that Lift didn't create the model and isn't affiliated with its authors. }
+    SubmitJob:
+      type: object
+      required: [steps]
+      properties:
+        steps: { type: array, minItems: 1, items: { $ref: '#/components/schemas/StepInput' } }
+        title: { type: string, description: Defaults to the first input's file name. }
+        priority: { $ref: '#/components/schemas/Priority' }
+        accept_memory_warning: { type: boolean, default: false, description: Queue it even if it's bigger than this Mac's memory or the budget. }
+        export: { $ref: '#/components/schemas/ExportSpec' }
+    ExportJob:
+      type: object
+      properties:
+        formats: { type: array, items: { $ref: '#/components/schemas/ExportFormat' } }
+        dir: { type: string, description: A folder on this Mac. }
+    Readme:
+      type: object
+      required: [text, base_url, cached]
+      properties:
+        text: { type: string, description: Markdown. }
+        base_url: { type: string, description: Resolves the README's relative links and images at the pinned commit. }
+        cached: { type: boolean, description: Served from Lift's cache because the network wasn't available. }
+    StepInput:
+      type: object
+      required: [recipe, task]
+      properties:
+        recipe: { type: string }
+        task: { type: string }
+        inputs:
+          type: object
+          additionalProperties: { type: string }
+          description: '<name>_path or <name> (a path on this Mac), <name>_base64 (+ <name>_filename), or the text for text inputs.'
+        settings:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/SettingValue' }
+          description: Setting key → value, per the recipe's settings schema (models_get); missing keys take their defaults.
+    ResolveInterrupted:
+      type: object
+      required: [action]
+      properties:
+        ids: { type: array, items: { type: string }, description: Defaults to every interrupted job. }
+        action: { type: string, enum: [requeue, discard] }
+    RetryJob:
+      type: object
+      properties:
+        settings: { type: object, additionalProperties: { $ref: '#/components/schemas/SettingValue' } }
+        accept_memory_warning: { type: boolean, default: false, description: Requeue it even if it's bigger than this Mac's memory or the budget. }
+    MemoryWarningResult:
+      type: object
+      required: [memory_warning, hint]
+      properties:
+        memory_warning:
+          type: object
+          required: [message, needed_gb, physical_gb, budget_gb, step]
+          properties:
+            message: { type: string, description: 'Plain words, e.g. "This model usually needs about 18 GB; this Mac has 16 GB."' }
+            needed_gb: { type: number }
+            physical_gb: { type: number }
+            budget_gb: { type: number }
+            step: { type: integer, description: The first step that is too big. }
+        hint: { type: string }
+    MoveJob:
+      type: object
+      description: Exactly one of before, after or index.
+      properties:
+        before: { type: string, description: Another job's id. }
+        after: { type: string, description: Another job's id. }
+        index: { type: integer, minimum: 0 }
+    SetPriority:
+      type: object
+      required: [priority]
+      properties:
+        priority: { $ref: '#/components/schemas/Priority' }
+    SetPin:
+      type: object
+      required: [commit]
+      properties:
+        commit: { type: string, description: A full 40-character commit sha. }
+    LoadWorker:
+      type: object
+      required: [recipe]
+      properties:
+        recipe: { type: string }
+    SetResources:
+      type: object
+      properties:
+        max_slots: { type: integer, minimum: 1 }
+        memory_budget_gb: { type: number }
+        idle_unload_minutes: { type: number, minimum: 0 }
+    SetSetting:
+      type: object
+      required: [key, value]
+      properties:
+        key: { type: string, enum: [max_slots, memory_budget_gb, idle_unload_minutes, dev_recipes, export_dir, export_formats,
+                                    cleanup_after_export, notifications, launch_at_login, menu_bar, port] }
+        value: { $ref: '#/components/schemas/SettingValue' }
+    SetLAN:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    SetHFToken:
+      type: object
+      properties:
+        token: { type: string, description: The token; empty or absent removes the stored one. }
+

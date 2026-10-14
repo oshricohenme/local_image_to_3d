@@ -1,0 +1,79 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "briaai/FIBO",
+      "revision": "7c7e00ca081f6cd24bbbd745d13cc214484c9199",
+      "gated": true
+    },
+    "vlm": {
+      "repo": "briaai/FIBO-vlm",
+      "revision": "bd13da5e0b73c808014d6260963e311c8cdf0d8b",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "fibo",
+      "-q",
+      "4",
+      "--path",
+      "{root}/converted"
+    ],
+    [
+      "{python}",
+      "-c",
+      "from mflux.models.fibo_vlm.model.fibo_vlm import FiboVLM; import sys; FiboVLM(model_path=sys.argv[1], quantize=4)",
+      "{vlm}"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "lift_media.apis",
+          "fibo-prompt",
+          "--model",
+          "{vlm}",
+          "--prompt",
+          "{prompt}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/prompt.json"
+        ],
+        [
+          "mflux-generate-fibo",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "fibo",
+          "--prompt-file",
+          "{out}/prompt.json",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

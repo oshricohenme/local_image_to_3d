@@ -1,0 +1,586 @@
+import Foundation
+import LiftCore
+import LiftServer
+import Observation
+
+/// Where Lift.app keeps what it ships: `Contents/Resources/dev-recipes`, `Contents/Resources/lift_worker`
+/// and the Lift skill.
+public struct AppPaths: Sendable {
+    public var bundledRecipes: URL
+    /// The folder holding the `lift_worker` package.
+    public var workerSource: URL
+    /// The Lift skill installed for Claude Code and Codex (`Contents/Resources/skills/lift/SKILL.md`).
+    public var skill: URL?
+
+    public init(bundledRecipes: URL, workerSource: URL, skill: URL? = nil) {
+        self.bundledRecipes = bundledRecipes
+        self.workerSource = workerSource
+        self.skill = skill
+    }
+
+    public static var main: AppPaths {
+        let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+        return AppPaths(bundledRecipes: resources.appending(path: "dev-recipes"), workerSource: resources,
+                        skill: resources.appending(path: "skills/lift/SKILL.md"))
+    }
+}
+
+public enum AppSection: String, CaseIterable, Identifiable, Sendable {
+    case generate, queue, history, models, settings
+    public var id: String { rawValue }
+    public var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    public var symbol: String {
+        switch self {
+        case .generate: "square.and.arrow.up"
+        case .queue: "list.bullet"
+        case .history: "square.grid.2x2"
+        case .models: "shippingbox"
+        case .settings: "gearshape"
+        }
+    }
+}
+
+/// The two values the app keeps outside the workdir: which workdir, and whether the wizard finished.
+/// `UserDefaults` in the app; a dictionary in tests, so they never write the user's preferences.
+public protocol PreferenceStore: AnyObject {
+    func string(forKey key: String) -> String?
+    func bool(forKey key: String) -> Bool
+    func set(_ value: Any?, forKey key: String)
+}
+
+extension UserDefaults: PreferenceStore {}
+
+/// A risky command (or a memory warning) waiting for the user's OK: `message` is LiftCore's own text,
+/// `action` the OK button's title.
+public struct Confirmation: Identifiable {
+    public let id = UUID()
+    public let message: String
+    public var action = "Continue"
+    let run: @MainActor () async -> Void
+
+    @MainActor public func confirm() async { await run() }
+}
+
+/// What setup has to do at this launch (spec §11): only what's missing. Nothing missing, no setup.
+public struct SetupNeeds: Equatable, Sendable {
+    /// No workdir was saved: the first launch ever, which also gets the Welcome and "You're all set" screens.
+    public var firstRun = false
+    /// No workdir yet, or the saved one is gone or won't open.
+    public var files = false
+    /// Native brew, git or uv isn't working, or the Metal Toolchain is absent while a recipe needs it.
+    public var mac = false
+    /// Why the saved workdir didn't open (nil when it's simply gone, or on a first run).
+    public var workdirProblem: String?
+
+    public var any: Bool { files || mac }
+}
+
+/// Something a notification reports (spec §8, §11).
+public enum JobEvent: Equatable, Sendable {
+    case finished(JobView)
+    case waitingForMemory(JobView)
+    /// A model's weights download finished (it's then checked and ready) or stopped with a reason.
+    case downloadFinished(model: String)
+    case downloadFailed(model: String, reason: String)
+}
+
+/// The app's state: owns the `Lift` engine (in-process) and the HTTP/MCP server, and mirrors the
+/// queue, resources, models and settings for the views. Every action goes through a `Lift` command.
+@MainActor @Observable
+public final class AppModel {
+    public enum Phase: Equatable {
+        case loading, setup, ready
+        case failed(String)
+    }
+
+    public private(set) var phase = Phase.loading
+    public private(set) var lift: Lift?
+    public private(set) var server: LiftServer?
+    public private(set) var serverStatus: ServerStatus?
+    public private(set) var queue: QueueStatus?
+    /// Failed jobs, newest first, until retried or deleted (the Queue's Failed list).
+    public private(set) var failed: [JobView] = []
+    public private(set) var resources: ResourcesView?
+    public private(set) var models: [ModelView] = []
+    public private(set) var settings = Settings()
+    /// The most recent job that finished while the app was watching (menu bar "Just finished").
+    public private(set) var lastFinished: JobView?
+    public var confirmation: Confirmation?
+    /// The one-time "About this model" sheet before a model's first install (spec §4a).
+    public var aboutBeforeInstall: ModelView?
+    /// The Hugging Face walkthrough before installing a model with gated weights while no key is kept.
+    public var accessBeforeInstall: HFAccess?
+    /// Download rates by model id, while its weights download (for the time left).
+    public private(set) var rates: [String: RateEstimate] = [:]
+    /// Free space on the disk that holds the Hugging Face cache (where weights download).
+    public private(set) var hubFreeBytes: Int64?
+    /// Weight sizes Hugging Face reported, by model id (the cards' and the page's "N GB").
+    public private(set) var weightBytes: [String: Int] = [:]
+    /// Each model's preview: the first real image of its README at the pin (missing: the card shows its task icon).
+    public private(set) var previews: [String: URL] = [:]
+    var previewsLoaded: Set<String> = []
+    var seenDownloads: [String: Download.State] = [:]
+    /// What setup shows at this launch, and the tools check it was based on (nil when skipped).
+    public private(set) var needs = SetupNeeds()
+    public private(set) var prereqs: Prereqs?
+    public var alert: String?
+    public var section = AppSection.generate
+    public let generate = GenerateModel()
+    /// Claude Code and Codex: one-click connect over HTTP (Settings, setup's last step).
+    public let assistants = AssistantsModel()
+
+    /// Called with each finished job and each new memory wait (the app posts notifications).
+    public var onEvent: (@MainActor (JobEvent) -> Void)?
+    /// Applies `launch_at_login` to the system (ServiceManagement in the app; a fake in tests).
+    public var applyLaunchAtLogin: (@MainActor (Bool) throws -> Void)?
+    public var launchAtLoginEnabled: (@MainActor () -> Bool)?
+
+    let defaults: any PreferenceStore
+    let paths: AppPaths
+    let secrets: any SecretStore
+    let serverPort: Int?
+    let checkPrereqs: PrereqsCheck?
+    let hf: any HFAccount
+    let weightsMetadata: (any WeightsMetadata)?
+    var refresher: Task<Void, Never>?
+    var seen: [String: JobView] = [:]
+    /// A menu-bar choice made before Lift opened (first launch), saved once the engine opens.
+    var pendingMenuBar: Bool?
+
+    static let workdirKey = "workdir"
+
+    /// Checks the tools (`metal`: also the Metal Toolchain). Runs off the main thread.
+    public typealias PrereqsCheck = @Sendable (_ metal: Bool) async -> Prereqs
+
+    /// The real check: native Homebrew, git and uv working, and the Metal Toolchain when asked.
+    public static let detectPrereqs: PrereqsCheck = { metal in
+        let toolchain = Toolchain(runner: SubprocessRunner())
+        return Prereqs(tools: await toolchain.detect(), metalToolchain: metal ? await toolchain.metalToolchainInstalled() : nil)
+    }
+
+    /// `serverPort`: nil uses the `port` setting; 0 picks any free port (tests). `checkPrereqs` nil skips the
+    /// tools check at launch (the launch smoke test); `hf` and `weightsMetadata` are Hugging Face (fakes in tests).
+    public init(defaults: any PreferenceStore = UserDefaults.standard, paths: AppPaths = .main, secrets: any SecretStore = KeychainSecretStore(),
+                serverPort: Int? = nil, checkPrereqs: PrereqsCheck? = AppModel.detectPrereqs, hf: any HFAccount = HuggingFaceAccount(),
+                weightsMetadata: (any WeightsMetadata)? = nil) {
+        self.defaults = defaults
+        self.paths = paths
+        self.secrets = secrets
+        self.serverPort = serverPort
+        self.checkPrereqs = checkPrereqs
+        self.hf = hf
+        self.weightsMetadata = weightsMetadata
+    }
+
+    /// The open engine, for actions; throws when Lift isn't open (the views only offer actions when it is).
+    public var engine: Lift {
+        get throws {
+            guard let lift else { throw LiftError.invalidState("Finish setup first: choose where Lift keeps its files.") }
+            return lift
+        }
+    }
+
+    public var liveServer: LiftServer {
+        get throws {
+            guard let server else { throw LiftError.invalidState("the server isn't running") }
+            return server
+        }
+    }
+
+    public var workdir: URL? {
+        defaults.string(forKey: Self.workdirKey).map { URL(filePath: $0) }
+    }
+
+    /// Developer mode (Settings → Developer): shows the Test Cube and the recipes' raw details (spec §1).
+    public var developer: Bool { settings.devRecipes }
+
+    /// The Metal Toolchain is checked and offered only when a recipe needs it (spec §6).
+    public var needsMetalToolchain: Bool { Self.needsMetalToolchain(models) }
+    nonisolated static func needsMetalToolchain(_ models: [ModelView]) -> Bool { models.contains { $0.recipe.metalToolchain } }
+
+    /// At launch: works out what's missing (spec §11) and shows setup only for that. The saved workdir opens
+    /// silently; the main window is up while the tools are checked. A setup quit halfway resumes with only
+    /// what's still missing, since what it finished is no longer missing.
+    public func start() async {
+        var needs = SetupNeeds(firstRun: workdir == nil)
+        if let workdir {
+            if FileManager.default.fileExists(atPath: workdir.path), await open(workdir, ready: false) {
+                phase = .ready
+            } else {
+                needs.files = true
+                needs.workdirProblem = alert
+                alert = nil
+            }
+        } else {
+            needs.files = true
+        }
+        if let p = await checkTools(), p.missing { needs.mac = true }
+        self.needs = needs
+        phase = needs.any ? .setup : .ready
+    }
+
+    /// Re-detects the assistants against the running server's address: one connected to an old port then
+    /// shows Update connection, and an unedited Lift skill is updated. In the background; it can take a few seconds.
+    public func checkAssistants() {
+        let url = serverStatus?.urls.mcp
+        let skill = paths.skill.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        Task { await assistants.check(mcpURL: url, skill: skill) }
+    }
+
+    /// Runs the tools check, with the Metal Toolchain when a recipe needs it (the bundled ones before Lift opens).
+    @discardableResult
+    public func checkTools() async -> Prereqs? {
+        guard let checkPrereqs else { return nil }
+        let metal = lift == nil ? Self.bundleNeedsMetal(paths.bundledRecipes) : needsMetalToolchain
+        let p = await checkPrereqs(metal)
+        prereqs = p
+        return p
+    }
+
+    nonisolated static func bundleNeedsMetal(_ bundle: URL) -> Bool {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: bundle, includingPropertiesForKeys: nil)) ?? []
+        return folders.contains { dir in
+            if case .ok(let r) = RecipeLoad.read(directory: dir) { r.metalToolchain && !r.developer } else { false }
+        }
+    }
+
+    /// Back to setup's folder step, e.g. after the workdir failed to open.
+    public func restartSetup() {
+        needs = SetupNeeds(files: true)
+        phase = .setup
+    }
+
+    /// Setup's last step.
+    public func finishSetup() {
+        needs = SetupNeeds()
+        phase = .ready
+    }
+
+    /// Opens (creating if needed) the workdir and starts the server. Jobs a quit cut short are already back in the queue.
+    /// `ready: false` keeps the wizard on screen (it opens Lift halfway through).
+    @discardableResult
+    public func open(_ workdir: URL, ready: Bool = true) async -> Bool {
+        if lift != nil { await close() }
+        do {
+            let runtime = try installRuntime(in: workdir)
+            let lift = try await Lift.open(LiftConfig(workdir: workdir, workerRuntime: runtime, bundledRecipes: paths.bundledRecipes,
+                                                      hfToken: secrets.hfTokenReader, weightsMetadata: weightsMetadata))
+            let server = LiftServer(lift: lift, configuration: .init(secrets: secrets, port: serverPort))
+            self.lift = lift
+            self.server = server
+            if let on = pendingMenuBar {
+                pendingMenuBar = nil
+                _ = try? await lift.settingsSet("menu_bar", .bool(on))
+            }
+            if self.workdir != workdir { defaults.set(workdir.path, forKey: Self.workdirKey) }
+            do {
+                serverStatus = try await server.start()
+                checkAssistants()
+            } catch {
+                self.server = nil  // the badge and Settings then say it isn't running
+                alert = "The HTTP/MCP server didn't start: \(Format.error(error))"
+            }
+            await refresh()
+            if ready { phase = .ready }
+            refresher = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    await self?.refresh()
+                }
+            }
+            return true
+        } catch {
+            if ready { phase = .failed(Format.error(error)) } else { alert = Format.error(error) }
+            return false
+        }
+    }
+
+    /// Copies the bundled `lift_worker` to `<workdir>/runtime/`, so Python's bytecode cache never
+    /// writes into the signed app bundle. Replaced on every launch (it's a few files).
+    func installRuntime(in workdir: URL) throws -> URL {
+        let fm = FileManager.default
+        let runtime = workdir.appending(path: "runtime")
+        let dest = runtime.appending(path: "lift_worker")
+        try fm.createDirectory(at: runtime, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+        try fm.copyItem(at: paths.workerSource.appending(path: "lift_worker"), to: dest)
+        return runtime
+    }
+
+    public func close() async {
+        refresher?.cancel()
+        refresher = nil
+        await server?.stop()
+        await lift?.close()
+        server = nil
+        lift = nil
+    }
+
+    // MARK: mirror
+
+    public func refresh() async {
+        guard let lift else { return }
+        do {
+            let queue = try await lift.queueStatus()
+            let failed = try await lift.jobsList(JobFilter(states: [.failed]))
+            let resources = try await lift.resourcesGet()
+            let models = try await lift.modelsList()
+            let settings = await lift.settingsGet()
+            let status = await server?.status()
+            await report(queue.jobs, lift: lift)
+            reportDownloads(await lift.downloadsList())
+            let free = SetupModel.volumeFree(lift.config.hfHub)
+            if hubFreeBytes != free { hubFreeBytes = free }
+            // Assign only changes: every assignment re-renders the views that read it.
+            if self.queue != queue { self.queue = queue }
+            if self.failed != failed { self.failed = failed }
+            if self.resources != resources { self.resources = resources }
+            sample(models)
+            if self.models != models { self.models = models; generate.models = models }
+            if self.settings != settings { self.settings = settings; generate.adoptExportDefaults(settings) }
+            if serverStatus != status { serverStatus = status }
+            reconcileLaunchAtLogin()
+        } catch {
+            if alert == nil { alert = Format.error(error) }  // once, not every second
+        }
+    }
+
+    /// Adds each downloading model's bytes to its rate; drops the rates of the others (a paused one starts afresh).
+    func sample(_ models: [ModelView], at date: Date = Date()) {
+        for m in models {
+            if let p = m.progress, m.download?.state != .paused {
+                rates[m.id, default: RateEstimate()].add(p.downloadedBytes, at: date)
+            } else {
+                rates[m.id] = nil
+            }
+        }
+    }
+
+    /// Notifies each download that just finished or failed.
+    func reportDownloads(_ downloads: [Download]) {
+        let names = Dictionary(models.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        for event in Self.downloadEvents(previous: seenDownloads, current: downloads, names: names) { onEvent?(event) }
+        seenDownloads = Dictionary(uniqueKeysWithValues: downloads.map { ($0.id, $0.state) })
+    }
+
+    static func downloadEvents(previous: [String: Download.State], current: [Download], names: [String: String]) -> [JobEvent] {
+        current.compactMap { d in
+            guard let before = previous[d.id], before != d.state else { return nil }
+            let name = names[d.model] ?? d.model
+            switch d.state {
+            case .done: return .downloadFinished(model: name)
+            case .failed: return .downloadFailed(model: name, reason: d.reason ?? "The download stopped.")
+            default: return nil
+            }
+        }
+    }
+
+    /// The weights' size from Hugging Face, once per model (nil offline: the recipe's estimate is shown instead).
+    public func loadWeightBytes(_ m: ModelView) async {
+        guard weightBytes[m.id] == nil, !m.recipe.weights.isEmpty else { return }
+        if let bytes = await hf.size(of: m.recipe.weights) { weightBytes[m.id] = bytes }
+    }
+
+    /// Reads the model's README once (Lift caches it in the workdir) for its preview image.
+    public func loadPreview(_ m: ModelView) async {
+        guard let lift, previewsLoaded.insert(m.id).inserted, let readme = try? await lift.modelsReadme(m.id) else { return }
+        if let url = Library.previewImage(readme.text, base: readme.baseURL) { previews[m.id] = url }
+    }
+
+    /// Use in Generate: the model's first task, selected, on the Generate screen.
+    public func useInGenerate(_ m: ModelView) {
+        guard let t = m.recipe.tasks.first(where: { $0.inputs.first?.type == .image && $0.output == .mesh }) ?? m.recipe.tasks.first else { return }
+        generate.modality = t.modality
+        generate.kind = TaskKind(inputs: t.inputs.map(\.type), output: t.output)
+        generate.recipe = m.id
+        section = .generate
+    }
+
+    /// While a model installs: its phase in plain words, with bytes and time left while its weights download.
+    public func installLine(_ m: ModelView) -> String? {
+        guard case .installing(let phase) = m.status else { return nil }
+        return Format.installLine(phase, progress: m.progress, secondsLeft: m.progress.flatMap { rates[m.id]?.secondsLeft(total: $0.totalBytes) })
+    }
+
+    /// Finished jobs leave the queue: each one that left is fetched, then reported with any new memory waits.
+    /// One still exporting stays watched until its export is done (its files may then live only in the export folder).
+    func report(_ jobs: [JobView], lift: Lift) async {
+        let ids = Set(jobs.map(\.job.id))
+        var left: [JobView] = []
+        for id in seen.keys where !ids.contains(id) {
+            if let v = try? await lift.jobsGet(id) { left.append(v) }
+        }
+        for event in Self.events(previous: seen, current: jobs, left: left) {
+            if case .finished(let v) = event { lastFinished = v }
+            onEvent?(event)
+        }
+        seen = Dictionary(uniqueKeysWithValues: (jobs + left.filter(\.job.exportPending)).map { ($0.job.id, $0) })
+    }
+
+    /// What to notify: jobs that left the queue succeeded or failed (not cancelled), and jobs that just
+    /// started waiting for memory.
+    static func events(previous: [String: JobView], current: [JobView], left: [JobView]) -> [JobEvent] {
+        func memoryWait(_ v: JobView?) -> Bool {
+            if case .memory = v?.job.waitReason { true } else { false }
+        }
+        let waits = current.filter { memoryWait($0) && !memoryWait(previous[$0.job.id]) }.map(JobEvent.waitingForMemory)
+        let done = left.filter { ($0.job.state == .succeeded || $0.job.state == .failed) && !$0.job.exportPending }.map(JobEvent.finished)
+        return waits + done
+    }
+
+    func reconcileLaunchAtLogin() {
+        guard let apply = applyLaunchAtLogin, let enabled = launchAtLoginEnabled, settings.launchAtLogin != enabled() else { return }
+        do {
+            try apply(settings.launchAtLogin)
+        } catch {
+            alert = "Launch at login: \(Format.error(error))"
+            let actual = enabled()
+            run { _ = try await self.lift?.settingsSet("launch_at_login", .bool(actual)) }
+        }
+    }
+
+    // MARK: actions
+
+    /// "Keep running in the menu bar". macOS also sets this when it places the menu-bar icon at launch,
+    /// before setup has opened Lift, so it's remembered locally until then instead of erroring.
+    public func setMenuBar(_ on: Bool) {
+        // Only a real change is written: SwiftUI's menu-bar extra re-sets this binding on every redraw,
+        // so writing an equal value would trigger another redraw, forever (froze the first launch).
+        guard settings.menuBar != on else { return }
+        settings.menuBar = on
+        if lift == nil { pendingMenuBar = on; return }
+        run { _ = try await self.engine.settingsSet("menu_bar", .bool(on)) }
+    }
+
+    /// Runs a command, showing any error in an alert, then refreshes.
+    public func run(_ body: @escaping @MainActor () async throws -> Void) {
+        Task {
+            do { try await body() } catch { alert = Format.error(error) }
+            await refresh()
+        }
+    }
+
+    /// Runs a confirm-gated command: without confirmation first, and if it answers
+    /// `confirmationRequired`, shows the impact and runs it again with `confirm: true` on OK.
+    public func gated<T: Sendable>(_ call: @escaping @MainActor (_ confirm: Bool) async throws -> Gated<T>,
+                                   then done: @escaping @MainActor (T) -> Void = { _ in }) {
+        run {
+            switch try await call(false) {
+            case .done(let value): done(value)
+            case .confirmationRequired(let impact):
+                self.confirmation = Confirmation(message: impact) { [weak self] in
+                    self?.run { if let value = try await call(true).value { done(value) } }
+                }
+            }
+        }
+    }
+
+    /// Queues the Generate form: one job per input file, each file leaving the form once it's queued, so a
+    /// failure partway keeps only what wasn't. Bad input (per field) stays in the form. A memory
+    /// warning (spec §8) asks once: Run anyway queues this file and the rest; Cancel queues nothing more.
+    public func submitGenerate() {
+        submit(generate.requests[...], accept: false)
+    }
+
+    func submit(_ requests: ArraySlice<SubmitRequest>, accept: Bool) {
+        run {
+            let lift = try self.engine
+            self.generate.errors = []
+            for (i, request) in zip(requests.indices, requests) {
+                do {
+                    if case .memoryWarning(let w) = try await lift.jobsSubmit(request, acceptMemoryWarning: accept) {
+                        self.confirmation = Confirmation(message: w.message, action: "Run Anyway") { [weak self] in
+                            self?.submit(requests[i...], accept: true)
+                        }
+                        return
+                    }
+                    let first = request.steps.first?.inputs.values.map { $0 } ?? []
+                    self.generate.files.removeAll { first.contains($0.path) }
+                } catch LiftError.invalidInput(let errors) {
+                    self.generate.errors = errors
+                    return
+                }
+            }
+            self.generate.files = []
+            self.generate.text = ""
+        }
+    }
+
+    /// `jobs_retry`, with the same memory-warning question as submitting.
+    public func retry(_ id: String, settings: [String: SettingValue]? = nil, accept: Bool = false) async throws {
+        if case .memoryWarning(let w) = try await engine.jobsRetry(id, settings: settings, acceptMemoryWarning: accept) {
+            confirmation = Confirmation(message: w.message, action: "Run Anyway") { [weak self] in
+                self?.run { try await self?.retry(id, settings: settings, accept: true) }
+            }
+        }
+    }
+
+    /// Retries every failed job; those that may not fit in memory wait for one "Run Anyway" together.
+    public func retryAll(_ ids: [String]) async throws {
+        var warned: [String] = []
+        for id in ids {
+            if case .memoryWarning = try await engine.jobsRetry(id) { warned.append(id) }
+        }
+        guard !warned.isEmpty else { return }
+        confirmation = Confirmation(message: "\(warned.count) of these jobs may need more memory than is free right now.", action: "Run Anyway") { [weak self] in
+            self?.run { for id in warned { _ = try await self?.engine.jobsRetry(id, acceptMemoryWarning: true) } }
+        }
+    }
+
+    /// Install, from Generate or Models. The first time for a model it shows "About this model" first; then,
+    /// for gated weights while no Hugging Face key is kept, the access walkthrough (the install needs the key);
+    /// then the install's own confirmation.
+    public func install(_ model: ModelView) {
+        if !defaults.bool(forKey: "aboutShown." + model.id) {
+            aboutBeforeInstall = model
+        } else if model.recipe.weights.contains(where: \.gated) && secrets.get(.hfToken) == nil {
+            accessBeforeInstall = HFAccess(model)
+        } else {
+            gated { confirm in try await self.engine.modelsInstall(model.id, confirm: confirm) }
+        }
+    }
+
+    /// Continue in the access walkthrough, once the key is kept.
+    public func continueAfterAccess() {
+        guard let model = accessBeforeInstall?.model else { return }
+        accessBeforeInstall = nil
+        install(model)
+    }
+
+    public func continueInstall() {
+        guard let model = aboutBeforeInstall else { return }
+        aboutBeforeInstall = nil
+        defaults.set(true, forKey: "aboutShown." + model.id)
+        install(model)
+    }
+
+    /// The end of a job's log (`<workdir>/jobs/<id>/log.txt`).
+    public func logTail(_ job: String, maxBytes: Int = 16_384) -> String {
+        guard let workdir, let handle = try? FileHandle(forReadingFrom: workdir.appending(path: "jobs/\(job)/log.txt")) else { return "" }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0)
+        return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
+    }
+
+    /// Moves the working directory (database, recipes, models, jobs) and reopens Lift there.
+    /// Needs confirmation; workers stop and running jobs go back in the queue.
+    public func moveWorkdir(to destination: URL) {
+        guard let from = workdir else { return }
+        let message = "Moves Lift's working directory from \(from.path) to \(destination.path). Workers stop, "
+            + "running jobs start over from their current step, and the HTTP/MCP server restarts. Installed models may need Reinstall "
+            + "if their environment has absolute paths."
+        confirmation = Confirmation(message: message) { [weak self] in
+            guard let self else { return }
+            await self.close()
+            do {
+                try FileManager.default.moveItem(at: from, to: destination)
+                self.defaults.set(destination.path, forKey: Self.workdirKey)  // the data is there now, even if it fails to open
+                await self.open(destination)
+            } catch {
+                self.alert = Format.error(error)
+                await self.open(from)
+            }
+        }
+    }
+}

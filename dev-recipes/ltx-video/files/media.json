@@ -1,0 +1,75 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "video-ltx23-av-mlx",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/video-ltx23-av-mlx/mererun_model.json"
+  ],
+  "tasks": {
+    "text_to_video": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "video",
+          "generate",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/video-ltx23-av-mlx",
+          "--num-frames",
+          "{frames}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    },
+    "image_to_video": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "video",
+          "generate",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/video-ltx23-av-mlx",
+          "--num-frames",
+          "{frames}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.mp4",
+          "--image",
+          "{image}"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "schema": 2,
+  "id": "cogvideox2b",
+  "name": "CogVideoX 2B",
+  "publisher": "Zhipu AI / Tsinghua",
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/zai-org/CogVideoX-2b",
+  "description": "Generate short 720 by 480 videos with Diffusers on MPS. Large MPS tensor limits may affect this experimental path. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"diffusers==0.35.2\" \"transformers==4.57.3\" torch accelerate safetensors sentencepiece protobuf imageio imageio-ffmpeg"
+  ],
+  "brew": [
+    "ffmpeg"
+  ],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "zai-org/CogVideoX-2b",
+      "revision": "1137dacfc2c9c012bed6a0793f4ecf2ca8e7ba01",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "CogVideoX 2B",
+    "authors": [
+      "Zhipu AI / Tsinghua"
+    ],
+    "homepage": "https://huggingface.co/zai-org/CogVideoX-2b",
+    "license": {
+      "spdx": "Apache-2.0",
+      "url": "https://huggingface.co/zai-org/CogVideoX-2b"
+    },
+    "components": [
+      {
+        "name": "zai-org/CogVideoX-2b",
+        "role": "model component",
+        "url": "https://huggingface.co/zai-org/CogVideoX-2b",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/zai-org/CogVideoX-2b"
+        },
+        "restrictions": []
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 32,
+    "disk_gb": 35
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_video",
+      "modality": "video",
+      "label": "Text to video",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "video",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "frames",
+          "label": "Frames",
+          "type": "enum",
+          "default": 17,
+          "group": "advanced",
+          "help": "Frames used by the upstream model.",
+          "options": [
+            17,
+            33,
+            49
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 30,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 21ca83afdd34415f80ba33772d153e8a5320271ee596c0fc82a5dcc76b86f3e9"
+  ]
+}

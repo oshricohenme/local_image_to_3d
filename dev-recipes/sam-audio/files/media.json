@@ -1,0 +1,49 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/sam-audio-large",
+      "revision": "a3e529408663b65cb418584036db8f7209a80ced",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-sts",
+      "--model",
+      "{model}",
+      "--kind",
+      "sam"
+    ]
+  ],
+  "required": [
+    "{model}"
+  ],
+  "tasks": {
+    "separate_audio": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "lift_media.apis",
+          "sam-audio",
+          "--model",
+          "{model}",
+          "--audio",
+          "{audio}",
+          "--output",
+          "{out}/result.wav",
+          "--prompt",
+          "{prompt}"
+        ]
+      ],
+      "outputs": [
+        "result.wav",
+        "residual.wav"
+      ]
+    }
+  }
+}

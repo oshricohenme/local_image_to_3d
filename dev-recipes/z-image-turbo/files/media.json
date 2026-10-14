@@ -1,0 +1,54 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "Tongyi-MAI/Z-Image-Turbo",
+      "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "z-image-turbo",
+      "-q",
+      "4",
+      "--path",
+      "{root}/converted"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-z-image-turbo",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "z-image-turbo",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

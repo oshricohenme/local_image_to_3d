@@ -1,0 +1,54 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "inclusionAI/Ming-Image-0.1-Design",
+      "revision": "208087ada1486931692c1896f38d4cd16ff3df82",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "ming-image-design",
+      "-q",
+      "8",
+      "--path",
+      "{root}/converted"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-ming",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "ming-image-design",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

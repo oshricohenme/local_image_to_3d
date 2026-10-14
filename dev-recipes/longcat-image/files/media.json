@@ -1,0 +1,114 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "Comfy-Org/LongCat-Image",
+      "revision": "d49457a376940fa670ac73f4e21763c56638f19c",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/longcat_image_bf16.safetensors",
+        "split_files/diffusion_models/longcat_image_edit_turbo_bf16.safetensors"
+      ]
+    },
+    "vae": {
+      "repo": "black-forest-labs/FLUX.1-schnell",
+      "revision": "741f7c3ce8b383c54771c7003378a50191e9efe9",
+      "gated": true,
+      "files": [
+        "ae.safetensors"
+      ]
+    },
+    "encoder": {
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "gated": false,
+      "files": [
+        "split_files/text_encoders/qwen_2.5_vl_7b.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/longcat_image_bf16.safetensors",
+          "--vae",
+          "{vae}/ae.safetensors",
+          "--llm",
+          "{encoder}/split_files/text_encoders/qwen_2.5_vl_7b.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png",
+          "--flow-shift",
+          "3"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    },
+    "edit_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/longcat_image_edit_turbo_bf16.safetensors",
+          "--vae",
+          "{vae}/ae.safetensors",
+          "--llm",
+          "{encoder}/split_files/text_encoders/qwen_2.5_vl_7b.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png",
+          "--flow-shift",
+          "3",
+          "--ref-image",
+          "{image}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

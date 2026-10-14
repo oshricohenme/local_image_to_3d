@@ -1,0 +1,48 @@
+{
+  "backend": "diffusers",
+  "assets": {
+    "model": {
+      "repo": "zai-org/CogVideoX-2b",
+      "revision": "1137dacfc2c9c012bed6a0793f4ecf2ca8e7ba01",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-c",
+      "from diffusers import CogVideoXPipeline; import torch,sys; CogVideoXPipeline.from_pretrained(sys.argv[1], torch_dtype=torch.float16, local_files_only=True)",
+      "{model}"
+    ]
+  ],
+  "required": [
+    "{model}/model_index.json"
+  ],
+  "tasks": {
+    "text_to_video": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "lift_media.apis",
+          "cogvideo",
+          "--model",
+          "{model}",
+          "--prompt",
+          "{prompt}",
+          "--frames",
+          "{frames}",
+          "--steps",
+          "{steps}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    }
+  }
+}

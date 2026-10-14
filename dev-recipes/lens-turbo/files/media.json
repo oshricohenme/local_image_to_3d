@@ -1,0 +1,70 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "Comfy-Org/Lens",
+      "revision": "393618fd7db3e370509f84390b9162b8fd839a25",
+      "gated": false,
+      "files": [
+        "diffusion_models/lens_turbo_bf16.safetensors"
+      ]
+    },
+    "encoder": {
+      "repo": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "revision": "773a7da77e569019bb0fd17a554b263738d669a3",
+      "gated": false
+    },
+    "vae": {
+      "repo": "black-forest-labs/FLUX.2-klein-4B",
+      "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+      "gated": false,
+      "files": [
+        "vae/config.json",
+        "vae/diffusion_pytorch_model.safetensors"
+      ]
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-c",
+      "from mflux.models.lens.variants.txt2img.lens_image import LensImage; import sys; LensImage(model_path=sys.argv[1], encoder_path=sys.argv[2], quantize=8)",
+      "{model}",
+      "{encoder}"
+    ]
+  ],
+  "required": [
+    "{model}",
+    "{encoder}"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-lens",
+          "--model",
+          "{model}",
+          "--base-model",
+          "lens-turbo",
+          "--prompt",
+          "{prompt}",
+          "--steps",
+          "4",
+          "-q",
+          "8",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

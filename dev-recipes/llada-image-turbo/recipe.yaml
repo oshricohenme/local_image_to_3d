@@ -1,0 +1,319 @@
+{
+  "schema": 2,
+  "id": "llada-image-turbo",
+  "name": "LLaDA Image Turbo",
+  "publisher": "inclusionAI",
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/fszontagh/LLaDA-Image-Turbo-GGUF",
+  "description": "Runs with stable-diffusion.cpp Metal. Model-specific Apple GPU parity remains unverified. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install huggingface-hub numpy safetensors torch",
+    "cmake -S repo -B repo/build -DSD_METAL=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build repo/build --config Release -j 4",
+    "repo/build/bin/sd-cli --help"
+  ],
+  "brew": [
+    "cmake",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [
+    {
+      "repo": "fszontagh/LLaDA-Image-Turbo-GGUF",
+      "revision": "73e2e2adecb76bcf1f89fc37a636912c551349a9",
+      "gated": false,
+      "files": [
+        "llada-image-turbo-connectors-edit.safetensors",
+        "llada-image-turbo-q8_0.gguf",
+        "llada-image-turbo-text_encoder-q8_0.gguf"
+      ]
+    },
+    {
+      "repo": "inclusionAI/LLaDA-Image-Turbo",
+      "revision": "f4afc52d925bbac4e22a1c947111fc1f127e37e5",
+      "gated": false,
+      "files": [
+        "tokenizer/tokenizer.json",
+        "vae/diffusion_pytorch_model.safetensors"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "LLaDA Image Turbo",
+    "authors": [
+      "inclusionAI"
+    ],
+    "homepage": "https://huggingface.co/fszontagh/LLaDA-Image-Turbo-GGUF",
+    "license": {
+      "spdx": "Apache-2.0",
+      "url": "https://huggingface.co/fszontagh/LLaDA-Image-Turbo-GGUF"
+    },
+    "components": [
+      {
+        "name": "fszontagh/LLaDA-Image-Turbo-GGUF",
+        "role": "model component",
+        "url": "https://huggingface.co/fszontagh/LLaDA-Image-Turbo-GGUF",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/fszontagh/LLaDA-Image-Turbo-GGUF"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "inclusionAI/LLaDA-Image-Turbo",
+        "role": "model component",
+        "url": "https://huggingface.co/inclusionAI/LLaDA-Image-Turbo",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/inclusionAI/LLaDA-Image-Turbo"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "leejet/stable-diffusion.cpp",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/leejet/stable-diffusion.cpp",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/leejet/stable-diffusion.cpp"
+        }
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 24,
+    "disk_gb": 60
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 4,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "guidance",
+          "label": "Guidance",
+          "type": "float",
+          "default": 1.0,
+          "group": "advanced",
+          "help": "Guidance used by the upstream model.",
+          "min": 1,
+          "max": 20
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    },
+    {
+      "id": "edit_image",
+      "modality": "image",
+      "label": "Edit image",
+      "inputs": [
+        {
+          "name": "image",
+          "type": "image"
+        },
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 4,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "guidance",
+          "label": "Guidance",
+          "type": "float",
+          "default": 1.0,
+          "group": "advanced",
+          "help": "Guidance used by the upstream model.",
+          "min": 1,
+          "max": 20
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/leejet/stable-diffusion.cpp",
+  "commit": "1d0a58a35050d285b1d6fb1bc68a92924d35825e",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected cff7e6090737f08e3979ad89d8df04b1f1c605246c49b5e123b45a6961c74ed3"
+  ]
+}

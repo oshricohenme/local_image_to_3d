@@ -1,0 +1,165 @@
+{
+  "schema": 2,
+  "id": "heartmula3b",
+  "name": "HeartMuLa 3B",
+  "publisher": "HeartMuLa",
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B",
+  "description": "Generate vocal music from style tags and lyrics. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install ./repo torch safetensors soundfile"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "HeartMuLa/HeartMuLa-oss-3B",
+      "revision": "d12ac79c6b3387d5c9eee456323495d8f08bb09d",
+      "gated": false
+    },
+    {
+      "repo": "HeartMuLa/HeartCodec-oss-20260123",
+      "revision": "f889dab0532cfa4bf459f2a3367eb6d346b8eeda",
+      "gated": false
+    },
+    {
+      "repo": "HeartMuLa/HeartMuLaGen",
+      "revision": "2e18e01702011f4f7dc8642b6260967df62417ea",
+      "gated": false,
+      "files": [
+        "tokenizer.json"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "HeartMuLa 3B",
+    "authors": [
+      "HeartMuLa"
+    ],
+    "homepage": "https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B",
+    "license": {
+      "spdx": "Apache-2.0",
+      "url": "https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B"
+    },
+    "components": [
+      {
+        "name": "HeartMuLa/HeartMuLa-oss-3B",
+        "role": "model component",
+        "url": "https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "HeartMuLa/HeartCodec-oss-20260123",
+        "role": "model component",
+        "url": "https://huggingface.co/HeartMuLa/HeartCodec-oss-20260123",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/HeartMuLa/HeartCodec-oss-20260123"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "Acelogic/heartlib-mlx",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/Acelogic/heartlib-mlx",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://github.com/Acelogic/heartlib-mlx"
+        }
+      },
+      {
+        "name": "HeartMuLa/HeartMuLaGen",
+        "role": "model component",
+        "url": "https://huggingface.co/HeartMuLa/HeartMuLaGen",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/HeartMuLa/HeartMuLaGen"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 32,
+    "disk_gb": 40
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "generate_song",
+      "modality": "music",
+      "label": "Generate song",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        },
+        {
+          "name": "lyrics",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "int",
+          "default": 15,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 120
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/Acelogic/heartlib-mlx",
+  "commit": "02dd2e22f6a1bf1a2f769a13f8af952a7a4e9cee",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 62e9a6b5fcd25f56e6f2d3fca11c5ecdab5ad67b33cb2963b03716ae16e217b5"
+  ]
+}

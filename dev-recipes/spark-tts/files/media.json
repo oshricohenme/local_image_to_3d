@@ -1,0 +1,73 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/Spark-TTS-0.5B-bf16",
+      "revision": "cac753e3cf9d9d92524eb15fe256efc7db45ce7e",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      ""
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    },
+    "voice_clone": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--ref_audio",
+          "{reference}",
+          "--ref_text",
+          "{transcript}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}

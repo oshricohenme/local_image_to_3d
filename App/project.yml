@@ -1,0 +1,64 @@
+# Lift.app, generated with XcodeGen (`xcodegen generate --spec App/project.yml`). The .xcodeproj is
+# build output (git-ignored); this file and App/Lift/ are the source. Code lives in the Swift package at
+# the repo root: LiftUI (screens and view models), LiftCore and LiftServer. MCP is HTTP only (no stdio bridge).
+name: Lift
+options:
+  bundleIdPrefix: me.oshricohen
+  deploymentTarget: { macOS: "26.0" }
+  createIntermediateGroups: true
+packages:
+  Lift: { path: .. }
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Personal build: ad-hoc signed, no team, no App Sandbox, no hardened runtime (spec §2).
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  Lift:
+    type: application
+    platform: macOS
+    sources: [Lift]
+    postCompileScripts:
+      # Contents/Resources gets the bundled recipe source (spec §4), the worker runtime (spec §8) and the
+      # Lift skill that connecting Claude Code or Codex installs (skills/lift/SKILL.md).
+      # rsync, not folder references: a developer's .venv (hundreds of MB) and caches must stay out.
+      - name: Bundle recipes, lift_worker and the Lift skill
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          R="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          X="--exclude .venv --exclude venv --exclude repo --exclude deps --exclude __pycache__ --exclude .pytest_cache --exclude .DS_Store"
+          rsync -a --delete $X "$SRCROOT/../dev-recipes/" "$R/dev-recipes/"
+          rsync -a --delete $X "$SRCROOT/../python/lift_worker/src/lift_worker/" "$R/lift_worker/"
+          rsync -a --delete $X "$SRCROOT/../skills/" "$R/skills/"
+    dependencies:
+      - package: Lift
+        product: LiftUI
+      - package: Lift
+        product: LiftServer
+    info:
+      path: Lift/Info.plist
+      properties:
+        CFBundleDisplayName: Lift
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.graphics-design
+        LSMinimumSystemVersion: "26.0"
+        NSHumanReadableCopyright: ""
+    entitlements:
+      path: Lift/Lift.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.oshricohen.Lift
+        PRODUCT_NAME: Lift
+        ENABLE_USER_SCRIPT_SANDBOXING: NO  # the bundling script reads the repo
+schemes:
+  Lift:
+    build: { targets: { Lift: all } }

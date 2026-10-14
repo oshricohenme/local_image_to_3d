@@ -1,0 +1,60 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "stabilityai/stable-diffusion-3.5-medium",
+      "revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+      "gated": true,
+      "files": [
+        "sd3.5_medium.safetensors",
+        "text_encoders/clip_g.safetensors",
+        "text_encoders/clip_l.safetensors",
+        "text_encoders/t5xxl_fp16.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--model",
+          "{model}/sd3.5_medium.safetensors",
+          "--clip_l",
+          "{model}/text_encoders/clip_l.safetensors",
+          "--clip_g",
+          "{model}/text_encoders/clip_g.safetensors",
+          "--t5xxl",
+          "{model}/text_encoders/t5xxl_fp16.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

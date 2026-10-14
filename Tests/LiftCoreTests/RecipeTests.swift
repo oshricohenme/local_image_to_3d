@@ -1,0 +1,166 @@
+import Foundation
+import Testing
+@testable import LiftCore
+
+/// Writes `<dir>/<id>/recipe.yaml` (+ launcher.py) and returns the folder.
+func writeRecipe(_ yaml: String, id: String, in dir: URL, launcher: Bool = true) throws -> URL {
+    let folder = dir.appending(path: id)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try yaml.write(to: folder.appending(path: "recipe.yaml"), atomically: true, encoding: .utf8)
+    if launcher { try "def run(state, job):\n    return []\n".write(to: folder.appending(path: "launcher.py"), atomically: true, encoding: .utf8) }
+    return folder
+}
+
+let pixalYAML = """
+schema: 1
+id: pixal3d
+name: Pixal3D
+publisher: TencentARC
+license: MIT
+homepage: https://github.com/TencentARC/Pixal3D
+repo: https://github.com/TencentARC/Pixal3D
+commit: f7cf38429b0bd264f1995f0f8743a88b1c728b94
+python: "3.11"
+platform: { status: supported, reason: "" }
+install:
+  - uv pip install torch torchvision
+substitutes: [flash_attn]
+shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }
+brew: [libusb]
+attribution:
+  project: Pixal3D
+  authors: [TencentARC]
+  homepage: https://ldyang694.github.io/projects/pixal3d/
+  license: { spdx: MIT, url: https://github.com/TencentARC/Pixal3D/blob/master/LICENSE }
+  components:
+    - { name: RMBG-2.0, role: background removal, url: https://huggingface.co/briaai/RMBG-2.0, license: { spdx: CC-BY-NC-4.0, url: https://creativecommons.org/licenses/by-nc/4.0/ }, restrictions: [non-commercial] }
+errors:
+  - { match: "out of memory", message: "Your Mac ran out of memory for this model." }
+weights:
+  - { repo: TencentARC/Pixal3D, gated: false }
+  - { repo: briaai/RMBG-2.0, revision: 1f3e2a7c, gated: true }
+resources:
+  memory_gb: 18
+  memory_keys: [low_vram, resolution]
+  memory_overrides: [{ when: { low_vram: true }, memory_gb: 12 }]
+stages:
+  - { pattern: '^\\[Stage\\] (?P<name>.+)$' }
+tasks:
+  - id: image_to_3d
+    modality: 3d
+    label: Image → 3D
+    inputs: [{ name: image, type: image }]
+    output: mesh
+    entry: inference:run_inference
+    settings:
+      - { key: resolution, label: Resolution, type: enum, options: [1024, 1536], default: 1536, group: basic }
+      - { key: low_vram, label: Low memory mode, type: bool, default: false, group: basic }
+      - { key: seed, label: Seed, type: int, default: 42, group: basic }
+      - { key: manual_fov, label: Camera FOV, type: float, default: -1.0, help: "radians; <0 = auto", group: basic }
+      - { key: ss_sampling_steps, label: Sparse structure steps, type: int, min: 1, max: 50, default: 12, group: advanced }
+"""
+
+@Suite struct RecipeTests {
+    @Test func parsesTheSpecExample() throws {
+        let folder = try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())
+        guard case .ok(let r) = RecipeLoad.read(directory: folder) else { Issue.record("\(RecipeLoad.read(directory: folder))"); return }
+        #expect(r.commit == "f7cf38429b0bd264f1995f0f8743a88b1c728b94")
+        #expect(r.substitutes == ["flash_attn"] && r.brew == ["libusb"] && !r.developer)
+        #expect(r.shim?.patches == ["transformers_fa2_to_sdpa"] && r.shim?.env == ["ATTN_BACKEND": "sdpa"] && r.shim?.aliases == [:])
+        #expect(r.weights == [Recipe.Weight(repo: "TencentARC/Pixal3D"), Recipe.Weight(repo: "briaai/RMBG-2.0", revision: "1f3e2a7c", gated: true)])
+        #expect(r.resources.memoryOverrides == [Recipe.MemoryOverride(when: ["low_vram": .bool(true)], memoryGB: 12)])
+        #expect(r.resources.diskGB == 5)  // default
+        let t = try #require(r.task("image_to_3d"))
+        #expect(t.output == .mesh && t.inputs == [TaskInput(name: "image", type: .image)])
+        #expect(t.settings.first?.options == [.int(1024), .int(1536)])
+        #expect(t.settings.first { $0.key == "manual_fov" }?.default == .float(-1.0))
+        #expect(r.stages == [Recipe.StagePattern(pattern: #"^\[Stage\] (?P<name>.+)$"#)])
+    }
+
+    @Test func plan4FieldsParse() throws {
+        let yaml = pixalYAML.replacingOccurrences(of: "  - { repo: TencentARC/Pixal3D, gated: false }",
+                                                  with: "  - { repo: TencentARC/Pixal3D, gated: false, files: [pipeline.json, ckpts/a.safetensors] }")
+            + "\nmetal_toolchain: true\ndescription: Turns a photo into a 3D model.\n"
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.metalToolchain && r.description == "Turns a photo into a 3D model.")
+        #expect(r.weights[0].files == ["pipeline.json", "ckpts/a.safetensors"] && r.weights[1].files == nil)
+        #expect(r.attribution.credit == "Pixal3D by TencentARC (MIT)" && r.attribution.components.first?.restrictions == ["non-commercial"])
+        guard case .ok(let plain) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { return }
+        #expect(!plain.metalToolchain && plain.description == nil)
+    }
+
+    @Test func attributionIsRequiredAndComplete() throws {
+        let start = pixalYAML.range(of: "attribution:")!.lowerBound, end = pixalYAML.range(of: "errors:")!.lowerBound
+        guard case .invalid(let missing) = RecipeLoad.read(directory: try writeRecipe(pixalYAML.replacingCharacters(in: start..<end, with: ""),
+                                                                                       id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(missing.contains("attribution is required"))
+        let blank = pixalYAML.replacingOccurrences(of: "  authors: [TencentARC]", with: "  authors: []")
+        guard case .invalid(let problems) = RecipeLoad.read(directory: try writeRecipe(blank, id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(problems.contains("attribution.authors must list who made it"))
+    }
+
+    @Test func plainErrorsMatchTheErrorOrTheLog() throws {
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { return }
+        #expect(r.plainError("RuntimeError: MPS backend out of memory") == "Your Mac ran out of memory for this model.")
+        #expect(r.plainError("worker exited with code 9", log: ["...", "torch: out of memory"]) == "Your Mac ran out of memory for this model.")
+        #expect(r.plainError("ValueError: boom") == nil)
+        let bad = pixalYAML.replacingOccurrences(of: #"match: "out of memory""#, with: #"match: "out of (memory""#)
+        guard case .invalid(let problems) = RecipeLoad.read(directory: try writeRecipe(bad, id: "pixal3d", in: try Fixtures.tempDir())) else {
+            Issue.record("expected invalid"); return
+        }
+        #expect(problems.contains("needs a valid regular expression"))
+    }
+
+    @Test func newerSchemaIsReportedNotParsed() throws {
+        let folder = try writeRecipe("schema: 3\nid: future\nsomething_new: true\n", id: "future", in: try Fixtures.tempDir())
+        #expect(RecipeLoad.read(directory: folder) == .needsNewerLift(id: "future", schema: 3))
+    }
+
+    @Test(arguments: [
+        ("id: pixal3d", "id: other", "must match its folder"),
+        ("commit: f7cf38429b0bd264f1995f0f8743a88b1c728b94", "commit: f7cf384", "40-character"),
+        ("type: enum, options: [1024, 1536], default: 1536", "type: enum, default: 1536", "enum needs options"),
+        ("min: 1, max: 50, default: 12", "min: 1, max: 50, default: 99", "default must be ≤ 50"),
+        ("memory_keys: [low_vram, resolution]", "memory_keys: [low_vram, nope]", "nope is not a setting"),
+        ("platform: { status: supported, reason: \"\" }", "platform: { status: unsupported }", "reason is required"),
+        ("repo: TencentARC/Pixal3D, gated", "repo: Pixal3D, gated", "must be owner/name"),
+        // C1: numbers that would trap when turned into bytes.
+        ("memory_gb: 18", "memory_gb: 1e300", "resources.memory_gb must be"),
+        ("memory_gb: 12 }]", "memory_gb: -1 }]", "resources.memory_overrides[0].memory_gb must be"),
+        ("memory_keys: [low_vram, resolution]", "memory_keys: [low_vram, resolution]\n  disk_gb: .inf", "resources.disk_gb must be"),
+    ])
+    func invalidRecipes(original: String, replacement: String, message: String) throws {
+        let yaml = pixalYAML.replacingOccurrences(of: original, with: replacement)
+        let folder = try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())
+        guard case .invalid(let problems) = RecipeLoad.read(directory: folder) else { Issue.record("expected invalid"); return }
+        #expect(problems.contains(message))
+    }
+
+    /// Gated weights download first: a refusal (terms not accepted) comes in seconds, not after the big repos.
+    @Test func gatedWeightsDownloadFirst() throws {
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.downloadOrder.map(\.repo) == ["briaai/RMBG-2.0", "TencentARC/Pixal3D"])
+    }
+
+    @Test func noShimMeansNone() throws {
+        let yaml = pixalYAML.replacingOccurrences(of: "shim: { patches: [transformers_fa2_to_sdpa], env: { ATTN_BACKEND: sdpa } }\n", with: "")
+        guard case .ok(let r) = RecipeLoad.read(directory: try writeRecipe(yaml, id: "pixal3d", in: try Fixtures.tempDir())) else { Issue.record("expected ok"); return }
+        #expect(r.shim == nil)
+    }
+
+    @Test func missingLauncherIsInvalid() throws {
+        let folder = try writeRecipe(pixalYAML, id: "pixal3d", in: try Fixtures.tempDir(), launcher: false)
+        guard case .invalid(let problems) = RecipeLoad.read(directory: folder) else { Issue.record("expected invalid"); return }
+        #expect(problems.contains("launcher.py is missing"))
+    }
+
+    @Test func undecodableYAMLIsInvalid() throws {
+        let folder = try writeRecipe("schema: 1\nid: x\n", id: "x", in: try Fixtures.tempDir())
+        guard case .invalid(let problems) = RecipeLoad.read(directory: folder) else { Issue.record("expected invalid"); return }
+        #expect(problems.hasPrefix("recipe.yaml:"))
+    }
+}

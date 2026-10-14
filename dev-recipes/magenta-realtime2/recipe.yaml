@@ -1,0 +1,116 @@
+{
+  "schema": 2,
+  "id": "magenta-realtime2",
+  "name": "Magenta RealTime 2",
+  "publisher": "Google Magenta",
+  "license": "CC-BY-4.0",
+  "homepage": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md",
+  "description": "Generate a finite instrumental recording with the native Magenta bridge. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "git -C repo lfs install --local",
+    "git -C repo lfs pull",
+    "cd repo && swift build --configuration release --product mere.run",
+    "cd repo && bash scripts/build_mlx_metallib.sh --configuration release"
+  ],
+  "brew": [
+    "git-lfs",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [],
+  "attribution": {
+    "project": "Magenta RealTime 2",
+    "authors": [
+      "Google Magenta"
+    ],
+    "homepage": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md",
+    "license": {
+      "spdx": "CC-BY-4.0",
+      "url": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md"
+    },
+    "components": [
+      {
+        "name": "sawfwair/mere-run",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/sawfwair/mere-run",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/sawfwair/mere-run"
+        }
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 16,
+    "disk_gb": 40
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "instrumental_music",
+      "modality": "music",
+      "label": "Instrumental music",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "int",
+          "default": 10,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 120
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/sawfwair/mere-run",
+  "commit": "01feae347b640f1c9fa8bf8e7dfbf782497d2706",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 3b8d59a52a6070819e90fdaef29217138e10b8c05e579e419520db165781dfde"
+  ]
+}

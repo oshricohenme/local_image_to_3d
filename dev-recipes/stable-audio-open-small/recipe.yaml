@@ -1,0 +1,188 @@
+{
+  "schema": 2,
+  "id": "stable-audio-open-small",
+  "name": "Stable Audio Open Small",
+  "publisher": "Stability AI",
+  "license": "LicenseRef-Stability-Community",
+  "homepage": "https://huggingface.co/stabilityai/stable-audio-open-small",
+  "description": "Generate short audio clips with the upstream MLX port. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"mlx==0.30.0\" \"transformers==4.57.3\" \"huggingface-hub==0.36.0\" numpy safetensors soundfile sentencepiece protobuf torch"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "stabilityai/stable-audio-open-small",
+      "revision": "dc620d91535857b72ebb59b4ca45978db6d417f5",
+      "gated": true,
+      "files": [
+        "model.safetensors",
+        "model_config.json"
+      ]
+    },
+    {
+      "repo": "stabilityai/stable-audio-open-1.0",
+      "revision": "f21265c1e2710b3bd2386596943f0007f55f802e",
+      "gated": true,
+      "files": [
+        "text_encoder/model.safetensors",
+        "tokenizer/special_tokens_map.json",
+        "tokenizer/spiece.model",
+        "tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "Stable Audio Open Small",
+    "authors": [
+      "Stability AI"
+    ],
+    "homepage": "https://huggingface.co/stabilityai/stable-audio-open-small",
+    "license": {
+      "spdx": "LicenseRef-Stability-Community",
+      "url": "https://huggingface.co/stabilityai/stable-audio-open-small"
+    },
+    "components": [
+      {
+        "name": "stabilityai/stable-audio-open-small",
+        "role": "model component",
+        "url": "https://huggingface.co/stabilityai/stable-audio-open-small",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/stabilityai/stable-audio-open-small"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      },
+      {
+        "name": "stabilityai/stable-audio-open-1.0",
+        "role": "model component",
+        "url": "https://huggingface.co/stabilityai/stable-audio-open-1.0",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/stabilityai/stable-audio-open-1.0"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      },
+      {
+        "name": "sandst1/stable-audio-mlx",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/sandst1/stable-audio-mlx",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/sandst1/stable-audio-mlx"
+        }
+      },
+      {
+        "name": "Stable Audio Open Small usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/stabilityai/stable-audio-open-small",
+        "license": {
+          "spdx": "LicenseRef-Stability-Community",
+          "url": "https://huggingface.co/stabilityai/stable-audio-open-small"
+        },
+        "restrictions": [
+          "custom terms; review before use"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 8,
+    "disk_gb": 20
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_sound",
+      "modality": "audio",
+      "label": "Text to sound",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "float",
+          "default": 5.0,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 11
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 8,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/sandst1/stable-audio-mlx",
+  "commit": "554275c77e794b4b4c35c02a2ac59946cddcf237",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 6b37e29092478dd26cd6b7d177a43859cea2a3f95c9850511615e7ae6acc6f2d"
+  ]
+}

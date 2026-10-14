@@ -1,0 +1,125 @@
+# TRELLIS.2 through trellis-mac, an existing Mac port: no lift_shim. Its setup.sh runs unchanged; Lift only
+# pre-places pinned clones so setup.sh skips its own unpinned ones, and points its .venv at Lift's venv.
+# Each nested clone converges from any state (spec §6): clone when missing, else fetch, force-checkout the pin and
+# `git clean -fdx` inside that Lift-created clone (also clearing stale build products); setup.sh then re-applies its patches.
+# Install steps and pins: docs/superpowers/findings/2026-10-go-no-go.md. Note: trellis-mac's own
+# patches/mps_compat.py (run by setup.sh) edits files in its TRELLIS.2 clone; that is trellis-mac's documented behaviour.
+schema: 1
+id: trellis2-mac
+name: TRELLIS.2 (Mac)
+description: >-
+  Microsoft's TRELLIS.2 turns one photo of an object into a 3D model with realistic textures, running on your
+  Mac through the trellis-mac port. Best on a single object on a plain background; needs about 18 GB of memory
+  and takes several minutes per model.
+publisher: shivampkumar (Mac port of microsoft/TRELLIS.2)
+license: MIT
+homepage: https://github.com/shivampkumar/trellis-mac
+repo: https://github.com/shivampkumar/trellis-mac
+commit: d58628f4f5b9c3de8274cb110074154f4b31cef2
+python: "3.11"
+platform: { status: supported }
+metal_toolchain: true
+install:
+  - '{ [ -d repo/TRELLIS.2/.git ] || git clone --filter=blob:none https://github.com/microsoft/TRELLIS.2 repo/TRELLIS.2; } && git -C repo/TRELLIS.2 fetch -q origin && git -C repo/TRELLIS.2 checkout -qf 75fbf0183001ed9876c8dbb35de6b68552ee08bd && git -C repo/TRELLIS.2 clean -fdxq'
+  # setup.sh clones these at HEAD unless they exist; these are the commits verified in the go/no-go test.
+  - '{ [ -d repo/deps/mtlbvh/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlbvh repo/deps/mtlbvh; } && git -C repo/deps/mtlbvh fetch -q origin && git -C repo/deps/mtlbvh checkout -qf 6b2a0f63b476ad8225695d092902104beafd7f58 && git -C repo/deps/mtlbvh clean -fdxq'
+  - '{ [ -d repo/deps/mtldiffrast/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtldiffrast repo/deps/mtldiffrast; } && git -C repo/deps/mtldiffrast fetch -q origin && git -C repo/deps/mtldiffrast checkout -qf c9499ba2e4ed6849e95ce5da7aae5bf61addb528 && git -C repo/deps/mtldiffrast clean -fdxq'
+  - '{ [ -d repo/deps/mtlmesh/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlmesh repo/deps/mtlmesh; } && git -C repo/deps/mtlmesh fetch -q origin && git -C repo/deps/mtlmesh checkout -qf 7de3864f783407201486bf6c900a4bd76a4018a3 && git -C repo/deps/mtlmesh clean -fdxq'
+  - '{ [ -d repo/deps/mtlgemm/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/mtlgemm repo/deps/mtlgemm; } && git -C repo/deps/mtlgemm fetch -q origin && git -C repo/deps/mtlgemm checkout -qf 566c133781ce4992de3f77c3a97dd6feaae9d013 && git -C repo/deps/mtlgemm clean -fdxq'
+  - '{ [ -d repo/deps/trellis2-apple/.git ] || git clone --filter=blob:none https://github.com/pedronaugusto/trellis2-apple repo/deps/trellis2-apple; } && git -C repo/deps/trellis2-apple fetch -q origin && git -C repo/deps/trellis2-apple checkout -qf 17347247c91c36c8cdc1896234983e878a457bba && git -C repo/deps/trellis2-apple clean -fdxq'
+  # setup.sh's clone has no submodules; without Eigen, o_voxel silently falls back to the KDTree baker.
+  - git -C repo/deps/trellis2-apple submodule update --init --depth 1 o-voxel/third_party/eigen
+  # setup.sh creates .venv only if it is missing, then activates it: make it Lift's venv.
+  - ln -sfn ../venv repo/.venv
+  # setup.sh installs unpinned torch. 2.14 headers need C++20 (the mtl* builds use C++17), 2.9 lacks
+  # at::mps::dispatch_sync_with_rethrow, mtlgemm needs >=2.11: 2.13 fits. UV_NO_CACHE avoids stale local builds.
+  # Relative: uv splits UV_CONSTRAINT on spaces ("Application Support"), and setup.sh runs from repo/.
+  - printf 'torch==2.13.0\n' > torch-constraint.txt
+  - cd repo && UV_CONSTRAINT=../torch-constraint.txt UV_NO_CACHE=1 bash setup.sh
+attribution:   # spec §4a; facts from the READMEs and LICENSE files at the pins and the Hugging Face cards
+  project: TRELLIS.2
+  authors: [Jianfeng Xiang, Xiaoxue Chen, Sicheng Xu, Ruicheng Wang, Zelong Lv, Yu Deng, Hongyuan Zhu, Yue Dong, Hao Zhao,
+            Nicholas Jing Yuan, Jiaolong Yang, Microsoft Research]
+  homepage: https://microsoft.github.io/TRELLIS.2
+  repo: https://github.com/microsoft/TRELLIS.2
+  paper:
+    title: Native and Compact Structured Latents for 3D Generation
+    url: https://arxiv.org/abs/2512.14692
+    bibtex: |
+      @article{
+          xiang2025trellis2,
+          title={Native and Compact Structured Latents for 3D Generation},
+          author={Xiang, Jianfeng and Chen, Xiaoxue and Xu, Sicheng and Wang, Ruicheng and Lv, Zelong and Deng, Yu and Zhu, Hongyuan and Dong, Yue and Zhao, Hao and Yuan, Nicholas Jing and Yang, Jiaolong},
+          journal={Tech report},
+          year={2025}
+      }
+  license: { spdx: MIT, url: https://github.com/microsoft/TRELLIS.2/blob/75fbf0183001ed9876c8dbb35de6b68552ee08bd/LICENSE }
+  components:
+    - { name: trellis-mac by shivampkumar, role: Mac port, url: https://github.com/shivampkumar/trellis-mac, license: { spdx: MIT, url: https://github.com/shivampkumar/trellis-mac/blob/d58628f4f5b9c3de8274cb110074154f4b31cef2/LICENSE } }
+    - { name: TRELLIS.2-4B, role: model weights, url: https://huggingface.co/microsoft/TRELLIS.2-4B, license: { spdx: MIT, url: https://huggingface.co/microsoft/TRELLIS.2-4B } }
+    - { name: TRELLIS-image-large, role: model weights (sparse-structure decoder), url: https://huggingface.co/microsoft/TRELLIS-image-large, license: { spdx: MIT, url: https://huggingface.co/microsoft/TRELLIS-image-large } }
+    - { name: DINOv3 ViT-L/16 by Meta, role: image features, url: https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m,
+        license: { spdx: LicenseRef-DINOv3, url: https://ai.meta.com/resources/models-and-libraries/dinov3-license/ },
+        restrictions: [no military or weapons use, "show \"Built with DINOv3\" when redistributing"] }
+    - { name: RMBG-2.0 by BRIA AI, role: background removal, url: https://huggingface.co/briaai/RMBG-2.0,
+        license: { spdx: CC-BY-NC-4.0, url: https://creativecommons.org/licenses/by-nc/4.0/ }, restrictions: [non-commercial] }
+    - { name: mtlgemm by pedronaugusto, role: Mac port (sparse convolution on Metal), url: https://github.com/pedronaugusto/mtlgemm, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlgemm/blob/566c133781ce4992de3f77c3a97dd6feaae9d013/LICENSE } }
+    - { name: mtldiffrast by pedronaugusto, role: Mac port (rasterizer on Metal), url: https://github.com/pedronaugusto/mtldiffrast, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtldiffrast/blob/c9499ba2e4ed6849e95ce5da7aae5bf61addb528/LICENSE.txt } }
+    - { name: mtlbvh by pedronaugusto, role: Mac port (BVH on Metal), url: https://github.com/pedronaugusto/mtlbvh, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlbvh/blob/6b2a0f63b476ad8225695d092902104beafd7f58/LICENSE.txt } }
+    - { name: mtlmesh by pedronaugusto, role: Mac port (mesh ops on Metal), url: https://github.com/pedronaugusto/mtlmesh, license: { spdx: MIT, url: https://github.com/pedronaugusto/mtlmesh/blob/7de3864f783407201486bf6c900a4bd76a4018a3/LICENSE } }
+    - { name: trellis2-apple (o-voxel) by pedronaugusto, role: Mac port (texture baking), url: https://github.com/pedronaugusto/trellis2-apple, license: { spdx: MIT, url: https://github.com/pedronaugusto/trellis2-apple/blob/17347247c91c36c8cdc1896234983e878a457bba/LICENSE } }
+    - { name: utils3d by EasternJournalist, role: library, url: https://github.com/EasternJournalist/utils3d, license: { spdx: MIT, url: https://github.com/EasternJournalist/utils3d/blob/9a4eb15e4021b67b12c460c7057d642626897ec8/LICENSE } }
+weights:
+  # The files TRELLIS.2-4B's pipeline.json (image to 3D) names; the shape/texture encoders are training-only.
+  - repo: microsoft/TRELLIS.2-4B
+    files: [pipeline.json, ckpts/ss_flow_img_dit_1_3B_64_bf16.json, ckpts/ss_flow_img_dit_1_3B_64_bf16.safetensors,
+            ckpts/shape_dec_next_dc_f16c32_fp16.json, ckpts/shape_dec_next_dc_f16c32_fp16.safetensors,
+            ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.json, ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.safetensors,
+            ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.json, ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.safetensors,
+            ckpts/tex_dec_next_dc_f16c32_fp16.json, ckpts/tex_dec_next_dc_f16c32_fp16.safetensors,
+            ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.json, ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.safetensors,
+            ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.json, ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors]
+  - { repo: microsoft/TRELLIS-image-large, files: [ckpts/ss_dec_conv3d_16l8_fp16.json, ckpts/ss_dec_conv3d_16l8_fp16.safetensors] }   # pipeline.json's sparse_structure_decoder
+  - { repo: facebook/dinov3-vitl16-pretrain-lvd1689m, gated: true }
+  - { repo: briaai/RMBG-2.0, gated: true, files: [config.json, BiRefNet_config.py, birefnet.py, model.safetensors] }
+resources:
+  memory_gb: 18
+  memory_keys: [pipeline_type]
+  disk_gb: 3
+stages:
+  # Bars give the percentage only: the stage keeps the plain name its [Stage] line gave ("Painting the texture",
+  # not "Sampling texture SLat"). [Stage] lines are built into every worker.
+  - { pattern: '^[^:|]+:\s*(?P<pct>\d+)%\|' }
+  - { pattern: '^\s*(?P<pct>\d+)%\|' }
+errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
+  - { match: "GPU watchdog", message: "Your Mac's graphics chip took too long on this image. Try the 512 quality setting, close other apps, or unplug external displays, then try again." }
+  - { match: "not on its Metal backend|KDTree", message: "The Mac graphics part of TRELLIS.2 didn't install correctly. Check that the Metal Toolchain is installed, then reinstall TRELLIS.2 from Models." }
+  - { match: "MPS backend out of memory|out of memory", message: "Your Mac ran out of memory for this model. Close other apps, or use the 512 quality setting." }
+  - { match: "GatedRepoError|401 Client Error|403 Client Error|Cannot access gated repo|Access to model .* is restricted", message: "Your Hugging Face account doesn't have access to DINOv3 or RMBG-2.0 yet. Open each model page, accept its terms, then try again." }
+tasks:
+  - id: image_to_3d
+    modality: 3d
+    label: Photo → 3D model
+    inputs: [{ name: image, type: image }]
+    output: mesh
+    entry: generate.py (main, mirrored by launcher.py)
+    settings:   # every generate.py option except image/--output, with its defaults
+      - { key: pipeline_type, label: Quality, type: enum, options: ["512", "1024", "1024_cascade"], default: "512", group: basic, help: "512 is fastest and safest on a Mac; 1024 and 1024_cascade add detail but take much longer." }
+      - { key: seed, label: Variation, type: int, default: 42, group: basic, help: "Change this number to get a different version of the same object." }
+      - { key: no_texture, label: Shape only, type: bool, default: false, group: basic, help: "Skip the colors and textures: much faster, gray model." }
+      - { key: texture_size, label: Texture size, type: enum, options: [512, 1024, 2048], default: 1024, group: advanced, help: "Bigger textures look sharper and take longer to bake." }
+      - { key: steps, label: Sampling steps, type: int, default: 0, min: 0, group: advanced, help: "More steps can add detail and take longer. 0 uses the model's own setting (usually 12)." }
+    # In launcher order (its [Stage] names): the Queue shows "Stage k of N". Shape only skips the bake for a plain save.
+    phases:
+      - { match: "^Removing the background" }
+      - { match: "^Reading the photo" }
+      - { match: "^Laying out the rough 3D shape" }
+      - { match: "^Sculpting the shape" }
+      - { match: "^Painting the texture" }
+      - { match: "^Decoding the 3D shape" }
+      - { match: "^Decoding the texture" }
+      - { match: "^Baking the textures", unless: { no_texture: true } }
+      - { match: "^Simplifying the mesh", unless: { no_texture: true } }
+      - { match: "^Saving the GLB file", unless: { no_texture: true } }
+      - { match: "^Saving the 3D file with vertex colours", when: { no_texture: true } }
+      - { match: "^Writing the OBJ file" }

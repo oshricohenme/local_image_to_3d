@@ -1,0 +1,61 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "MiniT2I/MiniT2I",
+      "revision": "5b4da2870d1554992670d1005567e9d55b1b37bb",
+      "gated": false,
+      "files": [
+        "minit2i-b-16/transformer/diffusion_pytorch_model.safetensors"
+      ]
+    },
+    "encoder": {
+      "repo": "google/flan-t5-large",
+      "revision": "0613663d0d48ea86ba8cb3d7a44f0f65dc596a2a",
+      "gated": false,
+      "files": [
+        "model.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/minit2i-b-16/transformer/diffusion_pytorch_model.safetensors",
+          "--t5xxl",
+          "{encoder}/model.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

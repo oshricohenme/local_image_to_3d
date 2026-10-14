@@ -1,0 +1,18 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+spike/work/
+**/.venv/
+**/__pycache__/
+.build/
+.superpowers/
+test-results/
+App/Lift.xcodeproj/
+App/build/
+build/
+
+# Upstream code, environments and weights are fetched into Lift's managed workdir.
+/models/
+/dev-recipes/*/repo/
+/dev-recipes/*/venv/
+/dev-recipes/*/deps/

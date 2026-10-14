@@ -1,0 +1,106 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+      "revision": "ee6f4a40737a995bf5818954cfce6d59443b0f04",
+      "gated": false,
+      "files": [
+        "split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors",
+        "split_files/diffusion_models/wan2.2_s2v_14B_bf16.safetensors",
+        "split_files/text_encoders/umt5_xxl_fp16.safetensors",
+        "split_files/vae/wan_2.1_vae.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "speech_to_video": {
+      "commands": [
+        [
+          "ffmpeg",
+          "-v",
+          "error",
+          "-y",
+          "-i",
+          "{audio}",
+          "-ar",
+          "16000",
+          "-ac",
+          "1",
+          "{out}/_inputs/audio.wav"
+        ],
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "-M",
+          "vid_gen",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/wan2.2_s2v_14B_bf16.safetensors",
+          "--vae",
+          "{model}/split_files/vae/wan_2.1_vae.safetensors",
+          "--t5xxl",
+          "{model}/split_files/text_encoders/umt5_xxl_fp16.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.avi",
+          "--vae-tiling",
+          "--flow-shift",
+          "3",
+          "--video-frames",
+          "{frames}",
+          "--fps",
+          "16",
+          "-i",
+          "{image}",
+          "--audio",
+          "{out}/_inputs/audio.wav",
+          "--audio-encoder",
+          "{model}/split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors"
+        ],
+        [
+          "ffmpeg",
+          "-v",
+          "error",
+          "-y",
+          "-i",
+          "{out}/result.avi",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          "aac",
+          "-movflags",
+          "+faststart",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ],
+      "directories": [
+        "_inputs"
+      ]
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "SeFi-Image/SeFi-Image-1B-turbo",
+      "revision": "88acf40938448963a43765d6f3533a8b289d79c4",
+      "gated": true
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "scripts/convert_sefi.py",
+      "{model}",
+      "{root}/sefi_1b_turbo.safetensors"
+    ],
+    [
+      "{python}",
+      "scripts/convert_qwen3_vl.py",
+      "{model}/Qwen3-VL-2B-Instruct",
+      "{root}/qwen3_vl_2b.safetensors"
+    ]
+  ],
+  "required": [
+    "{repo}/build/bin/sd-cli",
+    "{root}/sefi_1b_turbo.safetensors",
+    "{root}/qwen3_vl_2b.safetensors"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{root}/sefi_1b_turbo.safetensors",
+          "--llm",
+          "{root}/qwen3_vl_2b.safetensors",
+          "--vae",
+          "{model}/vae/diffusion_pytorch_model.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

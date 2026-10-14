@@ -1,0 +1,73 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/OmniVoice-bf16",
+      "revision": "8fb0b754cad788aaefec690cd55c207e8a628f85",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      ""
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    },
+    "voice_clone": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--ref_audio",
+          "{reference}",
+          "--ref_text",
+          "{transcript}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}

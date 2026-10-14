@@ -1,0 +1,54 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "ideogram-ai/ideogram-4-fp8",
+      "revision": "ee79a7237b519f1402ceacf952f30c8a31ec5073",
+      "gated": true
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "ideogram-4-fp8",
+      "-q",
+      "4",
+      "--path",
+      "{root}/converted"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-ideogram4",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "ideogram-4-fp8",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--preset",
+          "{preset}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

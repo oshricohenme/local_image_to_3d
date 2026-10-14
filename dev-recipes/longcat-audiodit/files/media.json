@@ -1,0 +1,73 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/LongCat-AudioDiT-1B-bf16",
+      "revision": "bb9de8ab0a4539232c9cbd72e6bf559cbd55274a",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      "longcat"
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    },
+    "voice_clone": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--ref_audio",
+          "{reference}",
+          "--ref_text",
+          "{transcript}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}

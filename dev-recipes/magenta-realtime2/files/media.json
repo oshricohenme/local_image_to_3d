@@ -1,0 +1,43 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "music-magenta-rt2-small",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/music-magenta-rt2-small/mererun_model.json"
+  ],
+  "tasks": {
+    "instrumental_music": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "music",
+          "realtime",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/music-magenta-rt2-small",
+          "--duration",
+          "{duration}",
+          "--no-play",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

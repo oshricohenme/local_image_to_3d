@@ -1,0 +1,82 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "black-forest-labs/FLUX.2-klein-4B",
+      "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "flux2-klein-4b",
+      "-q",
+      "4",
+      "--path",
+      "{root}/converted"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-flux2",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "flux2-klein-4b",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    },
+    "edit_image": {
+      "commands": [
+        [
+          "mflux-generate-flux2-edit",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "flux2-klein-4b",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}",
+          "--image-paths",
+          "{image}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

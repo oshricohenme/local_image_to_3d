@@ -1,0 +1,46 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/DeepFilterNet-mlx",
+      "revision": "220d5dfb7266352272d74c2a7d2025c59e07b391",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-sts",
+      "--model",
+      "{model}",
+      "--kind",
+      "deepfilter"
+    ]
+  ],
+  "required": [
+    "{model}"
+  ],
+  "tasks": {
+    "enhance_audio": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "lift_media.apis",
+          "deepfilter",
+          "--model",
+          "{model}",
+          "--audio",
+          "{audio}",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  }
+}

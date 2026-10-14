@@ -1,0 +1,50 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "video-cosmos3-edge-mlx",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/video-cosmos3-edge-mlx/mererun_model.json"
+  ],
+  "tasks": {
+    "image_to_video": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "video",
+          "cosmos3",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/video-cosmos3-edge-mlx",
+          "--mode",
+          "image-to-video",
+          "--image",
+          "{image}",
+          "--width",
+          "512",
+          "--height",
+          "320",
+          "--num-frames",
+          "{frames}",
+          "--output",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

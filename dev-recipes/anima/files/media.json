@@ -1,0 +1,57 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "circlestone-labs/Anima",
+      "revision": "f973fc41ec7545364ac9776c2440285f43ff2a30",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/anima-base-v1.0.safetensors",
+        "split_files/text_encoders/qwen_3_06b_base.safetensors",
+        "split_files/vae/qwen_image_vae.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/anima-base-v1.0.safetensors",
+          "--vae",
+          "{model}/split_files/vae/qwen_image_vae.safetensors",
+          "--llm",
+          "{model}/split_files/text_encoders/qwen_3_06b_base.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

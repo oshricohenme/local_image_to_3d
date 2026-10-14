@@ -1,0 +1,50 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/kitten-tts-mini-0.8",
+      "revision": "a22cce835c4af60bf9a50779124cf8cc34b0c36e",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      "kitten"
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--voice",
+          "{voice}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}
