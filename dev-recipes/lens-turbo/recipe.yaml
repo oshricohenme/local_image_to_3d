@@ -1,0 +1,219 @@
+{
+  "schema": 2,
+  "id": "lens-turbo",
+  "name": "Lens Turbo",
+  "publisher": "Microsoft / Comfy-Org mirror",
+  "license": "NOASSERTION",
+  "homepage": "https://huggingface.co/Comfy-Org/Lens",
+  "description": "Generate images using the archived Lens mirror. Original weights were withdrawn; provenance and use terms need review. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install ./repo"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "Comfy-Org/Lens",
+      "revision": "393618fd7db3e370509f84390b9162b8fd839a25",
+      "gated": false,
+      "files": [
+        "diffusion_models/lens_turbo_bf16.safetensors"
+      ]
+    },
+    {
+      "repo": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "revision": "773a7da77e569019bb0fd17a554b263738d669a3",
+      "gated": false
+    },
+    {
+      "repo": "black-forest-labs/FLUX.2-klein-4B",
+      "revision": "e7b7dc27f91deacad38e78976d1f2b499d76a294",
+      "gated": false,
+      "files": [
+        "vae/config.json",
+        "vae/diffusion_pytorch_model.safetensors"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "Lens Turbo",
+    "authors": [
+      "Microsoft / Comfy-Org mirror"
+    ],
+    "homepage": "https://huggingface.co/Comfy-Org/Lens",
+    "license": {
+      "spdx": "NOASSERTION",
+      "url": "https://huggingface.co/Comfy-Org/Lens"
+    },
+    "components": [
+      {
+        "name": "Comfy-Org/Lens",
+        "role": "model component",
+        "url": "https://huggingface.co/Comfy-Org/Lens",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/Comfy-Org/Lens"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      },
+      {
+        "name": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+        "role": "model component",
+        "url": "https://huggingface.co/mlx-community/gpt-oss-20b-MXFP4-Q8",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/mlx-community/gpt-oss-20b-MXFP4-Q8"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "black-forest-labs/FLUX.2-klein-4B",
+        "role": "model component",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "mflux-community/mflux",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/mflux-community/mflux",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/mflux-community/mflux"
+        }
+      },
+      {
+        "name": "Lens Turbo usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/Comfy-Org/Lens",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/Comfy-Org/Lens"
+        },
+        "restrictions": [
+          "custom terms; review before use"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 32,
+    "disk_gb": 90
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 512,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 512,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/mflux-community/mflux",
+  "commit": "602b26d242eb7ea9df2a765162a7f35c45c7a143",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 85662648ec1f5fd5ff543f3f265f111907744df71227bab3cf31366dcfd8f5b6"
+  ]
+}

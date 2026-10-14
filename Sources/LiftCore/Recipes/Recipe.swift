@@ -88,10 +88,9 @@ public struct PhasePosition: Sendable, Equatable {
     public init(number: Int, count: Int) { (self.number, self.count) = (number, count) }
 }
 
-/// `recipe.yaml`, schema v1 (spec §4), plus `shim`, `brew`, `stages`, `developer` and `weights[].revision`
-/// (see the plan's schema notes).
+/// `recipe.yaml`, schemas v1–2. Schema 2 adds asset preparation before installation succeeds.
 public struct Recipe: Codable, Sendable, Equatable {
-    public static let supportedSchema = 1
+    public static let supportedSchema = 2
 
     public struct Platform: Codable, Sendable, Equatable {
         public enum Status: String, Codable, Sendable { case supported, unsupported }
@@ -191,6 +190,8 @@ public struct Recipe: Codable, Sendable, Equatable {
     public var python: String
     public var platform: Platform
     public var install: [String]
+    /// After dependencies and the recipe copy, before the smoke check. Downloads/converts model assets.
+    public var prepare: [String]
     public var substitutes: [String]
     /// Present: install `lift_shim` + its `.pth` and set `LIFT_SHIM` for the worker. Absent: no shim.
     public var shim: Shim?
@@ -224,6 +225,7 @@ public struct Recipe: Codable, Sendable, Equatable {
         python = try c.decodeIfPresent(String.self, forKey: .python) ?? "3.11"
         platform = try c.decodeIfPresent(Platform.self, forKey: .platform) ?? Platform(status: .supported, reason: nil)
         install = try c.decodeIfPresent([String].self, forKey: .install) ?? []
+        prepare = try c.decodeIfPresent([String].self, forKey: .prepare) ?? []
         substitutes = try c.decodeIfPresent([String].self, forKey: .substitutes) ?? []
         shim = try c.decodeIfPresent(Shim.self, forKey: .shim)
         brew = try c.decodeIfPresent([String].self, forKey: .brew) ?? []
@@ -242,7 +244,7 @@ public struct Recipe: Codable, Sendable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case schema, id, name, publisher, license, homepage, description, repo, commit, python, platform, install, substitutes, shim, brew
+        case schema, id, name, publisher, license, homepage, description, repo, commit, python, platform, install, prepare, substitutes, shim, brew
         case metalToolchain = "metal_toolchain", weights, attribution, errors, developer, resources, stages, tasks
     }
 

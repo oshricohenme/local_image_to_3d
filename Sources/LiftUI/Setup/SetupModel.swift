@@ -82,7 +82,7 @@ public final class SetupModel {
     /// The current step's title, in plain words for a first run or a repair.
     public var heading: String {
         switch step {
-        case .welcome: "Turn photos into 3D models, right on your Mac"
+        case .welcome: "Create images, music, audio, video and 3D on your Mac"
         case .files: firstRun ? "Where should Lift keep its files?" : "Lift can't find its folder"
         case .mac: firstRun ? "Get your Mac ready" : "A helper tool is missing"
         case .done: "You're all set"
@@ -127,13 +127,12 @@ public final class SetupModel {
     }
 
     static func spaceNote(_ free: Int64) -> (text: String, warning: Bool) {
-        let lead = "Models are large — each one needs about 6 to 20 GB."
+        let lead = "Model sizes vary. Check each model's storage estimate before installing."
         let gb = free / 1_000_000_000
         if free < 25_000_000_000 {
             return ("\(lead) This Mac has only \(gb) GB free, which may not be enough. Free up some space, or choose a folder on a bigger drive.", true)
         }
-        let n = free / 20_000_000_000
-        return ("\(lead) This Mac has \(gb) GB free, enough for about \(n) model\(n == 1 ? "" : "s").", false)
+        return ("\(lead) This Mac has \(gb) GB free.", false)
     }
 
     /// Free space for important data on the volume that holds `url` (or would, once it's created).

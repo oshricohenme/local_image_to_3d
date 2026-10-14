@@ -29,7 +29,7 @@ public struct TaskChip: Identifiable, Sendable {
 /// follow-up step, priority and export options. It builds requests; the user decides everything.
 @MainActor @Observable
 public final class GenerateModel {
-    public nonisolated static let modalities = [("3d", "3D"), ("image", "Image"), ("video", "Video"), ("audio", "Audio")]
+    public nonisolated static let modalities = [("3d", "3D"), ("image", "Image"), ("music", "Music"), ("video", "Video"), ("audio", "Audio")]
 
     public var models: [ModelView] = [] {
         didSet { reconcile() }
@@ -57,6 +57,7 @@ public final class GenerateModel {
     /// Export (spec §7, §9): where the result goes and in which formats. Starts from the export settings
     /// and follows them until the user changes it here. No formats means the job only keeps its own copy.
     public var exportFormats: Set<ExportFormat> = [.glb] { didSet { exportEdited = exportEdited || !adopting } }
+    public var exportOriginal = true { didSet { exportEdited = true } }
     /// nil: the `export_dir` setting.
     public var exportDir: String? { didSet { exportEdited = exportEdited || !adopting } }
     public var cleanupAfterExport = false { didSet { exportEdited = exportEdited || !adopting } }
@@ -121,7 +122,13 @@ public final class GenerateModel {
     /// yet simply means no export); once changed here, these formats, this folder (or the setting's) and cleanup.
     public var export: ExportSpec {
         guard exportEdited else { return ExportSpec() }
-        return ExportSpec(dir: exportDir, formats: ExportFormat.allCases.filter(exportFormats.contains), cleanupAfterExport: cleanupAfterExport)
+        let formats = availableExportFormats == [.original] ? (exportOriginal ? [.original] : []) : availableExportFormats.filter(exportFormats.contains)
+        return ExportSpec(dir: exportDir, formats: formats, cleanupAfterExport: cleanupAfterExport)
+    }
+
+    public var availableExportFormats: [ExportFormat] {
+        let output = task(then ?? current)?.output
+        return output == .mesh || output == .riggedMesh ? ExportFormat.allCases : [.original]
     }
 
     /// The export settings, until the user changes the export options in this form.

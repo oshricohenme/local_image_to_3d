@@ -1,0 +1,64 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "lodestones/Chroma1-HD",
+      "revision": "0e0c60ece1e82b17cb7f77342d765ba5024c40c0",
+      "gated": false,
+      "files": [
+        "Chroma1-HD.safetensors",
+        "vae/diffusion_pytorch_model.safetensors"
+      ]
+    },
+    "encoder": {
+      "repo": "Comfy-Org/stable-diffusion-3.5-fp8",
+      "revision": "934251d1e6168bcb45a069abc5bd5cdd5f8fea00",
+      "gated": false,
+      "files": [
+        "text_encoders/t5xxl_fp16.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/Chroma1-HD.safetensors",
+          "--vae",
+          "{model}/vae/diffusion_pytorch_model.safetensors",
+          "--t5xxl",
+          "{encoder}/text_encoders/t5xxl_fp16.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

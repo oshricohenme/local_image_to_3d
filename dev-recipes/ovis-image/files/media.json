@@ -1,0 +1,64 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "Comfy-Org/Ovis-Image",
+      "revision": "b7d0cb855e82448c28936c9907a143bf319c80a0",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/ovis_image_bf16.safetensors",
+        "split_files/text_encoders/ovis_2.5.safetensors"
+      ]
+    },
+    "vae": {
+      "repo": "black-forest-labs/FLUX.1-schnell",
+      "revision": "741f7c3ce8b383c54771c7003378a50191e9efe9",
+      "gated": true,
+      "files": [
+        "ae.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/ovis_image_bf16.safetensors",
+          "--llm",
+          "{model}/split_files/text_encoders/ovis_2.5.safetensors",
+          "--vae",
+          "{vae}/ae.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

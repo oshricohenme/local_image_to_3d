@@ -95,4 +95,19 @@ import Testing
         #expect(g.current == TaskRef(recipe: "test-cube", task: "fake_rig"))
         #expect(g.files == [URL(filePath: "/tmp/out.glb")])
     }
+
+    @Test func choosingAFolderForMediaKeepsOriginalFilesSelected() async throws {
+        let g = GenerateModel()
+        g.models = try await UIFixtures.lift(bundle: UIFixtures.devRecipes).modelsList()
+        g.modality = "audio"
+        g.kind = g.chips("audio").first { $0.kind.inputs == [.text] }?.kind
+        g.recipe = "kitten-tts"
+        g.text = "Hello"
+        g.adoptExportDefaults(Settings())
+        g.exportDir = "/Exports"
+        #expect(g.requests.first?.export?.formats == [.original])
+        g.exportOriginal = false
+        #expect(g.requests.first?.export?.formats == [])
+        #expect(g.chips("music").flatMap(\.models).contains { $0.id == "musicgen" })
+    }
 }

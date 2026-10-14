@@ -1,0 +1,49 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/DialogueSidon-bf16",
+      "revision": "5d42379f8025486e262825620eeb5f85e5cd8dc9",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-sts",
+      "--model",
+      "{model}",
+      "--kind",
+      "sidon"
+    ]
+  ],
+  "required": [
+    "{model}"
+  ],
+  "tasks": {
+    "separate_audio": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.sts.generate",
+          "--model",
+          "{model}",
+          "--audio",
+          "{audio}",
+          "--output-path",
+          "{out}/result.wav",
+          "--num-steps",
+          "{steps}",
+          "--seed",
+          "{seed}"
+        ]
+      ],
+      "outputs": [
+        "result_speaker_*.wav"
+      ]
+    }
+  }
+}

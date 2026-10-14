@@ -1,0 +1,208 @@
+{
+  "schema": 2,
+  "id": "sefi-image",
+  "name": "SeFi Image 1B Turbo",
+  "publisher": "SeFi-Image",
+  "license": "CC-BY-NC-4.0",
+  "homepage": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo",
+  "description": "Runs with stable-diffusion.cpp Metal. Model-specific Apple GPU parity remains unverified. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install huggingface-hub numpy safetensors torch",
+    "cmake -S repo -B repo/build -DSD_METAL=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build repo/build --config Release -j 4",
+    "repo/build/bin/sd-cli --help"
+  ],
+  "brew": [
+    "cmake",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [
+    {
+      "repo": "SeFi-Image/SeFi-Image-1B-turbo",
+      "revision": "88acf40938448963a43765d6f3533a8b289d79c4",
+      "gated": true
+    }
+  ],
+  "attribution": {
+    "project": "SeFi Image 1B Turbo",
+    "authors": [
+      "SeFi-Image"
+    ],
+    "homepage": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo",
+    "license": {
+      "spdx": "CC-BY-NC-4.0",
+      "url": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo"
+    },
+    "components": [
+      {
+        "name": "SeFi-Image/SeFi-Image-1B-turbo",
+        "role": "model component",
+        "url": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      },
+      {
+        "name": "leejet/stable-diffusion.cpp",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/leejet/stable-diffusion.cpp",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/leejet/stable-diffusion.cpp"
+        }
+      },
+      {
+        "name": "SeFi Image 1B Turbo usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/SeFi-Image/SeFi-Image-1B-turbo"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 24,
+    "disk_gb": 60
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 4,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "guidance",
+          "label": "Guidance",
+          "type": "float",
+          "default": 1.0,
+          "group": "advanced",
+          "help": "Guidance used by the upstream model.",
+          "min": 1,
+          "max": 20
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/leejet/stable-diffusion.cpp",
+  "commit": "1d0a58a35050d285b1d6fb1bc68a92924d35825e",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 729b25b0499c2448c229742a2ba061a1689a89704ea2ed1bdb12807d682088fb"
+  ]
+}

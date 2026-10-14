@@ -212,9 +212,10 @@ struct GenerateView: View {
     /// Where the result goes (spec §7, §9). Plain words; the folder and formats start from Settings.
     var exportSection: some View {
         Section("Export") {
-            ForEach(ExportFormat.allCases, id: \.self) { format in
-                Toggle(isOn: Binding(get: { model.exportFormats.contains(format) },
-                                     set: { if $0 { model.exportFormats.insert(format) } else { model.exportFormats.remove(format) } })) {
+            ForEach(model.availableExportFormats, id: \.self) { format in
+                Toggle(isOn: Binding(get: { model.availableExportFormats == [.original] ? model.exportOriginal : model.exportFormats.contains(format) },
+                                     set: { if model.availableExportFormats == [.original] { model.exportOriginal = $0 }
+                                         else if $0 { model.exportFormats.insert(format) } else { model.exportFormats.remove(format) } })) {
                     VStack(alignment: .leading) {
                         Text(Format.export(format))
                         Text(Format.exportHelp(format)).font(.caption).foregroundStyle(.secondary)

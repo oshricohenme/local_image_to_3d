@@ -1,0 +1,58 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "rumik-ai/rumik-oss-1-mlx-4bit",
+      "revision": "6823f207c63caf5c5826a3a097e01f284deec37f",
+      "gated": false
+    },
+    "codec": {
+      "repo": "kyutai/moshiko-pytorch-bf16",
+      "revision": "2bfc9ae6e89079a5cc7ed2a68436010d91a3d289",
+      "gated": false,
+      "files": [
+        "tokenizer-e351c8d8-checkpoint125.safetensors"
+      ]
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      "rumik"
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--voice",
+          "{voice}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}

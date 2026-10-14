@@ -1,0 +1,50 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "sensenova/SenseNova-U1.5-8B-MoT",
+      "revision": "9feeeab8a2792514d109cd34589342a2cc1d4ab2",
+      "gated": false
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--model",
+          "{model}",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png",
+          "--flow-shift",
+          "3"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

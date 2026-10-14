@@ -1,0 +1,133 @@
+{
+  "schema": 2,
+  "id": "sam-audio",
+  "name": "SAM Audio Large",
+  "publisher": "Meta",
+  "license": "LicenseRef-SAM-Audio",
+  "homepage": "https://huggingface.co/mlx-community/sam-audio-large",
+  "description": "Process recorded audio: isolate a described sound and retain the residual. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"./repo[tts,sts]\" soundfile"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "mlx-community/sam-audio-large",
+      "revision": "a3e529408663b65cb418584036db8f7209a80ced",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "SAM Audio Large",
+    "authors": [
+      "Meta"
+    ],
+    "homepage": "https://huggingface.co/mlx-community/sam-audio-large",
+    "license": {
+      "spdx": "LicenseRef-SAM-Audio",
+      "url": "https://huggingface.co/mlx-community/sam-audio-large"
+    },
+    "components": [
+      {
+        "name": "mlx-community/sam-audio-large",
+        "role": "model component",
+        "url": "https://huggingface.co/mlx-community/sam-audio-large",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/mlx-community/sam-audio-large"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      },
+      {
+        "name": "Blaizzy/mlx-audio",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/Blaizzy/mlx-audio",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/Blaizzy/mlx-audio"
+        }
+      },
+      {
+        "name": "SAM Audio Large usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/mlx-community/sam-audio-large",
+        "license": {
+          "spdx": "LicenseRef-SAM-Audio",
+          "url": "https://huggingface.co/mlx-community/sam-audio-large"
+        },
+        "restrictions": [
+          "custom terms; review before use"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 32,
+    "disk_gb": 50
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "separate_audio",
+      "modality": "audio",
+      "label": "Separate audio",
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "audio"
+        },
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/Blaizzy/mlx-audio",
+  "commit": "e66ad2ff4eb96ce1149000187b30370cbcd707aa",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected b46dace299c93c37376a1dff858294d315c629e2e18e0f91fd968a9a0322e6ad"
+  ]
+}

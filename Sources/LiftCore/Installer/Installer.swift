@@ -120,14 +120,14 @@ public struct Installer: Sendable {
         struct Inputs: Encodable {
             var repo, commit: String?
             var python: String
-            var install, substitutes, brew: [String]
+            var install, prepare, substitutes, brew: [String]
             var usesShim: Bool  // installs lift_shim; its settings only act at run time
             var metalToolchain: Bool
             var weights: [Recipe.Weight]
         }
         let e = JSONEncoder()
         e.outputFormatting = .sortedKeys
-        let data = (try? e.encode(Inputs(repo: r.repo, commit: r.commit, python: r.python, install: r.install, substitutes: r.substitutes,
+        let data = (try? e.encode(Inputs(repo: r.repo, commit: r.commit, python: r.python, install: r.install, prepare: r.prepare, substitutes: r.substitutes,
                                          brew: r.brew, usesShim: r.shim != nil, metalToolchain: r.metalToolchain, weights: r.weights))) ?? Data()
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -249,6 +249,7 @@ public struct Installer: Sendable {
         var env = toolEnvironment
         env["PATH"] = "\(venv)/bin:" + (toolEnvironment["PATH"] ?? "/usr/bin:/bin")
         env["VIRTUAL_ENV"] = venv
+        env["LIFT_SHARED_DIR"] = entry.shared.path
         let repo = root.appending(path: "repo").path
 
         var steps: [ShellCommand] = []
@@ -277,6 +278,15 @@ public struct Installer: Sendable {
             for step in steps { try await logged(step, lines) }
             try fm.copyItem(at: entry.directory, to: installedRecipeDir(recipe.id))
             if let shimConfig { try shimConfig.json.write(to: shimURL(recipe.id), atomically: true, encoding: .utf8) }
+            if !recipe.prepare.isEmpty {
+                await onPhase("preparing model assets")
+                var prepareEnv = workerEnvironment(recipe)
+                prepareEnv["HF_HUB_DISABLE_XET"] = "1"
+                for command in recipe.prepare {
+                    try await logged(ShellCommand("/bin/sh", ["-c", command], environment: prepareEnv,
+                                                  workingDirectory: root.path, ownProcessGroup: true), lines)
+                }
+            }
             let smoke = ShellCommand(venvPython(recipe.id), ["-m", "lift_worker", "--check", workerConfig(recipe, heartbeat: 2)],
                                      environment: workerEnvironment(recipe), workingDirectory: repo)
             await onPhase("checking the install")

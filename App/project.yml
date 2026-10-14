@@ -32,7 +32,7 @@ targets:
         script: |
           set -e
           R="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
-          X="--exclude .venv --exclude __pycache__ --exclude .pytest_cache --exclude .DS_Store"
+          X="--exclude .venv --exclude venv --exclude repo --exclude deps --exclude __pycache__ --exclude .pytest_cache --exclude .DS_Store"
           rsync -a --delete $X "$SRCROOT/../dev-recipes/" "$R/dev-recipes/"
           rsync -a --delete $X "$SRCROOT/../python/lift_worker/src/lift_worker/" "$R/lift_worker/"
           rsync -a --delete $X "$SRCROOT/../skills/" "$R/skills/"

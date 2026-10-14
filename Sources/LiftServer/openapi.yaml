@@ -334,7 +334,7 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/Confirm' }
         - { $ref: '#/components/parameters/Wait' }
-        - { name: download_weights, in: query, description: Download the weights after installing (default true)., schema: { type: boolean, default: true } }
+        - { name: download_weights, in: query, description: "Download weights (default true). Recipes with asset preparation require true and fetch assets during installation.", schema: { type: boolean, default: true } }
       responses:
         '200':
           description: The model.
@@ -1114,7 +1114,7 @@ components:
       required: [hf_token_set]
       properties:
         hf_token_set: { type: boolean }
-    ExportFormat: { type: string, enum: [glb, usdz, obj, fbx] }
+    ExportFormat: { type: string, enum: [glb, usdz, obj, fbx, original] }
     ExportSpec:
       type: object
       description: Missing fields take the export_dir, export_formats and cleanup_after_export settings; formats [] means no export.

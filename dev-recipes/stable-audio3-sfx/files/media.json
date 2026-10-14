@@ -1,0 +1,104 @@
+{
+  "backend": "sa3",
+  "assets": {
+    "model": {
+      "repo": "stabilityai/stable-audio-3-optimized",
+      "revision": "08b17423649b5714b22eab20f96bf00751f2358a",
+      "gated": false,
+      "files": [
+        "MLX/dit_sm-sfx_f16.npz",
+        "MLX/same_s_decoder_f32.npz",
+        "MLX/same_s_encoder_f32.npz",
+        "MLX/t5gemma_f16.npz"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/optimized/mlx/models/mlx/dit_sm-sfx_f16.npz",
+    "{repo}/optimized/mlx/models/mlx/same_s_decoder_f32.npz",
+    "{repo}/optimized/mlx/models/mlx/same_s_encoder_f32.npz",
+    "{repo}/optimized/mlx/models/mlx/t5gemma_f16.npz"
+  ],
+  "tasks": {
+    "text_to_sound": {
+      "commands": [
+        [
+          "{python}",
+          "scripts/sa3_mlx.py",
+          "--dit",
+          "sm-sfx",
+          "--decoder",
+          "same-s",
+          "--prompt",
+          "{prompt}",
+          "--seconds",
+          "{duration}",
+          "--steps",
+          "{steps}",
+          "--seed",
+          "{seed}",
+          "--out",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    },
+    "audio_variation": {
+      "commands": [
+        [
+          "ffmpeg",
+          "-v",
+          "error",
+          "-y",
+          "-i",
+          "{audio}",
+          "-ar",
+          "44100",
+          "-ac",
+          "2",
+          "-c:a",
+          "pcm_s16le",
+          "{out}/_inputs/source.wav"
+        ],
+        [
+          "{python}",
+          "scripts/sa3_mlx.py",
+          "--dit",
+          "sm-sfx",
+          "--decoder",
+          "same-s",
+          "--prompt",
+          "{prompt}",
+          "--seconds",
+          "{duration}",
+          "--steps",
+          "{steps}",
+          "--seed",
+          "{seed}",
+          "--out",
+          "{out}/result.wav",
+          "--init-audio",
+          "{out}/_inputs/source.wav",
+          "--init-noise-level",
+          "0.7"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ],
+      "directories": [
+        "_inputs"
+      ]
+    }
+  },
+  "cwd": "{repo}/optimized/mlx",
+  "links": {
+    "{repo}/optimized/mlx/models/mlx/dit_sm-sfx_f16.npz": "{model}/MLX/dit_sm-sfx_f16.npz",
+    "{repo}/optimized/mlx/models/mlx/same_s_decoder_f32.npz": "{model}/MLX/same_s_decoder_f32.npz",
+    "{repo}/optimized/mlx/models/mlx/same_s_encoder_f32.npz": "{model}/MLX/same_s_encoder_f32.npz",
+    "{repo}/optimized/mlx/models/mlx/t5gemma_f16.npz": "{model}/MLX/t5gemma_f16.npz"
+  }
+}

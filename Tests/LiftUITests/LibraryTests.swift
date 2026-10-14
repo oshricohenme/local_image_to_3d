@@ -23,13 +23,16 @@ import Testing
         let app = try await UIFixtures.devApp()
         defer { Task { await app.close() } }
         let all = Library.sections(app.models, filter: .all, search: "")
-        #expect(all.map(\.title) == ["Photo to 3D", "Add-ons for your 3D models"])
+        #expect(all.map(\.title) == ["Photo to 3D", "Add-ons for your 3D models", "Image", "Music", "Video", "Audio"])
         #expect(all[0].models.map(\.id) == ["pixal3d", "trellis2-mac"] && all[1].models.map(\.id) == ["unirig"])
         #expect(Library.sections(app.models, filter: .rigging, search: "").flatMap(\.models).map(\.id) == ["unirig"])
         #expect(Library.sections(app.models, filter: .installed, search: "").isEmpty)  // nothing installed yet
         #expect(Library.sections(app.models, filter: .all, search: "skeleton").flatMap(\.models).map(\.id) == ["unirig"])  // the description
-        #expect(Library.sections(app.models, filter: .all, search: "microsoft").flatMap(\.models).map(\.id) == ["trellis2-mac"])  // the authors
-        #expect(Library.comingSoon(app.models) == ["Images", "Video", "Audio"])
+        #expect(Library.sections(app.models, filter: .all, search: "microsoft").flatMap(\.models).map(\.id) == ["trellis2-mac", "lens-turbo"])
+        #expect(Library.comingSoon(app.models).isEmpty)
+        for (filter, count) in [(LibraryFilter.image, 18), (.music, 8), (.audio, 18), (.video, 10)] {
+            #expect(Library.sections(app.models, filter: filter, search: "").flatMap(\.models).count == count)
+        }
     }
 
     @Test func eachCardSaysWhereTheModelStandsAndOffersOneThing() async throws {

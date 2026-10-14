@@ -116,8 +116,8 @@ tasks:
     }
 
     @Test func newerSchemaIsReportedNotParsed() throws {
-        let folder = try writeRecipe("schema: 2\nid: future\nsomething_new: true\n", id: "future", in: try Fixtures.tempDir())
-        #expect(RecipeLoad.read(directory: folder) == .needsNewerLift(id: "future", schema: 2))
+        let folder = try writeRecipe("schema: 3\nid: future\nsomething_new: true\n", id: "future", in: try Fixtures.tempDir())
+        #expect(RecipeLoad.read(directory: folder) == .needsNewerLift(id: "future", schema: 3))
     }
 
     @Test(arguments: [

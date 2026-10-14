@@ -1,0 +1,150 @@
+{
+  "schema": 2,
+  "id": "dialogue-sidon",
+  "name": "DialogueSidon",
+  "publisher": "SaruLab",
+  "license": "CC-BY-NC-4.0",
+  "homepage": "https://huggingface.co/mlx-community/DialogueSidon-bf16",
+  "description": "Process recorded audio: separate exactly two speakers into WAV stems. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"./repo[tts,sts]\" soundfile"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "mlx-community/DialogueSidon-bf16",
+      "revision": "5d42379f8025486e262825620eeb5f85e5cd8dc9",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "DialogueSidon",
+    "authors": [
+      "SaruLab"
+    ],
+    "homepage": "https://huggingface.co/mlx-community/DialogueSidon-bf16",
+    "license": {
+      "spdx": "CC-BY-NC-4.0",
+      "url": "https://huggingface.co/mlx-community/DialogueSidon-bf16"
+    },
+    "components": [
+      {
+        "name": "mlx-community/DialogueSidon-bf16",
+        "role": "model component",
+        "url": "https://huggingface.co/mlx-community/DialogueSidon-bf16",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/mlx-community/DialogueSidon-bf16"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      },
+      {
+        "name": "Blaizzy/mlx-audio",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/Blaizzy/mlx-audio",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/Blaizzy/mlx-audio"
+        }
+      },
+      {
+        "name": "DialogueSidon usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/mlx-community/DialogueSidon-bf16",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/mlx-community/DialogueSidon-bf16"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 8,
+    "disk_gb": 10
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "separate_audio",
+      "modality": "audio",
+      "label": "Separate audio",
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "audio"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 30,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/Blaizzy/mlx-audio",
+  "commit": "e66ad2ff4eb96ce1149000187b30370cbcd707aa",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 42b7c83c8a302dbaf0eb6c34fd9b3a054c5e25b6065744ec869c150601618f32"
+  ]
+}

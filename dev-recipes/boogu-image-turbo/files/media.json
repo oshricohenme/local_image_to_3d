@@ -1,0 +1,54 @@
+{
+  "backend": "mflux",
+  "assets": {
+    "model": {
+      "repo": "Boogu/Boogu-Image-0.1-Turbo",
+      "revision": "53ad54522023f64d049f7f38e4d679359ef3fb92",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "mflux-save",
+      "--model",
+      "{model}",
+      "--base-model",
+      "boogu-image-turbo",
+      "-q",
+      "8",
+      "--path",
+      "{root}/converted"
+    ]
+  ],
+  "required": [
+    "{root}/converted"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "mflux-generate-boogu",
+          "--model",
+          "{root}/converted",
+          "--base-model",
+          "boogu-image-turbo",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.png",
+          "--steps",
+          "{steps}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "schema": 2,
+  "id": "deepfilternet3",
+  "name": "DeepFilterNet 3",
+  "publisher": "DeepFilterNet",
+  "license": "MIT",
+  "homepage": "https://huggingface.co/mlx-community/DeepFilterNet-mlx",
+  "description": "Process recorded audio: remove background noise. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"./repo[tts,sts]\" soundfile"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "mlx-community/DeepFilterNet-mlx",
+      "revision": "220d5dfb7266352272d74c2a7d2025c59e07b391",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "DeepFilterNet 3",
+    "authors": [
+      "DeepFilterNet"
+    ],
+    "homepage": "https://huggingface.co/mlx-community/DeepFilterNet-mlx",
+    "license": {
+      "spdx": "MIT",
+      "url": "https://huggingface.co/mlx-community/DeepFilterNet-mlx"
+    },
+    "components": [
+      {
+        "name": "mlx-community/DeepFilterNet-mlx",
+        "role": "model component",
+        "url": "https://huggingface.co/mlx-community/DeepFilterNet-mlx",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://huggingface.co/mlx-community/DeepFilterNet-mlx"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "Blaizzy/mlx-audio",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/Blaizzy/mlx-audio",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/Blaizzy/mlx-audio"
+        }
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 3,
+    "disk_gb": 10
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "enhance_audio",
+      "modality": "audio",
+      "label": "Enhance audio",
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "audio"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/Blaizzy/mlx-audio",
+  "commit": "e66ad2ff4eb96ce1149000187b30370cbcd707aa",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 70e05b9e262a0884c15471e69e64303b4767ef82d38210dbd3b8cc6004e2645e"
+  ]
+}

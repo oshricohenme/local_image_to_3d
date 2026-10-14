@@ -1,0 +1,178 @@
+{
+  "schema": 2,
+  "id": "z-image-turbo",
+  "name": "Z Image Turbo",
+  "publisher": "Tongyi-MAI",
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+  "description": "Create 2D images locally with MLX. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install ./repo"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "Tongyi-MAI/Z-Image-Turbo",
+      "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "Z Image Turbo",
+    "authors": [
+      "Tongyi-MAI"
+    ],
+    "homepage": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+    "license": {
+      "spdx": "Apache-2.0",
+      "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+    },
+    "components": [
+      {
+        "name": "Tongyi-MAI/Z-Image-Turbo",
+        "role": "model component",
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "mflux-community/mflux",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/mflux-community/mflux",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/mflux-community/mflux"
+        }
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 24,
+    "disk_gb": 100
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 512,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 512,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 9,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/mflux-community/mflux",
+  "commit": "602b26d242eb7ea9df2a765162a7f35c45c7a143",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected cea60138ed935f0aabd4a08fc45d621d09f6fea6c2b6b7d0a17463bc98efbdf3"
+  ]
+}

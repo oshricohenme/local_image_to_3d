@@ -1,0 +1,216 @@
+{
+  "schema": 2,
+  "id": "ovis-image",
+  "name": "Ovis Image",
+  "publisher": "AIDC-AI",
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/Comfy-Org/Ovis-Image",
+  "description": "Runs with stable-diffusion.cpp Metal. Model-specific Apple GPU parity remains unverified. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install huggingface-hub numpy safetensors torch",
+    "cmake -S repo -B repo/build -DSD_METAL=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build repo/build --config Release -j 4",
+    "repo/build/bin/sd-cli --help"
+  ],
+  "brew": [
+    "cmake",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [
+    {
+      "repo": "Comfy-Org/Ovis-Image",
+      "revision": "b7d0cb855e82448c28936c9907a143bf319c80a0",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/ovis_image_bf16.safetensors",
+        "split_files/text_encoders/ovis_2.5.safetensors"
+      ]
+    },
+    {
+      "repo": "black-forest-labs/FLUX.1-schnell",
+      "revision": "741f7c3ce8b383c54771c7003378a50191e9efe9",
+      "gated": true,
+      "files": [
+        "ae.safetensors"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "Ovis Image",
+    "authors": [
+      "AIDC-AI"
+    ],
+    "homepage": "https://huggingface.co/Comfy-Org/Ovis-Image",
+    "license": {
+      "spdx": "Apache-2.0",
+      "url": "https://huggingface.co/Comfy-Org/Ovis-Image"
+    },
+    "components": [
+      {
+        "name": "Comfy-Org/Ovis-Image",
+        "role": "model component",
+        "url": "https://huggingface.co/Comfy-Org/Ovis-Image",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/Comfy-Org/Ovis-Image"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "black-forest-labs/FLUX.1-schnell",
+        "role": "model component",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell",
+        "license": {
+          "spdx": "Apache-2.0",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "leejet/stable-diffusion.cpp",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/leejet/stable-diffusion.cpp",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/leejet/stable-diffusion.cpp"
+        }
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 24,
+    "disk_gb": 60
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 30,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "guidance",
+          "label": "Guidance",
+          "type": "float",
+          "default": 5.0,
+          "group": "advanced",
+          "help": "Guidance used by the upstream model.",
+          "min": 1,
+          "max": 20
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/leejet/stable-diffusion.cpp",
+  "commit": "1d0a58a35050d285b1d6fb1bc68a92924d35825e",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 83c7bb4a65e7026f9767beabb39032a8dbb27290e4b615a045eddd8a53be133f"
+  ]
+}

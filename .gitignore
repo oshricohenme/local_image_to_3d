@@ -10,3 +10,9 @@ test-results/
 App/Lift.xcodeproj/
 App/build/
 build/
+
+# Upstream code, environments and weights are fetched into Lift's managed workdir.
+/models/
+/dev-recipes/*/repo/
+/dev-recipes/*/venv/
+/dev-recipes/*/deps/

@@ -1,0 +1,80 @@
+{
+  "backend": "heart",
+  "assets": {
+    "model": {
+      "repo": "HeartMuLa/HeartMuLa-oss-3B",
+      "revision": "d12ac79c6b3387d5c9eee456323495d8f08bb09d",
+      "gated": false
+    },
+    "codec": {
+      "repo": "HeartMuLa/HeartCodec-oss-20260123",
+      "revision": "f889dab0532cfa4bf459f2a3367eb6d346b8eeda",
+      "gated": false
+    },
+    "tokenizer": {
+      "repo": "HeartMuLa/HeartMuLaGen",
+      "revision": "2e18e01702011f4f7dc8642b6260967df62417ea",
+      "gated": false,
+      "files": [
+        "tokenizer.json"
+      ]
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "heartlib_mlx.utils.convert",
+      "--src",
+      "{model}",
+      "--dst",
+      "{root}/ckpt-mlx/heartmula",
+      "--model-type",
+      "heartmula"
+    ],
+    [
+      "{python}",
+      "-m",
+      "heartlib_mlx.utils.convert",
+      "--src",
+      "{codec}",
+      "--dst",
+      "{root}/ckpt-mlx/heartcodec",
+      "--model-type",
+      "heartcodec"
+    ]
+  ],
+  "required": [
+    "{root}/ckpt-mlx/heartmula/config.json",
+    "{root}/ckpt-mlx/heartcodec/config.json",
+    "{root}/ckpt/tokenizer.json"
+  ],
+  "tasks": {
+    "generate_song": {
+      "commands": [
+        [
+          "{python}",
+          "generate.py",
+          "--checkpoint",
+          "{root}/ckpt-mlx",
+          "--tags",
+          "{prompt}",
+          "--lyrics",
+          "{lyrics}",
+          "--duration",
+          "{duration}",
+          "--dtype",
+          "bfloat16",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  },
+  "links": {
+    "{root}/ckpt/tokenizer.json": "{tokenizer}/tokenizer.json"
+  }
+}

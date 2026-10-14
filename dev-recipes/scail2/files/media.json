@@ -1,0 +1,56 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "video-scail2-14b-mlx",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/video-scail2-14b-mlx/mererun_model.json"
+  ],
+  "tasks": {
+    "animate_subject": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "video",
+          "animate",
+          "{prompt}",
+          "--model-root",
+          "{root}/native-models/video-scail2-14b-mlx",
+          "--profile",
+          "quality",
+          "--reference",
+          "{image}",
+          "--reference-mask",
+          "{image_mask}",
+          "--driving-video",
+          "{video}",
+          "--driving-mask",
+          "{video_mask}",
+          "--width",
+          "832",
+          "--height",
+          "480",
+          "--steps",
+          "{steps}",
+          "--output",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

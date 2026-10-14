@@ -75,12 +75,21 @@ extension Lift {
         guard let entry = catalog.entries[id] else { throw LiftError.notFound("recipe \(id)") }
         guard installing[id] == nil else { throw LiftError.invalidState("\(id) is already installing") }
         let r = entry.recipe
+        guard downloadWeights || r.prepare.isEmpty else {
+            throw LiftError.invalidInput([FieldError("download_weights", "This recipe prepares model assets during installation; download_weights must be true.")])
+        }
         guard confirm else {
             let pin = settings.pinOverrides[id] ?? r.commit
             var text = "Installs \(r.name): "
             if let repo = r.repo { text += "clones \(repo) at \(pin ?? "?"), " }
             if !r.brew.isEmpty { text += "installs \(r.brew.joined(separator: ", ")) with Homebrew, " }
             text += "creates a Python \(r.python) environment and runs \(r.install.count) install steps (about \(r.resources.diskGB.formatted()) GB)."
+            if !r.prepare.isEmpty {
+                text += " Downloads and prepares model assets before marking the model installed. Native runtimes may also download components into this model's folder. Confirming accepts the model's published terms: \(r.attribution.license.url)."
+                for c in r.attribution.components where !(c.restrictions ?? []).isEmpty {
+                    text += " \(c.name): \((c.restrictions ?? []).joined(separator: ", ")) (\(c.license.url))."
+                }
+            }
             if downloadWeights && !r.weights.isEmpty { text += " " + (await weightsImpact(r)) }
             return .confirmationRequired(text)
         }

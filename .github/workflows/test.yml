@@ -66,6 +66,11 @@ jobs:
         working-directory: python/recipe_tests
         run: uv run --python 3.11 pytest -q --junitxml=../../test-results/recipes.xml
 
+      - name: Media recipe contracts (no dependencies or weights)
+        env:
+          PYTHONPATH: dev-recipes/shared/media/src
+        run: uv run --no-project --python 3.12 python -m unittest discover -s dev-recipes/shared/media/tests -v
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

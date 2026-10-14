@@ -1,0 +1,207 @@
+{
+  "schema": 2,
+  "id": "mmaudio",
+  "name": "MMAudio Large 44k v2",
+  "publisher": "hkchengrex et al.",
+  "license": "CC-BY-NC-4.0",
+  "homepage": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md",
+  "description": "Generate short sound effects or a soundtrack conditioned on a video. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "git -C repo lfs install --local",
+    "git -C repo lfs pull",
+    "cd repo && swift build --configuration release --product mere.run",
+    "cd repo && bash scripts/build_mlx_metallib.sh --configuration release"
+  ],
+  "brew": [
+    "git-lfs",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [],
+  "attribution": {
+    "project": "MMAudio Large 44k v2",
+    "authors": [
+      "hkchengrex et al."
+    ],
+    "homepage": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md",
+    "license": {
+      "spdx": "CC-BY-NC-4.0",
+      "url": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md"
+    },
+    "components": [
+      {
+        "name": "sawfwair/mere-run",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/sawfwair/mere-run",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/sawfwair/mere-run"
+        }
+      },
+      {
+        "name": "MMAudio Large 44k v2 usage terms",
+        "role": "model use",
+        "url": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://github.com/sawfwair/mere-run/blob/01feae347b640f1c9fa8bf8e7dfbf782497d2706/docs/model-sources.md"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 16,
+    "disk_gb": 45
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_sound",
+      "modality": "audio",
+      "label": "Text to sound",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "int",
+          "default": 8,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 8
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 25,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    },
+    {
+      "id": "video_to_sound",
+      "modality": "audio",
+      "label": "Video to sound",
+      "inputs": [
+        {
+          "name": "video",
+          "type": "video"
+        },
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "int",
+          "default": 8,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 8
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 25,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/sawfwair/mere-run",
+  "commit": "01feae347b640f1c9fa8bf8e7dfbf782497d2706",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 4d3fdaf915fa3105d7553bb9b43c8b5acd128cadacab2ffc1830884a7119994b"
+  ]
+}

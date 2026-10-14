@@ -1,0 +1,49 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "music-yue2",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/music-yue2/mererun_model.json"
+  ],
+  "tasks": {
+    "generate_song": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "music",
+          "generate",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/music-yue2",
+          "--lyrics-file",
+          "{lyrics_file}",
+          "--duration",
+          "{duration}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ],
+      "text_files": {
+        "lyrics": "lyrics.txt"
+      }
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

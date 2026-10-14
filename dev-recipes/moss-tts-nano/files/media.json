@@ -1,0 +1,78 @@
+{
+  "backend": "audio",
+  "assets": {
+    "model": {
+      "repo": "mlx-community/MOSS-TTS-Nano-100M",
+      "revision": "229a9c51bb0ffff6fd0dbe53b5bf0c441e438a79",
+      "gated": false
+    },
+    "codec": {
+      "repo": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+      "revision": "3cd226ba2947efa357ef453bcad111b6eafba782",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-tts",
+      "--model",
+      "{model}",
+      "--kind",
+      "moss"
+    ]
+  ],
+  "required": [
+    "{model}/config.json"
+  ],
+  "tasks": {
+    "text_to_speech": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    },
+    "voice_clone": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "mlx_audio.tts.generate",
+          "--model",
+          "{model}",
+          "--text",
+          "{text}",
+          "--join_audio",
+          "--output_path",
+          "{out}",
+          "--file_prefix",
+          "result",
+          "--ref_audio",
+          "{reference}",
+          "--ref_text",
+          "{transcript}"
+        ]
+      ],
+      "outputs": [
+        "result*.wav"
+      ]
+    }
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "schema": 2,
+  "id": "anima",
+  "name": "Anima",
+  "publisher": "CircleStone Labs",
+  "license": "LicenseRef-Anima",
+  "homepage": "https://huggingface.co/circlestone-labs/Anima",
+  "description": "Runs with stable-diffusion.cpp Metal. Model-specific Apple GPU parity remains unverified. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install huggingface-hub numpy safetensors torch",
+    "cmake -S repo -B repo/build -DSD_METAL=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build repo/build --config Release -j 4",
+    "repo/build/bin/sd-cli --help"
+  ],
+  "brew": [
+    "cmake",
+    "ffmpeg"
+  ],
+  "metal_toolchain": true,
+  "weights": [
+    {
+      "repo": "circlestone-labs/Anima",
+      "revision": "f973fc41ec7545364ac9776c2440285f43ff2a30",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/anima-base-v1.0.safetensors",
+        "split_files/text_encoders/qwen_3_06b_base.safetensors",
+        "split_files/vae/qwen_image_vae.safetensors"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "Anima",
+    "authors": [
+      "CircleStone Labs"
+    ],
+    "homepage": "https://huggingface.co/circlestone-labs/Anima",
+    "license": {
+      "spdx": "LicenseRef-Anima",
+      "url": "https://huggingface.co/circlestone-labs/Anima"
+    },
+    "components": [
+      {
+        "name": "circlestone-labs/Anima",
+        "role": "model component",
+        "url": "https://huggingface.co/circlestone-labs/Anima",
+        "license": {
+          "spdx": "NOASSERTION",
+          "url": "https://huggingface.co/circlestone-labs/Anima"
+        },
+        "restrictions": [
+          "review model card terms"
+        ]
+      },
+      {
+        "name": "leejet/stable-diffusion.cpp",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/leejet/stable-diffusion.cpp",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/leejet/stable-diffusion.cpp"
+        }
+      },
+      {
+        "name": "Anima usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/circlestone-labs/Anima",
+        "license": {
+          "spdx": "LicenseRef-Anima",
+          "url": "https://huggingface.co/circlestone-labs/Anima"
+        },
+        "restrictions": [
+          "custom terms; review before use"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 12,
+    "disk_gb": 15
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "int",
+          "default": 30,
+          "group": "advanced",
+          "help": "Steps used by the upstream model.",
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "guidance",
+          "label": "Guidance",
+          "type": "float",
+          "default": 6.0,
+          "group": "advanced",
+          "help": "Guidance used by the upstream model.",
+          "min": 1,
+          "max": 20
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/leejet/stable-diffusion.cpp",
+  "commit": "1d0a58a35050d285b1d6fb1bc68a92924d35825e",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 42a4038642d794b9d87235256b4522b2662369f8e7f2b19dfb8a48175a109789"
+  ]
+}

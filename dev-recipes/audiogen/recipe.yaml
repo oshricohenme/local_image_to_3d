@@ -1,0 +1,140 @@
+{
+  "schema": 2,
+  "id": "audiogen",
+  "name": "AudioGen Medium",
+  "publisher": "Meta",
+  "license": "CC-BY-NC-4.0",
+  "homepage": "https://huggingface.co/facebook/audiogen-medium",
+  "description": "Generate environmental sounds. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install ./repo \"transformers<5\" sentencepiece soundfile"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "facebook/audiogen-medium",
+      "revision": "1277dd7dfd8fa57a205a70acc5de0ee90804502f",
+      "gated": false
+    }
+  ],
+  "attribution": {
+    "project": "AudioGen Medium",
+    "authors": [
+      "Meta"
+    ],
+    "homepage": "https://huggingface.co/facebook/audiogen-medium",
+    "license": {
+      "spdx": "CC-BY-NC-4.0",
+      "url": "https://huggingface.co/facebook/audiogen-medium"
+    },
+    "components": [
+      {
+        "name": "facebook/audiogen-medium",
+        "role": "model component",
+        "url": "https://huggingface.co/facebook/audiogen-medium",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/facebook/audiogen-medium"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      },
+      {
+        "name": "theashishmaurya/mlx-audiocraft",
+        "role": "Mac inference runtime",
+        "url": "https://github.com/theashishmaurya/mlx-audiocraft",
+        "license": {
+          "spdx": "MIT",
+          "url": "https://github.com/theashishmaurya/mlx-audiocraft"
+        }
+      },
+      {
+        "name": "AudioGen Medium usage terms",
+        "role": "model use",
+        "url": "https://huggingface.co/facebook/audiogen-medium",
+        "license": {
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/facebook/audiogen-medium"
+        },
+        "restrictions": [
+          "non-commercial"
+        ]
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 12,
+    "disk_gb": 25
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_sound",
+      "modality": "audio",
+      "label": "Text to sound",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "audio",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "duration",
+          "label": "Duration",
+          "type": "int",
+          "default": 5,
+          "group": "basic",
+          "help": "Duration used by the upstream model.",
+          "min": 1,
+          "max": 30
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "repo": "https://github.com/theashishmaurya/mlx-audiocraft",
+  "commit": "bd969249949729dc907f28522377378d382b1ed1",
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected 7c4b68ecc905ee1ac3d4bd5d5a2b793532d83f5560ec4b0ecec8a2f4d2bba40e"
+  ]
+}

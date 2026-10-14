@@ -152,16 +152,16 @@ import Testing
         #expect(SetupModel.breadcrumb(URL(filePath: "/Volumes/Big Disk/Stuff/Lift")) == "Big Disk › Stuff › Lift")
     }
 
-    @Test func freeSpaceSaysHowManyModelsFitAndWarnsUnder25GB() async throws {
+    @Test func freeSpaceUsesPerModelEstimatesAndWarnsUnder25GB() async throws {
         var free: Int64 = 130_000_000_000
         let setup = SetupModel(app: try UIFixtures.newApp(), freeSpace: { _ in free })
-        #expect(setup.space?.text == "Models are large — each one needs about 6 to 20 GB. This Mac has 130 GB free, enough for about 6 models.")
+        #expect(setup.space?.text == "Model sizes vary. Check each model's storage estimate before installing. This Mac has 130 GB free.")
         #expect(setup.space?.warning == false)
         free = 24_000_000_000
         #expect(setup.space?.warning == true)
         #expect(setup.space?.text.contains("only 24 GB free") == true)
         free = 25_000_000_000
-        #expect(setup.space?.warning == false && setup.space?.text.hasSuffix("enough for about 1 model.") == true)
+        #expect(setup.space?.warning == false && setup.space?.text.hasSuffix("25 GB free.") == true)
     }
 
     @Test func theMacStepGoesFromMissingToInstallingToReady() async throws {

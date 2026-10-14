@@ -3,13 +3,14 @@ import LiftCore
 import Observation
 
 public enum HistoryFilter: Hashable, Sendable, CaseIterable {
-    case all, modality3d, image, video, audio, rigged, failed
+    case all, modality3d, image, music, video, audio, rigged, failed
 
     public var label: String {
         switch self {
         case .all: "All"
         case .modality3d: "3D"
         case .image: "Image"
+        case .music: "Music"
         case .video: "Video"
         case .audio: "Audio"
         case .rigged: "Rigged"
@@ -39,6 +40,7 @@ public final class HistoryModel {
         case .all, .rigged: return JobFilter(states: finished, text: text)
         case .modality3d: return JobFilter(states: finished, modality: "3d", text: text)
         case .image: return JobFilter(states: finished, modality: "image", text: text)
+        case .music: return JobFilter(states: finished, modality: "music", text: text)
         case .video: return JobFilter(states: finished, modality: "video", text: text)
         case .audio: return JobFilter(states: finished, modality: "audio", text: text)
         case .failed: return JobFilter(states: [.failed], text: text)
@@ -56,6 +58,10 @@ public final class HistoryModel {
     /// exporting, the exported GLB (or USDZ).
     public static func viewable(_ v: JobView) -> String? {
         if !v.job.cleanedUp { return v.outputs.first }
+        if let folder = v.job.exports.first(where: { $0.format == .original && $0.path != nil })?.path,
+           let first = v.outputs.first {
+            return URL(filePath: folder).appending(path: URL(filePath: first).lastPathComponent).path
+        }
         return v.job.exports.first { $0.format == .glb && $0.path != nil }?.path ?? v.job.exports.first { $0.format == .usdz && $0.path != nil }?.path
     }
 

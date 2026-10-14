@@ -105,8 +105,9 @@ extension Lift {
             do { step.inputs = try task.validated(inputs: s.inputs, chained: i > 0, prefix: "\(prefix).inputs", workdir: config.workdir) } catch { if case .invalidInput(let e) = error { errors += e } }
             checked.append((step, task))
         }
+        let isMedia = checked.last.map { ![IOType.mesh, .riggedMesh].contains($0.1.output) } ?? false
         let wanted = ExportSpec(dir: request.export?.dir ?? settings.exportDir,
-                                formats: request.export?.formats ?? settings.exportFormats,
+                                formats: request.export?.formats ?? (isMedia ? [.original] : settings.exportFormats),
                                 cleanupAfterExport: request.export?.cleanupAfterExport ?? settings.cleanupAfterExport)
         if wanted.dir == nil && request.export?.formats?.isEmpty == false {
             errors.append(FieldError("export.dir", "no export folder: give export.dir or set export_dir"))

@@ -1,0 +1,41 @@
+{
+  "backend": "craft",
+  "assets": {
+    "model": {
+      "repo": "facebook/musicgen-small",
+      "revision": "4c8334b02c6ec4e8664a91979669a501ec497792",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-c",
+      "from mlx_audiocraft.models import MusicGen; import sys; MusicGen.get_pretrained(sys.argv[1])",
+      "{model}"
+    ]
+  ],
+  "required": [
+    "{model}"
+  ],
+  "tasks": {
+    "text_to_music": {
+      "commands": [
+        [
+          "musicgen-mlx",
+          "{prompt}",
+          "--model",
+          "{model}",
+          "--duration",
+          "{duration}",
+          "--no-open",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  }
+}

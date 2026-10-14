@@ -16,7 +16,8 @@ import Testing
 
     @Test func everyRecipeParsesAndValidates() throws {
         #expect(Self.catalog.problems.isEmpty, "\(Self.catalog.problems)")
-        #expect(Self.catalog.entries.keys.sorted() == ["pixal3d", "test-cube", "trellis2-mac", "unirig"])
+        #expect(Self.catalog.entries.count == 58)
+        #expect(Self.catalog.entries.values.filter { !$0.recipe.prepare.isEmpty }.count == 54)
         for id in ["pixal3d", "unirig", "trellis2-mac"] {
             let r = try entry(id).recipe
             #expect(r.platform.status == .supported)

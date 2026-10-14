@@ -33,7 +33,7 @@ struct SetupView: View {
         VStack(spacing: 22) {
             Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 96, height: 96).accessibilityHidden(true)
             Text(model.heading).font(.system(size: 30, weight: .bold)).multilineTextAlignment(.center)
-            Text("Lift runs free, open-source models made by researchers. Everything happens on this Mac — your photos never leave it.")
+            Text("Lift runs models locally on your Mac. Choose a model to install its code, dependencies and weights. Each model has its own usage terms.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 560)
             HStack(alignment: .top, spacing: 16) {
                 welcomeCard(1, "Choose where Lift keeps its files", "We suggest a spot. Most people keep it.")

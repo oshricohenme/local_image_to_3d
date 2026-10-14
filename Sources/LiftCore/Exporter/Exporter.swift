@@ -5,7 +5,7 @@ import ModelIO
 import SceneKit
 
 public enum ExportFormat: String, Codable, Sendable, CaseIterable {
-    case glb, usdz, obj, fbx
+    case glb, usdz, obj, fbx, original
 }
 
 /// A job's `export` (spec §7). In a request, nil fields take the `export_dir`, `export_formats` and
@@ -129,6 +129,15 @@ public struct Exporter: Sendable {
         try? fm.removeItem(at: work)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
         let files = outputs.map { URL(filePath: $0) }
+        if format == .original {
+            guard !files.isEmpty else { throw LiftError.invalidState("no output files to export") }
+            // Keep multi-file results together: separated audio stems and sidecars must survive cleanup.
+            let folder = work.appending(path: name)
+            if fm.fileExists(atPath: folder.path) { try fm.removeItem(at: folder) }
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            for file in files { _ = try Self.copy(file, into: folder) }
+            return folder
+        }
         // The primary output (the first) is used as is when it's already in this format, e.g. UniRig's rigged FBX.
         // Only the primary: UniRig's later outputs are intermediate skin/skeleton passes, not the rigged model.
         // OBJ is always made from the GLB: an upstream OBJ (trellis-mac's) is bare geometry.
@@ -149,6 +158,8 @@ public struct Exporter: Sendable {
             throw LiftError.invalidState("no GLB output to make \(format.rawValue) from")
         }
         switch format {
+        case .original:
+            throw LiftError.invalidState("original export was not handled")
         case .glb:
             let dest = work.appending(path: "\(name).glb")
             try fm.copyItem(at: glb, to: dest)

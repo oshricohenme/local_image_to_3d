@@ -1,0 +1,194 @@
+{
+  "schema": 2,
+  "id": "sdxl-lightning",
+  "name": "SDXL Lightning",
+  "publisher": "ByteDance",
+  "license": "OpenRAIL++",
+  "homepage": "https://huggingface.co/ByteDance/SDXL-Lightning",
+  "description": "Four-step text-to-image generation with the official Lightning UNet. Experimental Lift integration: installation and inference have not been validated on hardware.",
+  "python": "3.12",
+  "platform": {
+    "status": "supported"
+  },
+  "install": [
+    "uv pip install -e \"$LIFT_SHARED_DIR/media\"",
+    "uv pip install \"diffusers==0.35.2\" \"transformers==4.57.3\" torch accelerate safetensors sentencepiece protobuf"
+  ],
+  "brew": [],
+  "metal_toolchain": false,
+  "weights": [
+    {
+      "repo": "stabilityai/stable-diffusion-xl-base-1.0",
+      "revision": "462165984030d82259a11f4367a4eed129e94a7b",
+      "gated": false,
+      "files": [
+        "model_index.json",
+        "scheduler/scheduler_config.json",
+        "text_encoder/config.json",
+        "text_encoder/model.fp16.safetensors",
+        "text_encoder_2/config.json",
+        "text_encoder_2/model.fp16.safetensors",
+        "tokenizer/merges.txt",
+        "tokenizer/special_tokens_map.json",
+        "tokenizer/tokenizer_config.json",
+        "tokenizer/vocab.json",
+        "tokenizer_2/merges.txt",
+        "tokenizer_2/special_tokens_map.json",
+        "tokenizer_2/tokenizer_config.json",
+        "tokenizer_2/vocab.json",
+        "unet/config.json",
+        "vae/config.json",
+        "vae/diffusion_pytorch_model.fp16.safetensors"
+      ]
+    },
+    {
+      "repo": "ByteDance/SDXL-Lightning",
+      "revision": "c9a24f48e1c025556787b0c58dd67a091ece2e44",
+      "gated": false,
+      "files": [
+        "sdxl_lightning_4step_unet.safetensors"
+      ]
+    }
+  ],
+  "attribution": {
+    "project": "SDXL Lightning",
+    "authors": [
+      "ByteDance"
+    ],
+    "homepage": "https://huggingface.co/ByteDance/SDXL-Lightning",
+    "license": {
+      "spdx": "OpenRAIL++",
+      "url": "https://huggingface.co/ByteDance/SDXL-Lightning"
+    },
+    "components": [
+      {
+        "name": "stabilityai/stable-diffusion-xl-base-1.0",
+        "role": "model component",
+        "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+        "license": {
+          "spdx": "openrail++",
+          "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"
+        },
+        "restrictions": []
+      },
+      {
+        "name": "ByteDance/SDXL-Lightning",
+        "role": "model component",
+        "url": "https://huggingface.co/ByteDance/SDXL-Lightning",
+        "license": {
+          "spdx": "openrail++",
+          "url": "https://huggingface.co/ByteDance/SDXL-Lightning"
+        },
+        "restrictions": []
+      }
+    ]
+  },
+  "resources": {
+    "memory_gb": 16,
+    "disk_gb": 30
+  },
+  "stages": [
+    {
+      "pattern": "^\\[Stage\\] (?P<name>.+)$"
+    },
+    {
+      "pattern": "(?P<pct>\\d+)%\\|"
+    }
+  ],
+  "errors": [
+    {
+      "match": "GatedRepoError|401 Client Error|403 Client Error",
+      "message": "Accept the model terms on Hugging Face and add a token with access in Lift."
+    },
+    {
+      "match": "out of memory|Insufficient Memory|Insufficient memory",
+      "message": "This generation exceeded available memory. Try a smaller output or fewer frames."
+    },
+    {
+      "match": "Model preparation is missing|Model setup changed|Installed model file is missing|LocalEntryNotFoundError",
+      "message": "Model assets are incomplete. Reinstall this model from Models."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "text_to_image",
+      "modality": "image",
+      "label": "Text to image",
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "text"
+        }
+      ],
+      "output": "image",
+      "entry": "launcher:run",
+      "settings": [
+        {
+          "key": "width",
+          "label": "Width",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Width used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "height",
+          "label": "Height",
+          "type": "enum",
+          "default": 1024,
+          "group": "basic",
+          "help": "Height used by the upstream model.",
+          "options": [
+            256,
+            384,
+            480,
+            512,
+            640,
+            720,
+            768,
+            832,
+            1024,
+            1280,
+            2048
+          ]
+        },
+        {
+          "key": "seed",
+          "label": "Seed",
+          "type": "int",
+          "default": 42,
+          "group": "advanced",
+          "help": "Seed used by the upstream model.",
+          "min": 0,
+          "max": 2147483647
+        }
+      ],
+      "phases": [
+        {
+          "name": "Generating",
+          "match": "Generating"
+        },
+        {
+          "name": "Complete",
+          "match": "Complete"
+        }
+      ]
+    }
+  ],
+  "prepare": [
+    "python -m lift_media.prepare recipe --expected cebcc702d2db3e45d23b78b714d6f9891aa176057816109f7fa2d22cdfef4c8f"
+  ]
+}

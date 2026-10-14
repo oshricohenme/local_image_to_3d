@@ -1,0 +1,84 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+      "revision": "1405a2b738c29b890cf6d03fc038d8d3e92eeed7",
+      "gated": false,
+      "files": [
+        "split_files/diffusion_models/hunyuanvideo1.5_480p_t2v_fp16.safetensors",
+        "split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+        "split_files/text_encoders/qwen_2.5_vl_7b.safetensors",
+        "split_files/vae/hunyuanvideo15_vae_fp16.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_video": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "-M",
+          "vid_gen",
+          "--diffusion-model",
+          "{model}/split_files/diffusion_models/hunyuanvideo1.5_480p_t2v_fp16.safetensors",
+          "--vae",
+          "{model}/split_files/vae/hunyuanvideo15_vae_fp16.safetensors",
+          "--llm",
+          "{model}/split_files/text_encoders/qwen_2.5_vl_7b.safetensors",
+          "--t5xxl",
+          "{model}/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.avi",
+          "--vae-tiling",
+          "--video-frames",
+          "{frames}",
+          "--fps",
+          "16"
+        ],
+        [
+          "ffmpeg",
+          "-v",
+          "error",
+          "-y",
+          "-i",
+          "{out}/result.avi",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          "aac",
+          "-movflags",
+          "+faststart",
+          "{out}/result.mp4"
+        ]
+      ],
+      "outputs": [
+        "result.mp4"
+      ]
+    }
+  }
+}

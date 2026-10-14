@@ -40,8 +40,10 @@ extension Lift {
         guard v.job.state == .succeeded else { throw LiftError.invalidState("Only a finished job can be exported; this one is \(v.job.state.rawValue).") }
         guard !v.job.cleanedUp else { throw LiftError.invalidState("This job's files were deleted after its export, so it can't be exported again.") }
         guard !v.job.exportPending else { throw LiftError.invalidState("This job is already exporting.") }
+        let output = v.steps.last.flatMap { recipe($0.recipe)?.task($0.task)?.output }
+        let defaults: [ExportFormat] = output == .mesh || output == .riggedMesh ? settings.exportFormats : [.original]
         let spec = ExportSpec(dir: dir ?? v.job.export?.dir ?? settings.exportDir,
-                              formats: formats ?? v.job.export?.formats ?? settings.exportFormats,
+                              formats: formats ?? v.job.export?.formats ?? defaults,
                               cleanupAfterExport: false)
         guard spec.dir != nil else { throw LiftError.invalidInput([FieldError("dir", "no export folder: give dir or set export_dir")]) }
         guard spec.formats?.isEmpty == false else { throw LiftError.invalidInput([FieldError("formats", "at least one format is required")]) }

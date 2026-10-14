@@ -164,6 +164,7 @@ extension Format {
         case .usdz: "USDZ"
         case .obj: "OBJ"
         case .fbx: "FBX"
+        case .original: "Original files"
         }
     }
 
@@ -173,6 +174,7 @@ extension Format {
         case .usdz: "Opens in Quick Look, Reality Composer and on iPhone and iPad."
         case .obj: "For older 3D apps; saved as a folder with its textures."
         case .fbx: "For game engines and animation tools. Needs UniRig installed (it brings Blender)."
+        case .original: "Copies all result files together in their original formats."
         }
     }
 }

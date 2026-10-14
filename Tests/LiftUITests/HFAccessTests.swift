@@ -130,9 +130,11 @@ import Testing
         defer { Task { await app.close() } }
         try app.secrets.set(.hfToken, "hf_kept")
         let access = HFAccess(models: app.models)
-        #expect(access.repos == ["briaai/RMBG-2.0", "facebook/dinov3-vitl16-pretrain-lvd1689m"] && access.model == nil)
+        let gated = Set(app.models.flatMap { $0.recipe.weights.filter(\.gated).map(\.repo) }).sorted()
+        #expect(access.repos == gated && access.model == nil)
+        #expect(gated.contains("briaai/RMBG-2.0") && gated.contains("stabilityai/stable-diffusion-3.5-medium"))
         await access.check(app)  // nothing typed: the key Lift already keeps
-        #expect(access.user == "ada" && access.repoAccess == ["briaai/RMBG-2.0": true, "facebook/dinov3-vitl16-pretrain-lvd1689m": false])
+        #expect(access.user == "ada" && access.repoAccess == Dictionary(uniqueKeysWithValues: gated.map { ($0, $0 == "briaai/RMBG-2.0") }))
     }
 }
 

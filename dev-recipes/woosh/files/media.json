@@ -1,0 +1,46 @@
+{
+  "backend": "mere",
+  "assets": {},
+  "prepare": [
+    [
+      "{repo}/.build/release/mere.run",
+      "model",
+      "pull",
+      "sfx-woosh-dflow",
+      "--accept-model-license"
+    ]
+  ],
+  "required": [
+    "{repo}/.build/release/mere.run",
+    "{root}/native-models/sfx-woosh-dflow/mererun_model.json"
+  ],
+  "tasks": {
+    "text_to_sound": {
+      "commands": [
+        [
+          "{repo}/.build/release/mere.run",
+          "sfx",
+          "generate",
+          "{prompt}",
+          "--model",
+          "{root}/native-models/sfx-woosh-dflow",
+          "--duration",
+          "{duration}",
+          "--steps",
+          "{steps}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  },
+  "env": {
+    "MERERUN_MODELS_DIR": "{root}/native-models",
+    "MERERUN_HUB_CACHE": "{root}/native-cache"
+  }
+}

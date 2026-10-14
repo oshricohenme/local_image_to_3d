@@ -1,0 +1,112 @@
+{
+  "backend": "sdcpp",
+  "assets": {
+    "model": {
+      "repo": "fszontagh/LLaDA-Image-Turbo-GGUF",
+      "revision": "73e2e2adecb76bcf1f89fc37a636912c551349a9",
+      "gated": false,
+      "files": [
+        "llada-image-turbo-connectors-edit.safetensors",
+        "llada-image-turbo-q8_0.gguf",
+        "llada-image-turbo-text_encoder-q8_0.gguf"
+      ]
+    },
+    "aux": {
+      "repo": "inclusionAI/LLaDA-Image-Turbo",
+      "revision": "f4afc52d925bbac4e22a1c947111fc1f127e37e5",
+      "gated": false,
+      "files": [
+        "tokenizer/tokenizer.json",
+        "vae/diffusion_pytorch_model.safetensors"
+      ]
+    }
+  },
+  "prepare": [],
+  "required": [
+    "{repo}/build/bin/sd-cli"
+  ],
+  "tasks": {
+    "text_to_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/llada-image-turbo-q8_0.gguf",
+          "--llm",
+          "{model}/llada-image-turbo-text_encoder-q8_0.gguf",
+          "--embeddings-connectors",
+          "{model}/llada-image-turbo-connectors-edit.safetensors",
+          "--vae",
+          "{aux}/vae/diffusion_pytorch_model.safetensors",
+          "--tokenizer",
+          "{aux}/tokenizer/tokenizer.json",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    },
+    "edit_image": {
+      "commands": [
+        [
+          "{repo}/build/bin/sd-cli",
+          "--backend",
+          "metal",
+          "--diffusion-model",
+          "{model}/llada-image-turbo-q8_0.gguf",
+          "--llm",
+          "{model}/llada-image-turbo-text_encoder-q8_0.gguf",
+          "--embeddings-connectors",
+          "{model}/llada-image-turbo-connectors-edit.safetensors",
+          "--vae",
+          "{aux}/vae/diffusion_pytorch_model.safetensors",
+          "--tokenizer",
+          "{aux}/tokenizer/tokenizer.json",
+          "--prompt",
+          "{prompt}",
+          "--width",
+          "{width}",
+          "--height",
+          "{height}",
+          "--steps",
+          "{steps}",
+          "--cfg-scale",
+          "{guidance}",
+          "--seed",
+          "{seed}",
+          "--sampling-method",
+          "euler",
+          "--rng",
+          "cpu",
+          "--output",
+          "{out}/result.png",
+          "--ref-image",
+          "{image}"
+        ]
+      ],
+      "outputs": [
+        "result.png"
+      ]
+    }
+  }
+}

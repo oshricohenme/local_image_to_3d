@@ -176,7 +176,7 @@ struct HistoryView: View {
             Button("Retry") { app.run { try await app.retry(v.job.id) } }.disabled(v.job.cleanedUp || v.job.exportPending)
             Button("Retry with changes…") { retrying = v }.disabled(v.job.cleanedUp || v.job.exportPending)
             Menu("Export Again…") {
-                ForEach(ExportFormat.allCases, id: \.self) { f in
+                ForEach(HistoryModel.output(of: v, models: app.models).map { [.mesh, .riggedMesh].contains($0) } == true ? ExportFormat.allCases : [.original], id: \.self) { f in
                     Button(Format.export(f)) { app.run { _ = try await app.engine.jobsExport(v.job.id, formats: [f]) } }
                 }
             }

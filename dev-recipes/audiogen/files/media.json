@@ -1,0 +1,41 @@
+{
+  "backend": "craft",
+  "assets": {
+    "model": {
+      "repo": "facebook/audiogen-medium",
+      "revision": "1277dd7dfd8fa57a205a70acc5de0ee90804502f",
+      "gated": false
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-c",
+      "from mlx_audiocraft.models import AudioGen; import sys; AudioGen.get_pretrained(sys.argv[1])",
+      "{model}"
+    ]
+  ],
+  "required": [
+    "{model}"
+  ],
+  "tasks": {
+    "text_to_sound": {
+      "commands": [
+        [
+          "audiogen-mlx",
+          "{prompt}",
+          "--model",
+          "{model}",
+          "--duration",
+          "{duration}",
+          "--no-open",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  }
+}

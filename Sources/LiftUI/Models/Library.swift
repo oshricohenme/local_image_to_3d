@@ -3,7 +3,7 @@ import LiftCore
 
 /// The Models library's filter chips.
 public enum LibraryFilter: String, CaseIterable, Sendable {
-    case all = "All", installed = "Installed", photo = "Photo to 3D", rigging = "Rigging"
+    case all = "All", installed = "Installed", photo = "Photo to 3D", rigging = "Rigging", image = "Images", music = "Music", audio = "Audio", video = "Video"
 }
 
 /// The one thing a card offers.
@@ -36,15 +36,22 @@ public enum Library {
             case .installed: m.isInstalled
             case .photo: isPhotoTo3D(m)
             case .rigging: isRigging(m)
+            case .image: m.recipe.tasks.contains { $0.modality == "image" }
+            case .music: m.recipe.tasks.contains { $0.modality == "music" }
+            case .audio: m.recipe.tasks.contains { $0.modality == "audio" }
+            case .video: m.recipe.tasks.contains { $0.modality == "video" }
             }
             let a = m.recipe.attribution
             return kept && (query.isEmpty || ([m.name, m.recipe.description ?? "", a.project] + a.authors).contains {
                 $0.localizedCaseInsensitiveContains(query)
             })
         }
-        return [Section(title: "Photo to 3D", models: shown.filter(isPhotoTo3D)),
-                Section(title: "Add-ons for your 3D models", models: shown.filter { !isPhotoTo3D($0) })]
-            .filter { !$0.models.isEmpty }
+        var sections = [Section(title: "Photo to 3D", models: shown.filter(isPhotoTo3D)),
+                        Section(title: "Add-ons for your 3D models", models: shown.filter { !isPhotoTo3D($0) && $0.recipe.tasks.contains { $0.modality == "3d" } })]
+        for (modality, label) in GenerateModel.modalities where modality != "3d" {
+            sections.append(Section(title: label, models: shown.filter { $0.recipe.tasks.contains { $0.modality == modality } }))
+        }
+        return sections.filter { !$0.models.isEmpty }
     }
 
     /// Modalities Lift's UI already has but no recipe offers yet: "Images", "Video", "Audio".

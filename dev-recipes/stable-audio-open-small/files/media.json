@@ -1,0 +1,82 @@
+{
+  "backend": "saopen",
+  "assets": {
+    "model": {
+      "repo": "stabilityai/stable-audio-open-small",
+      "revision": "dc620d91535857b72ebb59b4ca45978db6d417f5",
+      "gated": true,
+      "files": [
+        "model.safetensors",
+        "model_config.json"
+      ]
+    },
+    "encoder": {
+      "repo": "stabilityai/stable-audio-open-1.0",
+      "revision": "f21265c1e2710b3bd2386596943f0007f55f802e",
+      "gated": true,
+      "files": [
+        "text_encoder/model.safetensors",
+        "tokenizer/special_tokens_map.json",
+        "tokenizer/spiece.model",
+        "tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json"
+      ]
+    }
+  },
+  "prepare": [
+    [
+      "{python}",
+      "-c",
+      "from src.conversion import convert as c; c.download_t5_weights = lambda: \"model/t5.safetensors\"; c.convert()"
+    ],
+    [
+      "{python}",
+      "-m",
+      "lift_media.apis",
+      "prepare-open-audio",
+      "--model",
+      "{repo}/model/stable_audio_small.npz"
+    ]
+  ],
+  "required": [
+    "{repo}/model/stable_audio_small.npz",
+    "{repo}/model/t5.safetensors",
+    "{repo}/model/tokenizer_config.json"
+  ],
+  "tasks": {
+    "text_to_sound": {
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "lift_media.apis",
+          "open-audio",
+          "--model",
+          "{repo}/model/stable_audio_small.npz",
+          "--prompt",
+          "{prompt}",
+          "--duration",
+          "{duration}",
+          "--steps",
+          "{steps}",
+          "--seed",
+          "{seed}",
+          "--output",
+          "{out}/result.wav"
+        ]
+      ],
+      "outputs": [
+        "result.wav"
+      ]
+    }
+  },
+  "links": {
+    "{repo}/model/model.safetensors": "{model}/model.safetensors",
+    "{repo}/model/model_config.json": "{model}/model_config.json",
+    "{repo}/model/t5.safetensors": "{encoder}/text_encoder/model.safetensors",
+    "{repo}/model/special_tokens_map.json": "{encoder}/tokenizer/special_tokens_map.json",
+    "{repo}/model/spiece.model": "{encoder}/tokenizer/spiece.model",
+    "{repo}/model/tokenizer.json": "{encoder}/tokenizer/tokenizer.json",
+    "{repo}/model/tokenizer_config.json": "{encoder}/tokenizer/tokenizer_config.json"
+  }
+}
