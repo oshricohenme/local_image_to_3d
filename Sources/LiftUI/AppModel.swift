@@ -9,7 +9,7 @@ public struct AppPaths: Sendable {
     public var bundledRecipes: URL
     /// The folder holding the `lift_worker` package.
     public var workerSource: URL
-    /// The Lift skill installed for Claude Code and Codex (`Contents/Resources/skills/lift/SKILL.md`).
+    /// The Lift skill installed for Claude Code, Codex and opencode (`Contents/Resources/skills/lift/SKILL.md`).
     public var skill: URL?
 
     public init(bundledRecipes: URL, workerSource: URL, skill: URL? = nil) {
@@ -126,7 +126,7 @@ public final class AppModel {
     public var alert: String?
     public var section = AppSection.generate
     public let generate = GenerateModel()
-    /// Claude Code and Codex: one-click connect over HTTP (Settings, setup's last step).
+    /// Claude Code, Codex and opencode: one-click connect over HTTP (Settings, setup's last step).
     public let assistants = AssistantsModel()
 
     /// Called with each finished job and each new memory wait (the app posts notifications).

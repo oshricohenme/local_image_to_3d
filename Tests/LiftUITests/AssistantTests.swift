@@ -48,8 +48,12 @@ struct Home {
         return path
     }
 
-    func skillFile(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/SKILL.md") }
-    func marker(_ tool: String) -> URL { root.appending(path: ".\(tool)/skills/lift/.installed-by-lift") }
+    func skillDir(_ tool: String) -> URL {
+        tool == "opencode" ? root.appending(path: ".config/opencode/skills/lift")
+                           : root.appending(path: ".\(tool)/skills/lift")
+    }
+    func skillFile(_ tool: String) -> URL { skillDir(tool).appending(path: "SKILL.md") }
+    func marker(_ tool: String) -> URL { skillDir(tool).appending(path: ".installed-by-lift") }
     func text(_ url: URL) -> String? { try? String(contentsOf: url, encoding: .utf8) }
 
     func connector(port: Int = 7777, skill: String? = Home.skillV1) -> AssistantConnector {
@@ -226,6 +230,146 @@ func codexGet(_ transport: String) -> [String] {
     }
 }
 
+@Suite struct OpencodeConnectorTests {
+    static let addHelp = ["Usage: opencode mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)", "      --url <URL>"]
+    static let oldAddHelp = ["Usage: opencode mcp add [OPTIONS] <NAME> -- <COMMAND>..."]
+    static let config = #"{"mcp": {"lift": {"type": "remote", "url": "http://127.0.0.1:7777/mcp"}}}"#
+
+    /// An opencode config file in the fake home ("opencode.json" by default).
+    func config(_ home: Home, _ text: String, file: String = "opencode.json") throws {
+        let dir = home.root.appending(path: ".config/opencode")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: dir.appending(path: file))
+    }
+
+    @Test func detectsFromTheConfigFilesNotTheCLI() async throws {
+        let home = try Home()
+        #expect(await home.connector().detect(.opencode) == .notInstalled)
+        try home.install("opencode")
+        #expect(await home.connector().detect(.opencode) == .notConnected)
+
+        try config(home, Self.config)
+        #expect(await home.connector().detect(.opencode) == .connected)
+        #expect(await home.connector(port: 7001).detect(.opencode) == .needsUpdate)
+        // `opencode mcp list` health-checks (slow), so detection only reads files.
+        #expect(home.script.calls.isEmpty)
+    }
+
+    @Test func aForeignEntryIsTaken() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        try config(home, #"{"mcp": {"lift": {"type": "remote", "url": "https://lift.example.com/mcp"}}}"#)
+        #expect(await home.connector().detect(.opencode) == .taken)
+    }
+
+    @Test func bothConfigFilesAreReadAndJSONCIsFine() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        try config(home, #"{"theme": "dark"}"#)
+        try config(home, """
+            // My assistants
+            {
+              "mcp": {
+                "lift": { "type": "remote", "url": "http://127.0.0.1:7777/mcp" },  // Lift's
+              },
+            }
+            """, file: "opencode.jsonc")
+        #expect(await home.connector().detect(.opencode) == .connected)
+
+        // opencode merges the two; a "lift" in opencode.json wins over one in the .jsonc.
+        try config(home, #"{"mcp": {"lift": {"type": "remote", "url": "https://lift.example.com/mcp"}}}"#)
+        #expect(await home.connector().detect(.opencode) == .taken)
+    }
+
+    @Test func aLocalEntryPointsAtACommandArray() throws {
+        let local = AssistantConnector.parseOpencode(#"{"mcp": {"lift": {"type": "local", "command": ["npx", "lift-server"]}}}"#)!
+        #expect(local.url == nil)
+        #expect(local.command == "npx lift-server")
+        #expect(!local.isLifts)
+    }
+
+    @Test func connectAddsTheURLWithoutRemovingFirst() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        try config(home, #"{"mcp": {"lift": {"type": "remote", "url": "http://127.0.0.1:7000/mcp"}}}"#)
+        home.script.on("mcp add --help", lines: Self.addHelp)
+        home.script.on("mcp add lift")
+        try await home.connector().connect(.opencode)
+        // Same-name re-add replaces the URL, so no `mcp remove` (which opencode doesn't have anyway).
+        #expect(home.script.calls == [["mcp", "add", "--help"],
+                                      ["mcp", "add", "lift", "--url", "http://127.0.0.1:7777/mcp"]])
+    }
+
+    @Test func aForeignEntryIsRefusedUnlessReplacing() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        try config(home, #"{"mcp": {"lift": {"type": "remote", "url": "https://lift.example.com/mcp"}}}"#)
+        home.script.on("mcp add --help", lines: Self.addHelp)
+        home.script.on("mcp add lift")
+        await #expect(throws: AssistantError.taken(.opencode)) { try await home.connector().connect(.opencode) }
+        #expect(home.script.calls.isEmpty)
+
+        try await home.connector().connect(.opencode, replacing: true)
+        #expect(home.script.calls == [["mcp", "add", "--help"],
+                                      ["mcp", "add", "lift", "--url", "http://127.0.0.1:7777/mcp"]])
+    }
+
+    @Test func anOpencodeWithoutURLSupportIsAskedToUpdate() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        home.script.on("mcp add --help", lines: Self.oldAddHelp)
+        home.script.on("mcp add lift")
+        await #expect(throws: AssistantError.opencodeTooOld) { try await home.connector().connect(.opencode) }
+        #expect(!home.script.calls.contains { $0.starts(with: ["mcp", "add", "lift"]) })
+    }
+
+    @Test func disconnectSplicesBothFilesLeavingEveryOtherByteAlone() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        try config(home, Self.config)
+        try config(home, """
+            // My assistants
+            {
+              "mcp": {
+                "other": { "type": "remote", "url": "https://api.example/mcp" },
+                "lift": { "type": "remote", "url": "http://127.0.0.1:7777/mcp" },  // Lift's
+              },
+              "theme": "dark",
+            }
+            """, file: "opencode.jsonc")
+        try await home.connector().disconnect(.opencode)
+
+        let dir = home.root.appending(path: ".config/opencode")
+        #expect(home.text(dir.appending(path: "opencode.json")) == #"{"mcp": {}}"#)
+        let jsonc = home.text(dir.appending(path: "opencode.jsonc"))!
+        #expect(jsonc.contains("// My assistants"))
+        #expect(jsonc.contains("api.example"))
+        #expect(jsonc.contains("\"theme\": \"dark\""))
+        #expect(!jsonc.contains("\"lift\""))
+        #expect(AssistantConnector.parseOpencode(jsonc) == nil)  // "other" survives, "lift" is gone
+    }
+
+    @Test func aConfigWithoutLiftIsLeftUntouched() async throws {
+        let home = try Home()
+        try home.install("opencode")
+        let original = #"{"mcp": {"other": {"type": "remote", "url": "https://api.example/mcp"}}}"#
+        try config(home, original)
+        try await home.connector().disconnect(.opencode)
+        #expect(home.text(home.root.appending(path: ".config/opencode/opencode.json")) == original)
+    }
+
+    @Test func liftComesOutOfEveryPosition() throws {
+        #expect(AssistantConnector.removeLiftMember(#"{"mcp": {"lift": {"url": "u"}}}"#) == #"{"mcp": {}}"#)
+        #expect(AssistantConnector.removeLiftMember(#"{"mcp": {"lift": {"url": "u"}, "other": {}}}"#)
+            == #"{"mcp": {"other": {}}}"#)
+        #expect(AssistantConnector.removeLiftMember(#"{"mcp": {"a": {}, "lift": {"url": "u"}, "b": {}}}"#)
+            == #"{"mcp": {"a": {}, "b": {}}}"#)
+        #expect(AssistantConnector.removeLiftMember(#"{"mcp": {"a": {}, "lift": {}}}"#)
+            == #"{"mcp": {"a": {}}}"#)
+        #expect(AssistantConnector.removeLiftMember(#"{"skills": {"lift": {}}, "mcp": {"other": {}}}"#) == nil)
+    }
+}
+
 @MainActor @Suite struct AssistantsModelTests {
     @Test func nothingRunsUntilTheAppSaysHow() async throws {
         let model = AssistantsModel()
@@ -245,6 +389,7 @@ func codexGet(_ transport: String) -> [String] {
         await model.check(mcpURL: "http://127.0.0.1:7777/mcp")
         #expect(model.rows[.claudeCode]?.state == .connected)
         #expect(model.rows[.codex]?.state == .notInstalled)
+        #expect(model.rows[.opencode]?.state == .notInstalled)
         #expect(model.needingUpdate.isEmpty)
         await model.check(mcpURL: "http://127.0.0.1:7778/mcp")
         #expect(model.needingUpdate == [.claudeCode])
@@ -305,7 +450,7 @@ func codexGet(_ transport: String) -> [String] {
 
     static func sha(_ text: String) -> String { AssistantConnector.sha256(Data(text.utf8)) }
 
-    @Test(arguments: [("claude", Assistant.claudeCode), ("codex", Assistant.codex)])
+    @Test(arguments: [("claude", Assistant.claudeCode), ("codex", Assistant.codex), ("opencode", Assistant.opencode)])
     func connectInstallsTheSkillWithItsMarker(_ tool: String, _ a: Assistant) async throws {
         let home = try Home()
         try home.install(tool)
