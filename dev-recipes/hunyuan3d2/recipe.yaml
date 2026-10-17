@@ -1,0 +1,214 @@
+# Tencent's Hunyuan3D-2 (photo → textured 3D) on Apple Silicon. Upstream is CUDA-only on paper, but the
+# shipped CPU rasterizer path is complete: the install patches the custom_rasterizer extension to build
+# without nvcc and always take that path, and the texture stage's hardcoded 'cuda' devices are moved to
+# 'mps' (the paint pipeline's DDIM solver and its index tensors stay on the CPU, as upstream keeps them
+# off the execution device anyway). Every patch is an exact-string replacement that asserts its match
+# count, so a pin bump that changes upstream files fails loudly during install, not silently at runtime.
+schema: 1
+id: hunyuan3d2
+name: Hunyuan3D 2.0
+description: >-
+  Tencent's Hunyuan3D 2.0 turns one photo of an object into a 3D model, first sculpting the shape with a
+  diffusion transformer and then painting a texture onto it. Runs on your Mac with the texture stage's
+  rasterizer on the CPU. Best on a single object on a plain background; needs about 16 GB of memory and
+  takes a few minutes per model.
+publisher: Tencent (Tencent-Hunyuan), Mac packaging by Lift
+license: LicenseRef-Hunyuan3D-2
+homepage: https://hunyuan3d.github.io/
+repo: https://github.com/Tencent-Hunyuan/Hunyuan3D-2
+commit: f8db63096c8282cb27354314d896feba5ba6ff8a
+python: "3.11"
+platform: { status: supported }
+install:
+  # torch first: both C++ extensions build against its headers. 2.14.1/0.29.1 is the pair unirig uses.
+  - uv pip install torch==2.14.1 torchvision==0.29.1
+  # Everything the shape and texture stages import, minus the gradio/onnxrembg serving pieces this recipe never runs.
+  - uv pip install "diffusers>=0.35" "transformers>=4.48" accelerate einops omegaconf opencv-python trimesh pymeshlab pygltflib xatlas pybind11 ninja tqdm huggingface_hub safetensors pyyaml scikit-image scipy pillow numpy
+  # The Mac patches. Each asserts its match count; bump the pin and any drift shows up here.
+  - |
+    python - <<'PY'
+    import pathlib
+    root = pathlib.Path("repo")
+
+    def patch(rel, old, new, count=1):
+        p = root / rel
+        text = p.read_text()
+        found = text.count(old)
+        assert found == count, f"{rel}: expected {count} match(es) for {old!r}, found {found}"
+        p.write_text(text.replace(old, new))
+
+    kern = "hy3dgen/texgen/custom_rasterizer/lib/custom_rasterizer_kernel"
+
+    # custom_rasterizer: drop the CUDA surface, keep the complete CPU rasterizer path.
+    # clang (unlike gcc) rejects `float vt[2] = {px + 0.5, py + 0.5}` as double-to-float narrowing.
+    patch(f"{kern}/rasterizer.cpp", "float vt[2] = {px + 0.5, py + 0.5};",
+          "float vt[2] = {static_cast<float>(px + 0.5), static_cast<float>(py + 0.5)};")
+    patch(f"{kern}/rasterizer.h", "#include <ATen/cuda/CUDAContext.h> // For CUDA context\n", "")
+    patch(f"{kern}/rasterizer.h", "__host__ __device__", "", count=3)
+    patch(f"{kern}/rasterizer.h",
+          "std::vector<torch::Tensor> rasterize_image_gpu(torch::Tensor V, torch::Tensor F, torch::Tensor D,\n"
+          "    int width, int height, float occlusion_truncation, int use_depth_prior);\n", "")
+    patch(f"{kern}/rasterizer.cpp",
+          "rasterize_image_gpu(V, F, D, width, height, occlusion_truncation, use_depth_prior)",
+          "rasterize_image_cpu(V, F, D, width, height, occlusion_truncation, use_depth_prior)")
+    # render.py lives inside the custom_rasterizer package folder, one level under custom_rasterizer/
+    rast = "hy3dgen/texgen/custom_rasterizer/custom_rasterizer/render.py"
+    patch(rast,
+          "rasterize_image(pos[0], tri, clamp_depth, resolution[1],",
+          "rasterize_image(pos[0].cpu(), tri.cpu(), clamp_depth.cpu(), resolution[1],")
+    patch(rast,
+          "    return findices, barycentric",
+          "    return findices.to(pos.device), barycentric.to(pos.device)")
+    (root / "hy3dgen/texgen/custom_rasterizer/setup.py").write_text(
+        "from setuptools import setup, find_packages\n"
+        "from torch.utils.cpp_extension import BuildExtension, CppExtension\n"
+        "\n"
+        "custom_rasterizer_module = CppExtension('custom_rasterizer_kernel', [\n"
+        "    'lib/custom_rasterizer_kernel/rasterizer.cpp',\n"
+        "    'lib/custom_rasterizer_kernel/grid_neighbor.cpp',\n"
+        "])\n"
+        "\n"
+        "setup(\n"
+        "    packages=find_packages(),\n"
+        "    version='0.1',\n"
+        "    name='custom_rasterizer',\n"
+        "    include_package_data=True,\n"
+        "    package_dir={'': '.'},\n"
+        "    ext_modules=[custom_rasterizer_module],\n"
+        "    cmdclass={'build_ext': BuildExtension}\n"
+        ")\n")
+
+    texgen = "hy3dgen/texgen"
+    # Texture stage: MPS by default, 1024 renders (the CPU rasterizer at 2048 takes minutes), no torch.cuda call.
+    patch(f"{texgen}/pipelines.py", "        self.device = 'cuda'", "        self.device = 'mps'")
+    patch(f"{texgen}/pipelines.py", "        self.render_size = 2048", "        self.render_size = 1024")
+    patch(f"{texgen}/pipelines.py", "        self.texture_size = 2048", "        self.texture_size = 1024")
+    patch(f"{texgen}/pipelines.py",
+          "        self.render = MeshRender(\n"
+          "            default_resolution=self.config.render_size,\n"
+          "            texture_size=self.config.texture_size)",
+          "        self.render = MeshRender(\n"
+          "            default_resolution=self.config.render_size,\n"
+          "            texture_size=self.config.texture_size,\n"
+          "            device=self.config.device)")
+    patch(f"{texgen}/pipelines.py", "        torch.cuda.empty_cache()", "        pass")
+
+    # hunyuanpaint (the paint pipeline): solver and its index tensors stay on the CPU where upstream's
+    # turbo path keeps them anyway; image tensors follow the pipeline's execution device.
+    hp = f"{texgen}/hunyuanpaint/pipeline.py"
+    patch(hp, "        ).to('cuda')", "        ).to('cpu')")
+    patch(hp, '.half().to("cuda")', ".half().to(device)")
+    patch(hp, "index = torch.range(29, 0, -bsz, device='cuda').long()",
+             "index = torch.range(29, 0, -bsz, device='cpu').long()")
+    patch(hp, "self.scheduler.set_timesteps(timesteps=timesteps.cpu(), device='cuda')",
+             "self.scheduler.set_timesteps(timesteps=timesteps.cpu(), device=device)")
+
+    # Belt and braces: texgen/pipelines.py now passes device=config.device, but fix the default too.
+    patch(f"{texgen}/differentiable_renderer/mesh_render.py",
+          "        bake_mode='linear', raster_mode='cr', device='cuda'):",
+          "        bake_mode='linear', raster_mode='cr', device='mps'):")
+    # differentiable_renderer's darwin link args add -dynamiclib, which clashes with distutils'
+    # default -bundle -undefined dynamic_lookup for a Python extension module (clang++ refuses
+    # both); -dynamiclib is for plain shared libraries, not loadable .so modules.
+    patch(f"{texgen}/differentiable_renderer/setup.py",
+          "        link_args = ['-fPIC', '-stdlib=libc++', '-mmacosx-version-min=10.14', '-dynamiclib']",
+          "        link_args = ['-fPIC', '-stdlib=libc++', '-mmacosx-version-min=10.14']")
+    print("Hunyuan3D-2 Mac patches applied")
+    PY
+  - uv pip install --no-build-isolation ./repo/hy3dgen/texgen/differentiable_renderer ./repo/hy3dgen/texgen/custom_rasterizer
+  # The root setup.py is plain setuptools (the extensions above have their own), so --no-deps is safe.
+  - uv pip install --no-deps ./repo
+  - cd repo && python -c "from hy3dgen.shapegen.pipelines import Hunyuan3DDiTFlowMatchingPipeline; from hy3dgen.texgen.pipelines import Hunyuan3DPaintPipeline; import custom_rasterizer_kernel; print('hy3dgen imports OK')"
+attribution:   # spec §4a; facts from the LICENSE file and the README at the pin, and the Hugging Face card
+  project: Hunyuan3D 2.0
+  authors: [Tencent Hunyuan3D Team]
+  homepage: https://hunyuan3d.github.io/
+  repo: https://github.com/Tencent-Hunyuan/Hunyuan3D-2
+  paper:
+    title: 'Hunyuan3D 2.0: Scaling Diffusion Models for High Resolution Textured 3D Assets Generation'
+    url: https://arxiv.org/abs/2501.12202
+    bibtex: |
+      @article{
+          yang2025hunyuan3d2,
+          title={Hunyuan3D 2.0: Scaling Diffusion Models for High Resolution Textured 3D Assets Generation},
+          author={Tencent Hunyuan3D Team},
+          journal={arXiv preprint arXiv:2501.12202},
+          year={2025}
+      }
+  license: { spdx: LicenseRef-Hunyuan3D-2, url: https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/f8db63096c8282cb27354314d896feba5ba6ff8a/LICENSE }
+  components:
+    - { name: Hunyuan3D-2, role: code (shape diffusion + texture painting), url: https://github.com/Tencent-Hunyuan/Hunyuan3D-2,
+        license: { spdx: LicenseRef-Hunyuan3D-2, url: https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/f8db63096c8282cb27354314d896feba5ba6ff8a/LICENSE },
+        restrictions: [Territory excludes the EU, the UK and South Korea, "Products over 1M monthly active users need a separate Tencent license",
+                      "Distribution requires the license text and change notices", "Do not use outputs to improve other AI models"] }
+    - { name: Hunyuan3D-2, role: model weights (dit-v2-0, delight-v2-0, paint-v2-0-turbo), url: https://huggingface.co/tencent/Hunyuan3D-2,
+        license: { spdx: LicenseRef-Hunyuan3D-2, url: https://huggingface.co/tencent/Hunyuan3D-2 },
+        restrictions: ["Same community license as the code: check the Hugging Face model card before distributing outputs"] }
+weights:   # the fp16 dit plus the delight and paint-turbo texture models; ~16 GB total
+  - repo: tencent/Hunyuan3D-2
+    files:
+      - hunyuan3d-dit-v2-0/config.yaml
+      - hunyuan3d-dit-v2-0/model.fp16.safetensors
+      - hunyuan3d-delight-v2-0/model_index.json
+      - hunyuan3d-delight-v2-0/feature_extractor/preprocessor_config.json
+      - hunyuan3d-delight-v2-0/scheduler/scheduler_config.json
+      - hunyuan3d-delight-v2-0/text_encoder/config.json
+      - hunyuan3d-delight-v2-0/text_encoder/model.safetensors
+      - hunyuan3d-delight-v2-0/tokenizer/merges.txt
+      - hunyuan3d-delight-v2-0/tokenizer/special_tokens_map.json
+      - hunyuan3d-delight-v2-0/tokenizer/tokenizer_config.json
+      - hunyuan3d-delight-v2-0/tokenizer/vocab.json
+      - hunyuan3d-delight-v2-0/unet/config.json
+      - hunyuan3d-delight-v2-0/unet/diffusion_pytorch_model.safetensors
+      - hunyuan3d-delight-v2-0/vae/config.json
+      - hunyuan3d-delight-v2-0/vae/diffusion_pytorch_model.safetensors
+      - hunyuan3d-paint-v2-0-turbo/model_index.json
+      - hunyuan3d-paint-v2-0-turbo/feature_extractor/preprocessor_config.json
+      - hunyuan3d-paint-v2-0-turbo/image_encoder/config.json
+      - hunyuan3d-paint-v2-0-turbo/image_encoder/model.safetensors
+      - hunyuan3d-paint-v2-0-turbo/image_encoder/preprocessor_config.json
+      - hunyuan3d-paint-v2-0-turbo/scheduler/scheduler_config.json
+      - hunyuan3d-paint-v2-0-turbo/text_encoder/config.json
+      - hunyuan3d-paint-v2-0-turbo/text_encoder/pytorch_model.bin
+      - hunyuan3d-paint-v2-0-turbo/tokenizer/merges.txt
+      - hunyuan3d-paint-v2-0-turbo/tokenizer/special_tokens_map.json
+      - hunyuan3d-paint-v2-0-turbo/tokenizer/tokenizer_config.json
+      - hunyuan3d-paint-v2-0-turbo/tokenizer/vocab.json
+      - hunyuan3d-paint-v2-0-turbo/unet/config.json
+      - hunyuan3d-paint-v2-0-turbo/unet/diffusion_pytorch_model.safetensors
+      - hunyuan3d-paint-v2-0-turbo/unet/modules.py
+      - hunyuan3d-paint-v2-0-turbo/vae/config.json
+      - hunyuan3d-paint-v2-0-turbo/vae/diffusion_pytorch_model.bin
+resources:
+  memory_gb: 16
+  disk_gb: 20
+stages:
+  # tqdm bars ("Diffusion Sampling::  50%|...") give the percentage only: the stage keeps the plain name
+  # its [Stage] line gave. [Stage] lines themselves are built into every worker.
+  - { pattern: '^[^:|]+:\s*(?P<pct>\d+)%\|' }
+  - { pattern: '^\s*(?P<pct>\d+)%\|' }
+errors:   # plain messages for known failures (shown instead of the raw error; the log keeps the details)
+  - { match: "MPS backend out of memory|out of memory|Failed to allocate", message: "Your Mac ran out of memory for this model. Close other apps, lower Mesh detail, or turn on Shape only, then try again." }
+  - { match: "kIOGPUCommandBuffer|GPU watchdog", message: "Your Mac's graphics chip took too long on this image. Close other apps or unplug external displays, then try again." }
+  - { match: "GatedRepoError|401 Client Error|403 Client Error|ConnectionError|LocalEntryNotFoundError", message: "Couldn't download the Hunyuan3D weights from Hugging Face. Check your internet connection, then try again." }
+  - { match: "ImportError|ModuleNotFoundError", message: "A Hunyuan3D component didn't install correctly. Reinstall Hunyuan3D 2.0 from Models." }
+tasks:
+  - id: image_to_3d
+    modality: 3d
+    label: Photo → 3D model
+    inputs: [{ name: image, type: image }]
+    output: mesh
+    entry: "launcher.py (mirrors the README quickstart: shape generation plus texture painting)"
+    settings:
+      - { key: texture, label: Paint texture, type: bool, default: true, group: basic, help: "Paint colors onto the model. Off gives a gray shape much faster; on adds a few minutes." }
+      - { key: octree_resolution, label: Mesh detail, type: enum, options: [256, 384, 512], default: 256, group: basic, help: "256 is fastest and safest on a Mac; 384 and 512 add detail, memory and time." }
+      - { key: steps, label: Sampling steps, type: int, default: 50, min: 1, max: 100, group: advanced, help: "More steps can add detail and take longer. The model's own default is 50." }
+      - { key: guidance, label: Shape fidelity, type: float, default: 5.0, min: 1.0, max: 20.0, group: advanced, help: "How closely the shape follows the photo. The model's own default is 5." }
+    # In launcher order (its [Stage] names): the Queue shows "Stage k of N". Shape only skips the painting stages.
+    phases:
+      - { match: "^Loading Hunyuan3D 2.0 shape model" }
+      - { match: "^Generating the shape" }
+      - { match: "^Loading the texture models", when: { texture: true } }
+      - { match: "^Painting the texture", when: { texture: true } }
+      - { match: "^Saving the GLB file" }
+      - { match: "^Writing the OBJ file" }

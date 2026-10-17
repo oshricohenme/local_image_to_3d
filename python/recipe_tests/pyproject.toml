@@ -12,4 +12,5 @@ dev = ["pytest>=8", "pyyaml>=6", "numpy"]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+pythonpath = ["../lift_worker/src"]
+testpaths = ["../../dev-recipes/pixal3d/test_pixal3d.py", "../../dev-recipes/unirig/test_unirig.py", "../../dev-recipes/trellis2-mac/test_trellis2_mac.py", "../../dev-recipes/hunyuan3d2/test_hunyuan3d2.py"]

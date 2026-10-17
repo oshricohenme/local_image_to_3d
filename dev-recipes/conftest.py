@@ -1,5 +1,6 @@
 """Helpers: load a recipe's launcher.py with fake upstream modules, and a stand-in for lift_worker's Job."""
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-RECIPES = Path(__file__).resolve().parents[2] / "dev-recipes"
+RECIPES = Path(__file__).resolve().parent
 
 
 class FakeJob:
@@ -55,3 +56,11 @@ def launcher(monkeypatch):
     for name in set(sys.modules) - before:  # a recipe's files/ helpers bind to this test's fakes: reload them next time
         if str(getattr(sys.modules[name], "__file__", "") or "").startswith(str(RECIPES)):
             del sys.modules[name]
+
+
+def upstream_repo(recipe):
+    """Opt-in contracts against the installed upstream checkout, without importing models."""
+    models = os.environ.get("LIFT_MODELS_DIR")
+    if not models:
+        pytest.skip("set LIFT_MODELS_DIR to check installed upstream settings")
+    return Path(models) / recipe / "repo"

@@ -1,9 +1,10 @@
+import re
 import os
 from pathlib import Path
 
 import pytest
 
-from conftest import FakeJob, defaults
+from conftest import upstream_repo, FakeJob, defaults
 
 # Stands in for upstream's launch/inference/*.sh: logs its arguments (and where --input points), then writes
 # --output unless FAIL_<script> is set. Like upstream, it always exits 0.
@@ -77,7 +78,9 @@ def test_default_runs_skeleton_skin_merge_with_upstream_defaults(unirig, tmp_pat
     assert skin_args[6:10] == ["--force_override", "true", "--data_name", "raw_data.npz"]
     assert merge_args == ["--source", f"{work}/skin.fbx", "--target", f"{work}/input.glb", f"-> {m}",
                           "--output", f"{work}/rigged.glb", "--require_suffix", "obj,fbx,FBX,dae,glb,gltf,vrm"]
-    assert [s[0] for s in j.stages] == ["skeleton", "skin", "merge"]
+    assert [s[0] for s in j.stages] == ["Predicting the skeleton (UniRig step 1 of 3)",
+                                       "Working out how the mesh bends with each bone (step 2 of 3)",
+                                       "Putting the rig on your mesh and saving it (step 3 of 3)"]
     assert not os.path.exists(work)  # the temp folder is gone
 
 
@@ -117,3 +120,17 @@ def test_upstream_output_reaches_the_job_log(unirig, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "$ bash launch/inference/generate_skeleton.sh" in out
     assert "Predicting DataLoader 0: 100%|" in out
+
+
+def test_unirig_settings_are_the_script_flags():
+    ours = defaults("unirig", "rig")
+    for script, renames in [("generate_skeleton", {"force_override": "skeleton_force_override"}),
+                            ("generate_skin", {"force_override": "skin_force_override"}), ("merge", {})]:
+        text = (upstream_repo("unirig") / f"launch/inference/{script}.sh").read_text()
+        flags = re.findall(r"^\s+--(\w+)\) ", text, re.M)
+        values = {k: a or b for k, a, b in re.findall(r'^(\w+)=(?:"([^"]*)"|(\S+))', text, re.M)}
+        for flag in flags:
+            if flag in {"input", "output", "input_dir", "output_dir", "source", "target"}:
+                continue  # Lift passes the job's files
+            value = ours[renames.get(flag, flag)]
+            assert (str(value).lower() if isinstance(value, bool) else str(value)) == values[flag], (script, flag)

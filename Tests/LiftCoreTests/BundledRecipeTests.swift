@@ -16,7 +16,7 @@ import Testing
 
     @Test func everyRecipeParsesAndValidates() throws {
         #expect(Self.catalog.problems.isEmpty, "\(Self.catalog.problems)")
-        #expect(Self.catalog.entries.count == 58)
+        #expect(Self.catalog.entries.count == 59)
         #expect(Self.catalog.entries.values.filter { !$0.recipe.prepare.isEmpty }.count == 54)
         for id in ["pixal3d", "unirig", "trellis2-mac"] {
             let r = try entry(id).recipe
@@ -146,7 +146,7 @@ import Testing
 
     /// Spec §4a: every weights repo is credited, and RMBG-2.0's non-commercial license is flagged wherever it's used.
     @Test func everyRecipeCreditsWhatItUses() throws {
-        for id in ["pixal3d", "unirig", "trellis2-mac"] {
+        for id in ["pixal3d", "unirig", "trellis2-mac", "hunyuan3d2"] {
             let r = try entry(id).recipe
             let a = r.attribution
             #expect(a.problems.isEmpty && a.paper != nil, "\(id): \(a.problems)")

@@ -1,10 +1,11 @@
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from conftest import FakeJob, defaults, module
+from conftest import upstream_repo, FakeJob, defaults, module
 
 
 class Tensor:
@@ -164,3 +165,9 @@ def test_other_errors_pass_through(trellis, tmp_path):
     pipeline.result = IndexError("list index out of range")
     with pytest.raises(IndexError, match="list index"):
         mod.run(pipeline, job(tmp_path))
+
+
+def test_trellis_settings_are_generate_py_options():
+    text = (upstream_repo("trellis2-mac") / "generate.py").read_text()
+    options = {o.replace("-", "_") for o in re.findall(r'add_argument\(\s*"--([\w-]+)"', text)} - {"output"}
+    assert set(defaults("trellis2-mac", "image_to_3d")) == options

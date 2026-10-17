@@ -24,7 +24,7 @@ import Testing
         defer { Task { await app.close() } }
         let all = Library.sections(app.models, filter: .all, search: "")
         #expect(all.map(\.title) == ["Photo to 3D", "Add-ons for your 3D models", "Image", "Music", "Video", "Audio"])
-        #expect(all[0].models.map(\.id) == ["pixal3d", "trellis2-mac"] && all[1].models.map(\.id) == ["unirig"])
+        #expect(all[0].models.map(\.id) == ["hunyuan3d2", "pixal3d", "trellis2-mac"] && all[1].models.map(\.id) == ["unirig"])
         #expect(Library.sections(app.models, filter: .rigging, search: "").flatMap(\.models).map(\.id) == ["unirig"])
         #expect(Library.sections(app.models, filter: .installed, search: "").isEmpty)  // nothing installed yet
         #expect(Library.sections(app.models, filter: .all, search: "skeleton").flatMap(\.models).map(\.id) == ["unirig"])  // the description
