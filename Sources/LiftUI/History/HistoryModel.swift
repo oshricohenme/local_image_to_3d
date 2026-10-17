@@ -71,6 +71,24 @@ public final class HistoryModel {
         return models.first { $0.id == last.recipe }?.recipe.task(last.task)?.output
     }
 
+    /// The step a retry restarts from (first unfinished, else the first) and its task; nil when the
+    /// recipe or task is gone from the catalog.
+    public static func retryStep(_ v: JobView, models: [ModelView]) -> (StepRecord, RecipeTask)? {
+        guard let s = v.steps.first(where: { $0.state != .succeeded }) ?? v.steps.first,
+              let t = models.first { $0.id == s.recipe }?.recipe.task(s.task) else { return nil }
+        return (s, t)
+    }
+
+    /// "Retry with another model…": other models' tasks of the same kind as the retried step
+    /// (same input and output types), so its inputs can run through a different model.
+    public static func alternatives(_ v: JobView, models: [ModelView]) -> [(ModelView, RecipeTask)] {
+        guard let (s, t) = retryStep(v, models: models) else { return [] }
+        let kind = TaskKind(inputs: t.inputs.map(\.type), output: t.output)
+        return models.filter { !$0.isUnsupported && $0.id != s.recipe }.flatMap { m in
+            m.recipe.tasks.filter { TaskKind(inputs: $0.inputs.map(\.type), output: $0.output) == kind }.map { (m, $0) }
+        }
+    }
+
     /// `curl` that submits the same job again over HTTP (spec §10): the same steps, inputs (the job's
     /// copies) and settings. A chained step's first input comes from the step before, so it's left out.
     public static func curl(_ v: JobView, apiBase: String, models: [ModelView]) -> String {

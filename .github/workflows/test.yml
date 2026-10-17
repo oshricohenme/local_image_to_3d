@@ -62,7 +62,7 @@ jobs:
         working-directory: python/lift_worker
         run: uv run --python 3.11 pytest -q --junitxml=../../test-results/lift_worker.xml
 
-      - name: Recipe launcher tests (fake upstream, no weights)
+      - name: Recipe-local tests (fake upstream, no weights)
         working-directory: python/recipe_tests
         run: uv run --python 3.11 pytest -q --junitxml=../../test-results/recipes.xml
 

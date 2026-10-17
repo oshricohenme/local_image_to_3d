@@ -7,13 +7,14 @@ import Observation
 /// Only ever from a click: these change the user's own assistant settings, so nothing here is exposed over MCP or HTTP.
 /// Always over HTTP, never stdio (so not Claude Desktop, whose settings file only starts programs).
 public enum Assistant: String, CaseIterable, Identifiable, Sendable {
-    case claudeCode, codex
+    case claudeCode, codex, opencode
     public var id: String { rawValue }
 
     public var name: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .opencode: "opencode"
         }
     }
 
@@ -21,6 +22,7 @@ public enum Assistant: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: "Use Lift from Claude Code in your terminal"
         case .codex: "Use Lift from OpenAI's Codex in your terminal"
+        case .opencode: "Use Lift from opencode in your terminal"
         }
     }
 
@@ -29,6 +31,7 @@ public enum Assistant: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeCode: URL(string: "https://claude.com/product/claude-code")!
         case .codex: URL(string: "https://developers.openai.com/codex/cli")!
+        case .opencode: URL(string: "https://opencode.ai")!
         }
     }
 }
@@ -55,14 +58,17 @@ public enum SkillState: Equatable, Sendable {
 public enum AssistantError: Error, Equatable, CustomStringConvertible {
     case taken(Assistant)
     case notInstalled(Assistant)
-    /// Its `codex mcp add` has no `--url`, so it can't connect over HTTP.
+    /// Its `mcp add` has no `--url`, so it can't connect over HTTP.
     case codexTooOld
+    /// Same, for opencode.
+    case opencodeTooOld
 
     public var description: String {
         switch self {
         case .taken(let a): "\(a.name) already has a different tool called “lift”. Lift left it alone."
         case .notInstalled(let a): "\(a.name) isn't installed on this Mac."
         case .codexTooOld: "This version of Codex can't connect over HTTP. Update it (npm install -g @openai/codex@latest), then click Connect."
+        case .opencodeTooOld: "This version of opencode can't connect over HTTP. Update it (opencode upgrade), then click Connect."
         }
     }
 }
@@ -100,7 +106,7 @@ public struct AssistantConnector: Sendable {
     public var skill: String?
     let runner: any CommandRunner
     let home: URL
-    /// Where to look for `claude` and `codex` after the login shell's PATH.
+    /// Where to look for `claude`, `codex` and `opencode` after the login shell's PATH.
     let searchDirs: [String]
 
     public init(mcpURL: String, skill: String? = nil, runner: any CommandRunner = SubprocessRunner(),
@@ -118,16 +124,18 @@ public struct AssistantConnector: Sendable {
         switch a {
         case .claudeCode: "claude mcp add --scope user --transport http lift \(mcpURL)"
         case .codex: "codex mcp add lift --url \(mcpURL)"
+        case .opencode: "opencode mcp add lift --url \(mcpURL)"
         }
     }
 
     // MARK: the skill
 
-    /// `~/.claude/skills/lift` or `~/.codex/skills/lift`.
+    /// `~/.claude/skills/lift`, `~/.codex/skills/lift` or `~/.config/opencode/skills/lift`.
     func skillDir(_ a: Assistant) -> URL {
         switch a {
         case .claudeCode: home.appending(path: ".claude/skills/lift")
         case .codex: home.appending(path: ".codex/skills/lift")
+        case .opencode: home.appending(path: ".config/opencode/skills/lift")
         }
     }
 
@@ -202,14 +210,18 @@ public struct AssistantConnector: Sendable {
         if let existing, !existing.isLifts, !replacing { throw AssistantError.taken(a) }
         // Worked out before anything is removed, so a refusal leaves the old entry in place.
         let add: [String]
-        if a == .claudeCode {
+        switch a {
+        case .claudeCode:
             add = ["mcp", "add", "--scope", "user", "--transport", "http", "lift", mcpURL]
-        } else if ((try? await runner.output(command(cli, ["mcp", "add", "--help"]))) ?? "").contains("--url") {
+        case .codex, .opencode:
+            // Both need `--url` for HTTP; an older build without it only starts programs (stdio).
+            guard ((try? await runner.output(command(cli, ["mcp", "add", "--help"]))) ?? "").contains("--url") else {
+                throw a == .codex ? AssistantError.codexTooOld : .opencodeTooOld
+            }
             add = ["mcp", "add", "lift", "--url", mcpURL]
-        } else {
-            throw AssistantError.codexTooOld  // it only starts programs (stdio), which Lift never uses
         }
-        if existing != nil { try await disconnect(a, cli: cli, existing: existing) }
+        // opencode's `mcp add` with the same name replaces the URL, so nothing is removed first.
+        if existing != nil, a != .opencode { try await disconnect(a, cli: cli, existing: existing) }
         try await run(cli, add)
         return try installSkill(a)
     }
@@ -226,14 +238,27 @@ public struct AssistantConnector: Sendable {
         switch a {
         case .claudeCode: try await run(cli, ["mcp", "remove", "--scope", existing?.scope ?? "user", "lift"])
         case .codex: try await run(cli, ["mcp", "remove", "lift"])
+        case .opencode:
+            // No `mcp remove`: the member is spliced out of both config files, keeping everything else byte for byte.
+            for url in opencodeConfigs where FileManager.default.fileExists(atPath: url.path) {
+                guard let text = try? String(contentsOf: url, encoding: .utf8),
+                      let spliced = Self.removeLiftMember(text) else { continue }
+                try Data(spliced.utf8).write(to: url, options: .atomic)
+            }
         }
+    }
+
+    /// opencode's two config files; it merges both, so both are read and both are written.
+    var opencodeConfigs: [URL] {
+        let dir = home.appending(path: ".config/opencode")
+        return [dir.appending(path: "opencode.json"), dir.appending(path: "opencode.jsonc")]
     }
 
     // MARK: the CLIs
 
     /// The login shell's PATH first (where Terminal finds it), then the usual install spots.
     func find(_ a: Assistant) async -> String? {
-        let tool = a == .codex ? "codex" : "claude"
+        let tool = switch a { case .claudeCode: "claude"; case .codex: "codex"; case .opencode: "opencode" }
         let fm = FileManager.default
         let shell = try? await runner.output(ShellCommand("/bin/zsh", ["-lc", "command -v \(tool)"]))
         if let path = shell?.split(separator: "\n").last.map(String.init), path.hasPrefix("/"), fm.isExecutableFile(atPath: path) { return path }
@@ -259,6 +284,13 @@ public struct AssistantConnector: Sendable {
         case .codex:
             guard let out = try? await runner.output(command(cli, ["mcp", "get", "lift", "--json"])) else { return nil }
             return Self.parseCodex(out)
+        case .opencode:
+            // `opencode mcp list` health-checks (slow), so the config files are read instead; both, since it merges them.
+            for url in opencodeConfigs {
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                if let e = Self.parseOpencode(text) { return e }
+            }
+            return nil
         }
     }
 
@@ -284,6 +316,220 @@ public struct AssistantConnector: Sendable {
         guard let json = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any] else { return nil }
         let t = json["transport"] as? [String: Any] ?? json
         return AssistantEntry(url: t["url"] as? String, command: t["command"] as? String, args: t["args"] as? [String] ?? [])
+    }
+
+    /// opencode's config (`opencode.json`/`opencode.jsonc`, merged): `{"mcp": {"lift": {"type": "remote", "url": …}}}`.
+    /// JSONC, so comments are stripped first; a local entry's `"command"` is an array, not a string.
+    static func parseOpencode(_ text: String) -> AssistantEntry? {
+        guard let json = try? JSONSerialization.jsonObject(with: Data(stripJSONC(text).utf8)) as? [String: Any],
+              let lift = (json["mcp"] as? [String: Any])?["lift"] as? [String: Any] else { return nil }
+        let command: String?
+        switch lift["command"] {
+        case let s as String: command = s
+        case let a as [Any]: command = a.compactMap { $0 as? String }.joined(separator: " ")
+        default: command = nil
+        }
+        return AssistantEntry(url: lift["url"] as? String, command: command, args: [])
+    }
+
+    /// The first index from `i` on that isn't whitespace or a comment, and its character (nil: only such stuff left).
+    static func significantIndex(_ text: String, from i: String.Index) -> (String.Index, Character)? {
+        var i = i
+        while i < text.endIndex {
+            let c = text[i], n = text.index(after: i)
+            if c.isWhitespace { i = n; continue }
+            if c == "/", n < text.endIndex, text[n] == "/" {
+                while i < text.endIndex, text[i] != "\n" { i = text.index(after: i) }
+                continue
+            }
+            if c == "/", n < text.endIndex, text[n] == "*" {
+                var j = n, closed = false
+                while j < text.endIndex {
+                    if text[j] == "*", text.index(after: j) < text.endIndex, text[text.index(after: j)] == "/" {
+                        j = text.index(after: text.index(after: j)); closed = true; break
+                    }
+                    j = text.index(after: j)
+                }
+                if !closed { return nil }
+                i = j; continue
+            }
+            return (i, c)
+        }
+        return nil
+    }
+
+    /// JSONC as plain JSON: comments dropped, and a trailing comma (one followed by a closer) dropped too.
+    static func stripJSONC(_ text: String) -> String {
+        var out = ""
+        var i = text.startIndex
+        while i < text.endIndex {
+            let c = text[i], n = text.index(after: i)
+            if c == "\"" {
+                out.append(c)
+                i = n
+                var escaped = false
+                while i < text.endIndex {
+                    let s = text[i]
+                    out.append(s)
+                    i = text.index(after: i)
+                    if escaped { escaped = false }
+                    else if s == "\\" { escaped = true }
+                    else if s == "\"" { break }
+                }
+            } else if c == "/", n < text.endIndex, text[n] == "/" {
+                while i < text.endIndex, text[i] != "\n" { i = text.index(after: i) }  // the newline stays
+            } else if c == "/", n < text.endIndex, text[n] == "*" {
+                var j = n
+                while j < text.endIndex {
+                    if text[j] == "*", text.index(after: j) < text.endIndex, text[text.index(after: j)] == "/" {
+                        j = text.index(after: text.index(after: j)); break
+                    }
+                    j = text.index(after: j)
+                }
+                i = j  // unterminated: the rest is comment, so nothing is emitted either
+            } else if c == ",", let (j, sig) = significantIndex(text, from: n), sig == "}" || sig == "]" {
+                i = j  // trailing comma: left out
+            } else {
+                out.append(c)
+                i = n
+            }
+        }
+        return out
+    }
+
+    /// Takes the "lift" member out of the "mcp" object, leaving every other byte (comments included) alone.
+    /// Returns nil when there's no such member, so the caller only rewrites files that changed.
+    static func removeLiftMember(_ text: String) -> String? {
+        var i = text.startIndex
+        var depth = 0
+        /// mcp's value object: the depth its keys are read at, and whether the reader is inside it.
+        var mcpKeysDepth = -1
+        var mcpValueNext = false
+        var insideMcpObject = false
+        var keyStart: String.Index?, keyEnd: String.Index?
+        var liftKeyStart: String.Index?
+        var lastComma: String.Index?
+
+        while let (idx, c) = significantIndex(text, from: i) {
+            i = idx
+            let n = text.index(after: i)
+            switch c {
+            case "\"":
+                var j = n
+                var escaped = false
+                while j < text.endIndex {
+                    let s = text[j]
+                    if escaped { escaped = false }
+                    else if s == "\\" { escaped = true }
+                    else if s == "\"" { break }
+                    j = text.index(after: j)
+                }
+                guard j < text.endIndex else { return nil }  // unterminated string
+                keyStart = i; keyEnd = j
+                mcpValueNext = false
+                i = text.index(after: j)
+            case "{", "[":
+                depth += 1
+                if mcpValueNext { mcpKeysDepth = depth; mcpValueNext = false; insideMcpObject = true }
+                i = n
+            case "}", "]":
+                depth -= 1
+                if depth < 0 || depth < mcpKeysDepth { insideMcpObject = false }
+                i = n
+            case ":":
+                if let ks = keyStart, let ke = keyEnd {
+                    let key = text[text.index(after: ks)..<ke]
+                    if key == "mcp" {
+                        mcpValueNext = true
+                    } else if key == "lift", insideMcpObject, depth == mcpKeysDepth, liftKeyStart == nil {
+                        liftKeyStart = ks
+                    }
+                }
+                i = n
+            case ",":
+                if insideMcpObject, depth == mcpKeysDepth { lastComma = i }
+                i = n
+            default:
+                mcpValueNext = false
+                i = n
+            }
+            if liftKeyStart != nil { break }
+        }
+        guard let liftStart = liftKeyStart else { return nil }
+
+        // Where the value ends, scanning strings and comments properly.
+        guard let (valIdx, valChar) = significantIndex(text, from: i) else { return nil }
+        var end: String.Index
+        if valChar == "{" || valChar == "[" {
+            var j = valIdx, d = 0
+            while j < text.endIndex {
+                let cj = text[j], nj = text.index(after: j)
+                if cj == "\"" {
+                    var escaped = false
+                    j = nj
+                    while j < text.endIndex {
+                        let s = text[j]
+                        if escaped { escaped = false }
+                        else if s == "\\" { escaped = true }
+                        else if s == "\"" { j = text.index(after: j); break }
+                        j = text.index(after: j)
+                    }
+                    continue
+                }
+                if cj == "/", nj < text.endIndex, text[nj] == "/" {
+                    while j < text.endIndex, text[j] != "\n" { j = text.index(after: j) }
+                    continue
+                }
+                if cj == "/", nj < text.endIndex, text[nj] == "*" {
+                    var k = nj, closed = false
+                    while k < text.endIndex {
+                        if text[k] == "*", text.index(after: k) < text.endIndex, text[text.index(after: k)] == "/" {
+                            k = text.index(after: text.index(after: k)); closed = true; break
+                        }
+                        k = text.index(after: k)
+                    }
+                    if !closed { return nil }
+                    j = k; continue
+                }
+                if cj == "{" || cj == "[" { d += 1 }
+                else if cj == "}" || cj == "]" {
+                    d -= 1
+                    if d == 0 { j = nj; break }
+                }
+                j = nj
+            }
+            end = j
+        } else if valChar == "\"" {
+            var j = text.index(after: valIdx)
+            var escaped = false
+            while j < text.endIndex {
+                let s = text[j]
+                if escaped { escaped = false }
+                else if s == "\\" { escaped = true }
+                else if s == "\"" { j = text.index(after: j); break }
+                j = text.index(after: j)
+            }
+            end = j
+        } else {
+            var j = valIdx
+            while j < text.endIndex {
+                let s = text[j]
+                if s == "," || s == "}" || s == "]" { break }
+                j = text.index(after: j)
+            }
+            end = j
+        }
+
+        // Cut out the member and its comma: the one after the value, else the one before the key.
+        var cutStart = liftStart, cutEnd = end
+        if let (j, sig) = significantIndex(text, from: end), sig == "," {
+            cutEnd = text.index(after: j)
+            while cutEnd < text.endIndex, text[cutEnd].isWhitespace { cutEnd = text.index(after: cutEnd) }
+        } else if let comma = lastComma {
+            cutStart = comma
+        }
+        guard cutStart < cutEnd else { return nil }
+        return String(text[..<cutStart]) + String(text[cutEnd...])
     }
 }
 
@@ -313,14 +559,14 @@ public final class AssistantsModel {
     /// Connected to an old address (Lift's port changed): each gets an Update button, never a silent fix.
     public var needingUpdate: [Assistant] { Assistant.allCases.filter { rows[$0]?.state == .needsUpdate } }
 
-    /// Detects both at once (`claude mcp get` health-checks, so it can take a few seconds).
+    /// Detects all of them at once (`claude mcp get` health-checks, so it can take a few seconds).
     /// Also brings an unedited skill up to this Lift's version for each connected assistant (Lift was updated).
     public func check(mcpURL: String?, skill: String? = nil) async {
         guard let mcpURL, let makeConnector else { return }
         let c = makeConnector(mcpURL, skill)
         connector = c
-        async let code = c.detect(.claudeCode), codex = c.detect(.codex)
-        for (a, state) in [(Assistant.claudeCode, await code), (.codex, await codex)] {
+        async let code = c.detect(.claudeCode), codex = c.detect(.codex), opencode = c.detect(.opencode)
+        for (a, state) in [(Assistant.claudeCode, await code), (.codex, await codex), (.opencode, await opencode)] {
             if state != .notInstalled, state != .notConnected, state != .taken, c.skillState(a) == .outdated { _ = try? c.installSkill(a) }
             rows[a, default: Row()].state = state
             rows[a]?.skill = c.skillState(a)

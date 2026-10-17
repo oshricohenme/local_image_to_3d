@@ -1,10 +1,11 @@
+import ast
 import json
 import math
 from pathlib import Path
 
 import pytest
 
-from conftest import FakeJob, defaults, module
+from conftest import upstream_repo, RECIPES, FakeJob, defaults, module
 
 # Upstream's assets/mv_images/example/transforms.json at f7cf384 (the four_view preset copies it).
 D = 3.1192049980163574
@@ -17,6 +18,23 @@ EXAMPLE = {
         {"file_path": "view03_azim270.png", "name": "azim270", "transform_matrix": [[0.0, 0.0, -1.0, -D], [-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]},
     ],
 }
+
+
+@pytest.fixture(autouse=True)
+def stage_imports(monkeypatch):
+    """Stage announcements must not require the real models in launcher contract tests."""
+    import sys
+
+    postprocess = module("o_voxel.postprocess")
+    pipelines = module("pixal3d.pipelines")
+    fakes = {
+        "o_voxel": module("o_voxel", postprocess=postprocess), "o_voxel.postprocess": postprocess,
+        "trimesh": module("trimesh", Trimesh=type("Trimesh", (), {})),
+        "pixal3d": module("pixal3d", pipelines=pipelines), "pixal3d.pipelines": pipelines,
+        "pixal3d.pipelines.pixal3d_image_to_3d": module("pixal3d.pipelines.pixal3d_image_to_3d", Pixal3DImageTo3DPipeline=type("Pipeline", (), {})),
+    }
+    for name, fake in fakes.items():
+        monkeypatch.setitem(sys.modules, name, fake)
 
 
 def fake_upstream(name, repo, write=True):
@@ -65,6 +83,31 @@ def test_image_to_3d_passes_every_setting_as_a_keyword(pixal, tmp_path):
     assert mod.run(None, j) == [f"{j.out_dir}/mesh.glb"]
     (kw,) = fakes["inference"].runs
     assert kw == {"image_path": "/in/photo.png", **defaults("pixal3d", "image_to_3d")}
+
+
+def test_recipe_only_advertises_a_resolution_below_the_mps_mesh_limit():
+    import yaml
+
+    recipe = yaml.safe_load((RECIPES / "pixal3d/recipe.yaml").read_text())
+    for task in recipe["tasks"]:
+        resolution = next(s for s in task["settings"] if s["key"] == "resolution")
+        assert resolution["default"] == 1024
+        assert resolution["options"] == [1024]
+        assert all(n ** 3 <= 2 ** 31 - 1 for n in resolution["options"])
+
+
+@pytest.mark.parametrize("task", ["image_to_3d", "image_set_to_3d"])
+@pytest.mark.parametrize("resolution", [-1, 1536, None])
+@pytest.mark.parametrize("low_vram", [False, True])
+def test_unsafe_or_missing_resolution_stops_before_inference(pixal, tmp_path, task, resolution, low_vram):
+    mod, fakes = pixal
+    inputs = {"image": "/in/photo.png"} if task == "image_to_3d" else {"views": images(tmp_path / "v", "transforms.json")}
+    j = job(task, inputs, tmp_path, resolution=resolution, low_vram=low_vram, **({"views": "transforms"} if task == "image_set_to_3d" else {}))
+    if resolution is None:
+        del j.settings["resolution"]
+    with pytest.raises(ValueError, match="1024"):
+        mod.run(None, j)
+    assert all(not m.init_calls and not m.runs for m in fakes.values())
 
 
 def test_pipeline_stays_loaded_until_model_path_or_low_vram_change(pixal, tmp_path):
@@ -153,3 +196,26 @@ def test_orbit_needs_images(pixal, tmp_path):
     mod, _ = pixal
     with pytest.raises(ValueError, match="no images"):
         mod.run(None, job("image_set_to_3d", {"views": images(tmp_path / "v", "notes.txt")}, tmp_path, views="orbit"))
+
+
+def keyword_defaults(path, function, constants):
+    tree = ast.parse(Path(path).read_text())
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == function)
+    args = fn.args.args[len(fn.args.args) - len(fn.args.defaults):]
+    return {a.arg: constants[d.id] if isinstance(d, ast.Name) else ast.literal_eval(d) for a, d in zip(args, fn.args.defaults)}
+
+
+@pytest.mark.parametrize("module, task, lift_only", [
+    ("inference", "image_to_3d", set()),
+    ("inference_mv", "image_set_to_3d", {"views", "orbit_elevation_deg", "orbit_fov_deg", "orbit_distance"}),
+])
+def test_pixal3d_settings_are_run_inference_keywords(module, task, lift_only):
+    upstream = keyword_defaults(upstream_repo("pixal3d") / f"{module}.py", "run_inference",
+                                {"MODEL_PATH": "TencentARC/Pixal3D", "CONFIG_FILE": "pipeline_mv.json"})
+    if "num_views" in upstream:
+        assert upstream["num_views"] is None
+        upstream["num_views"] = 0  # Lift's 0 = upstream's None (all views)
+    ours = {k: v for k, v in defaults("pixal3d", task).items() if k not in lift_only}
+    assert upstream["resolution"] == -1
+    upstream["resolution"] = 1024  # Mac decoder limit; Lift deliberately overrides upstream auto.
+    assert ours == upstream

@@ -92,8 +92,8 @@ tasks:
     inputs: [{ name: image, type: image }]
     output: mesh
     entry: inference:run_inference
-    settings:   # every keyword argument of inference.run_inference except image_path/output_path, with its defaults
-      - { key: resolution, label: Quality, type: enum, options: [-1, 1024, 1536], default: -1, group: basic, help: "Higher is more detailed but slower and needs more memory. -1 picks 1536, or 1024 in low-memory mode." }
+    settings:   # upstream keywords, except resolution is restricted to the Mac decoder's supported size
+      - { key: resolution, label: Quality, type: enum, options: [1024], default: 1024, group: basic, help: "1024 is the supported mesh resolution on Mac. 1536 exceeds the decoder's MPS tensor limit, including when selected automatically." }
       - { key: low_vram, label: Low memory mode, type: bool, default: false, group: basic, help: "Uses about 10–12 GB instead of about 18 GB, but takes longer." }
       - { key: seed, label: Variation, type: int, default: 42, group: basic, help: "Change this number to get a different version of the same object." }
       - { key: manual_fov, label: Camera field of view, type: float, default: -1.0, group: advanced, help: "In radians, e.g. 0.2. Leave at -1 to have it estimated from the photo." }
@@ -122,7 +122,7 @@ tasks:
     entry: inference_mv:run_inference
     settings:   # the view layout (spec §4), then every keyword argument of inference_mv.run_inference except views_dir/output_path
       - { key: views, label: Photo layout, type: enum, options: [transforms, four_view, orbit], default: four_view, group: basic, help: "four_view: photos named front, right, back and left. orbit: photos taken all around the object, in name order. transforms: the folder has a transforms.json camera file." }
-      - { key: resolution, label: Quality, type: enum, options: [-1, 1024, 1536], default: -1, group: basic, help: "Higher is more detailed but slower and needs more memory. -1 picks 1536, or 1024 in low-memory mode." }
+      - { key: resolution, label: Quality, type: enum, options: [1024], default: 1024, group: basic, help: "1024 is the supported mesh resolution on Mac. 1536 exceeds the decoder's MPS tensor limit, including when selected automatically." }
       - { key: low_vram, label: Low memory mode, type: bool, default: false, group: basic, help: "Uses less memory, but takes longer." }
       - { key: seed, label: Variation, type: int, default: 42, group: basic, help: "Change this number to get a different version of the same object." }
       - { key: orbit_elevation_deg, label: Camera height (degrees), type: float, default: 0.0, min: -89, max: 89, group: advanced, help: "Orbit layout only: how far above the object the photos were taken." }

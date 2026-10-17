@@ -188,6 +188,58 @@ public final class GenerateModel {
         files = [URL(filePath: path)]
     }
 
+    /// Prefills the form to re-run a historical step's inputs with a different model ("Retry with
+    /// another model…"). The step and the new task have the same kind, so inputs map by position;
+    /// settings carry over for keys the new task shares with a fitting type; `then` keeps the rest
+    /// of the chain when its first input still accepts this task's output.
+    public func rerun(_ inputs: [String?], settings: [String: SettingValue], as ref: TaskRef, then next: TaskRef? = nil) {
+        guard let m = models.first(where: { $0.id == ref.recipe }), let t = m.recipe.task(ref.task) else { return }
+        modality = t.modality
+        kind = TaskKind(inputs: t.inputs.map(\.type), output: t.output)
+        recipe = ref.recipe
+        var carried = defaults(for: ref)
+        for def in t.settings where Self.carries(settings[def.key], to: def) { carried[def.key] = settings[def.key] }
+        values = carried
+        text = ""
+        files = []
+        otherInputs = [:]
+        for (input, value) in zip(t.inputs, inputs).compactMap({ value in value.1.map { (value.0, $0) } }) {
+            if input == t.inputs.first {
+                if input.type == .text { text = value } else { files = [URL(filePath: value)] }
+            } else {
+                otherInputs[input.name] = value
+            }
+        }
+        then = next.flatMap { followUps.contains($0) ? $0 : nil }
+    }
+
+    /// Whether an old setting value fits the new task's definition well enough to carry over
+    /// (same type, within min/max, an enum option). Numbers stay numbers; strings stay strings.
+    static func carries(_ v: SettingValue?, to def: SettingDef) -> Bool {
+        guard let v else { return false }
+        func number(_ v: SettingValue) -> Double? {
+            switch v {
+            case .int(let i): Double(i)
+            case .float(let f): f
+            default: nil
+            }
+        }
+        switch (v, def.type) {
+        case (.bool, .bool):
+            return true
+        case (.int, .int), (.int, .float), (.float, .float), (.float, .int):
+            if let n = number(v), let lo = def.min, n < lo { return false }
+            if let n = number(v), let hi = def.max, n > hi { return false }
+            return true
+        case (.string, .string), (.string, .path):
+            return true
+        case (.string, .enum):
+            return def.options?.contains { $0 == v || (number($0) != nil && number($0) == number(v)) } == true
+        default:
+            return false
+        }
+    }
+
     func defaults(for ref: TaskRef?) -> [String: SettingValue] {
         var out: [String: SettingValue] = [:]
         for def in task(ref)?.settings ?? [] { out[def.key] = def.default }

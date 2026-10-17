@@ -230,18 +230,18 @@ extension Lift {
     }
 
     /// Re-queues a finished job from its first unfinished step (all steps if it succeeded).
-    /// `settings` replaces that step's settings (validated) when given.
+    /// `settings` replaces that step's settings when given; all retried steps are checked against the current schema.
     public func jobsRetry(_ id: String, settings: [String: SettingValue]? = nil, acceptMemoryWarning: Bool = false) throws -> Admission<JobView> {
         let v = try view(id)
         guard v.job.state.isTerminal || v.job.state == .interrupted else { throw LiftError.invalidState("job \(id) is \(v.job.state.rawValue); only finished jobs can be retried") }
         guard !v.job.cleanedUp else { throw LiftError.invalidState("This job's files were deleted after it was exported, so it can't run again.") }
         guard !v.job.exportPending else { throw LiftError.invalidState("This job is still exporting. Try again when the export has finished.") }
         let from = v.steps.firstIndex { $0.state != .succeeded } ?? 0
-        var newSettings: [String: SettingValue]?
-        if let settings {
-            let s = v.steps[from]
+        var newSettings: [Int: [String: SettingValue]] = [:]
+        for s in v.steps where s.idx >= from {
             guard let task = recipe(s.recipe)?.task(s.task) else { throw LiftError.notFound("recipe \(s.recipe)") }
-            newSettings = try task.validated(settings: settings, prefix: "settings")
+            newSettings[s.idx] = try task.validated(settings: s.idx == from ? (settings ?? s.settings) : s.settings,
+                                                    prefix: s.idx == from ? "settings" : "steps[\(s.idx)].settings")
         }
         try store.db.write { db in
             for var s in v.steps where s.idx >= from {
@@ -254,7 +254,7 @@ extension Lift {
                 s.workerId = nil
                 s.startedAt = nil
                 s.finishedAt = nil
-                if s.idx == from, let newSettings { s.settings = newSettings }
+                s.settings = newSettings[s.idx]!
                 try s.update(db)
             }
             var job = v.job

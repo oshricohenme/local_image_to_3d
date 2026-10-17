@@ -41,6 +41,9 @@ LAYOUT_SETTINGS = ("views", "orbit_elevation_deg", "orbit_fov_deg", "orbit_dista
 
 def run(state, job):
     settings = dict(job.settings)
+    # shortcut: the Mac decoder's dense 1536^3 lookup exceeds INT_MAX; re-enable after a sparse lookup replaces it.
+    if settings.get("resolution") != 1024:
+        raise ValueError("Pixal3D on Mac requires resolution=1024. Automatic (-1) and 1536 can exceed MPS's mesh-decoding limit. Retry with Quality 1024.")
     out = os.path.join(job.out_dir, "mesh.glb")
     if job.task == "image_to_3d":
         inference.run_inference(image_path=job.inputs["image"], output_path=out, **settings)

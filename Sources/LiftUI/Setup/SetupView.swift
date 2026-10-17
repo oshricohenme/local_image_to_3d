@@ -286,7 +286,7 @@ struct SetupView: View {
     var assistants: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Use Lift from an AI assistant (optional)").font(.headline)
-            Text("Claude or Codex can use Lift to make 3D models for you. Connect one now or later in Settings.")
+            Text("Claude Code, Codex or opencode can use Lift to make 3D models for you. Connect one now or later in Settings.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if app.serverStatus == nil {
                 Text("Lift's assistant connection didn't start. Settings shows why.").foregroundStyle(.secondary)
