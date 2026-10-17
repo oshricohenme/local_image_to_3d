@@ -34,6 +34,43 @@ import Testing
         #expect(HistoryModel.viewable(JobView(job: job, steps: [step])) == nil)
     }
 
+    @Test func retryStepTargetsTheFirstUnfinishedStep() async throws {
+        let models = try await UIFixtures.lift(bundle: UIFixtures.devRecipes).modelsList()
+        let at = Date()
+        let job = JobRecord(id: "j", title: "t", priority: .normal, position: 1, source: .ui, state: .failed, forceStart: false,
+                            currentStep: 1, createdAt: at, updatedAt: at)
+        let done = StepRecord(jobId: "j", idx: 0, recipe: "pixal3d", task: "image_to_3d", inputs: [:], settings: [:], state: .succeeded, outputs: [])
+        let failed = StepRecord(jobId: "j", idx: 1, recipe: "unirig", task: "rig", inputs: [:], settings: [:], state: .failed, outputs: [])
+        let v = JobView(job: job, steps: [done, failed])
+        let step = HistoryModel.retryStep(v, models: models)?.0
+        #expect(step?.idx == 1 && step?.task == "rig")  // a retry restarts at the failure
+        var ok = job
+        ok.state = .succeeded
+        let all = JobView(job: ok, steps: [done, .init(jobId: "j", idx: 1, recipe: "unirig", task: "rig", inputs: [:], settings: [:], state: .succeeded, outputs: [])])
+        #expect(HistoryModel.retryStep(all, models: models)?.0.idx == 0)  // succeeded: all steps again
+        let gone = JobView(job: ok, steps: [done, .init(jobId: "j", idx: 1, recipe: "nope", task: "rig", inputs: [:], settings: [:], state: .failed, outputs: [])])
+        #expect(HistoryModel.retryStep(gone, models: models) == nil)  // the recipe was uninstalled
+    }
+
+    @Test func anotherModelOffersTheSameKindOfTask() async throws {
+        let lift = try await UIFixtures.lift(bundle: UIFixtures.devRecipes)
+        _ = try await lift.settingsSet("dev_recipes", .bool(false))  // as users see it: no Test Cube
+        let models = try await lift.modelsList()
+        let at = Date()
+        let job = JobRecord(id: "j", title: "t", priority: .normal, position: 1, source: .ui, state: .failed, forceStart: false,
+                            currentStep: 0, createdAt: at, updatedAt: at)
+        let v = JobView(job: job, steps: [StepRecord(jobId: "j", idx: 0, recipe: "hunyuan3d2", task: "image_to_3d",
+                                                     inputs: [:], settings: [:], state: .failed, outputs: [])])
+        let alts = HistoryModel.alternatives(v, models: models)
+        #expect(alts.contains { $0.0.id == "pixal3d" && $0.1.id == "image_to_3d" })
+        #expect(alts.contains { $0.0.id == "trellis2-mac" && $0.1.id == "image_to_3d" })
+        #expect(!alts.contains { $0.0.id == "hunyuan3d2" })  // the model it already used
+        #expect(alts.allSatisfy { $0.1.inputs.map(\.type) == [.image] && $0.1.output == .mesh })  // interchangeable: same kind
+        let rig = JobView(job: job, steps: [StepRecord(jobId: "j", idx: 0, recipe: "unirig", task: "rig",
+                                                        inputs: [:], settings: [:], state: .failed, outputs: [])])
+        #expect(HistoryModel.alternatives(rig, models: models).isEmpty)  // nothing else rigs: the menu stays off
+    }
+
     @Test func curlResubmitsTheSameJob() async throws {
         let lift = try await UIFixtures.lift()
         let v = try await lift.jobsSubmit(SubmitRequest(steps: [

@@ -48,7 +48,7 @@ import Testing
         g.models = try await lift.modelsList()
         let chips = g.chips("3d")
         #expect(!g.models.contains { $0.id == "test-cube" })
-        #expect(chips.first { $0.kind.label == "Image → 3D" }?.models.map(\.id).sorted() == ["pixal3d", "trellis2-mac"])
+        #expect(chips.first { $0.kind.label == "Image → 3D" }?.models.map(\.id).sorted() == ["hunyuan3d2", "pixal3d", "trellis2-mac"])
         #expect(chips.contains { $0.kind.label == "Mesh → Rigged" && $0.models.map(\.id) == ["unirig"] })
         g.recipe = "pixal3d"
         #expect(g.followUps.contains(TaskRef(recipe: "unirig", task: "rig")))  // rig what Pixal3D makes
@@ -94,6 +94,37 @@ import Testing
         #expect(g.kind?.label == "Mesh → Rigged")
         #expect(g.current == TaskRef(recipe: "test-cube", task: "fake_rig"))
         #expect(g.files == [URL(filePath: "/tmp/out.glb")])
+    }
+
+    /// "Retry with another model…": the same inputs map onto the new task by position, settings carry
+    /// over where the new task has the same key and type within its bounds, and the chain survives
+    /// only while the next step still accepts what the new task makes.
+    @Test func rerunRunsAnOldStepThroughAnotherModel() async throws {
+        let g = GenerateModel()
+        let lift = try await UIFixtures.lift(bundle: UIFixtures.devRecipes)
+        _ = try await lift.settingsSet("dev_recipes", .bool(false))
+        g.models = try await lift.modelsList()
+        let image = try UIFixtures.file("chair.png").path
+        let old: [String: SettingValue] = ["texture": .bool(false), "steps": .int(60), "guidance": .float(50), "resolution": .int(2048)]
+        g.rerun([image], settings: old, as: TaskRef(recipe: "pixal3d", task: "image_to_3d"), then: TaskRef(recipe: "unirig", task: "rig"))
+        #expect(g.current == TaskRef(recipe: "pixal3d", task: "image_to_3d"))
+        #expect(g.files == [URL(filePath: image)])  // the old job's input copy feeds the new model
+        #expect(g.values["resolution"] == .int(1024) && g.values["seed"] == .int(42))  // no shared keys: the new task's defaults
+        #expect(g.then == TaskRef(recipe: "unirig", task: "rig"))  // rig what the new model makes
+        g.rerun([image], settings: old, as: TaskRef(recipe: "hunyuan3d2", task: "image_to_3d"), then: TaskRef(recipe: "hunyuan3d2", task: "image_to_3d"))
+        #expect(g.values["texture"] == .bool(false) && g.values["steps"] == .int(60))  // same key, same type, in bounds: carried
+        #expect(g.values["guidance"] == .float(5.0) && g.values["resolution"] == nil)  // out of bounds, or not the new task's: dropped
+        #expect(g.then == nil)  // an Image → 3D step can't follow a mesh step
+    }
+
+    @Test func rerunMapsInputsByPositionNotName() async throws {
+        let g = try await model()
+        g.rerun(["/tmp/out.glb"], settings: ["delay": .float(3), "size": .float(2.5), "fail": .bool(true)],
+                as: TaskRef(recipe: "test-cube", task: "fake_rig"))
+        #expect(g.current == TaskRef(recipe: "test-cube", task: "fake_rig"))
+        #expect(g.files == [URL(filePath: "/tmp/out.glb")])  // first input to first input, whatever they're called
+        #expect(g.values["delay"] == .float(3))  // the rig task's own setting carries over
+        #expect(g.values["size"] == nil && g.values["fail"] == nil)  // the 3D task's settings don't exist here
     }
 
     @Test func choosingAFolderForMediaKeepsOriginalFilesSelected() async throws {

@@ -95,6 +95,24 @@ extension Fixtures {
         #expect(!FileManager.default.fileExists(atPath: lift.config.workdir.appending(path: "jobs/\(id)").path))
     }
 
+    @Test func retryRevalidatesStoredSettingsBeforeChangingTheJob() async throws {
+        let lift = try await Fixtures.lift()
+        let request = cube(try Fixtures.image())
+        let id = try await lift.jobsSubmit(SubmitRequest(steps: [request])).accepted().job.id
+        _ = try await lift.jobsCancel(id)
+        // A saved job with settings no longer allowed by the current schema.
+        try await lift.store.db.write { db in
+            var step = try StepRecord.filter(Column("jobId") == id).fetchOne(db)!
+            step.settings["size"] = .int(0)
+            try step.update(db)
+        }
+        let before = try await lift.jobsGet(id)
+        #expect(await fieldErrors { _ = try await lift.jobsRetry(id).accepted() } == ["settings.size"])
+        #expect(try await lift.jobsGet(id) == before)
+        let retried = try await lift.jobsRetry(id, settings: ["size": .int(2)]).accepted()
+        #expect(retried.steps[0].settings["size"]?.number == 2)
+    }
+
     @Test func firstOpenCopiesTheBundledRecipes() async throws {
         let lift = try await Fixtures.lift()
         let copy = lift.config.workdir.appending(path: "recipes/bundled")

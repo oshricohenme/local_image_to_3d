@@ -175,6 +175,7 @@ struct HistoryView: View {
         HStack {
             Button("Retry") { app.run { try await app.retry(v.job.id) } }.disabled(v.job.cleanedUp || v.job.exportPending)
             Button("Retry with changes…") { retrying = v }.disabled(v.job.cleanedUp || v.job.exportPending)
+            anotherModel(v)
             Menu("Export Again…") {
                 ForEach(HistoryModel.output(of: v, models: app.models).map { [.mesh, .riggedMesh].contains($0) } == true ? ExportFormat.allCases : [.original], id: \.self) { f in
                     Button(Format.export(f)) { app.run { _ = try await app.engine.jobsExport(v.job.id, formats: [f]) } }
@@ -190,6 +191,25 @@ struct HistoryView: View {
             }
             .disabled(v.job.exportPending)
         }
+    }
+
+    /// "Retry with another model…" — the same inputs re-run through a different model of the same
+    /// kind, as a new job composed in Generate (the original job is left as it is).
+    func anotherModel(_ v: JobView) -> some View {
+        let refs = HistoryModel.alternatives(v, models: app.models)
+        return Menu("Retry with another model…") {
+            ForEach(refs, id: \.1.id) { m, t in
+                Button("\(m.name) · \(t.label)") {
+                    guard let (s, t) = HistoryModel.retryStep(v, models: app.models) else { return }
+                    let next = v.steps.first { $0.idx == s.idx + 1 }.map { TaskRef(recipe: $0.recipe, task: $0.task) }
+                    app.generate.rerun(t.inputs.map { s.inputs[$0.name] }, settings: s.settings,
+                                       as: TaskRef(recipe: m.id, task: t.id), then: next)
+                    app.section = .generate
+                }
+            }
+        }
+        .disabled(refs.isEmpty || v.job.cleanedUp || v.job.exportPending)
+        .fixedSize()
     }
 
     func copy(_ text: String) {
